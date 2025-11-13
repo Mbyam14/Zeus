@@ -24,7 +24,10 @@
       "Bash(netsh advfirewall firewall add rule name=\"Zeus Backend Port 8000\" dir=in action=allow protocol=TCP localport=8000)",
       "Bash(dir:*)",
       "Bash(del:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git remote add:*)",
+      "Bash(git push:*)"
     ],
     "deny": [],
     "ask": []
