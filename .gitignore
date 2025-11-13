@@ -1,0 +1,84 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+*.egg-info/
+dist/
+build/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Node.js / npm
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn-integrity
+
+# Expo
+.expo/
+.expo-shared/
+expo-env.d.ts
+web-build/
+dist/
+
+# React Native
+.bundle/
+*.jsbundle
+.react-native/
+
+# Metro bundler
+.metro-health-check*
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.history/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Alembic
+alembic/versions/*.pyc
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.sqlite3
+
+# AWS
+.aws/
+
+# Claude Code (optional - uncomment if you want to keep this local)
+# .claude/
+
+# Documentation (if you want to keep these local)
+# zeus_prompt.txt
+# zeus_app_spec.txt
+
+# Misc
+*.bak

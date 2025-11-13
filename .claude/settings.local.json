@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(venvScripts:*)",
+      "Bash(pip install:*)",
+      "Bash(venv/Scripts/activate:*)",
+      "Bash(curl:*)",
+      "Bash(node:*)",
+      "Bash(npx create-expo-app:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx expo start:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(taskkill /F /PID 22508)",
+      "Bash(uvicorn:*)",
+      "Bash(venv/Scripts/python.exe -m uvicorn:*)",
+      "Bash(venv/Scripts/pip.exe install:*)",
+      "Bash(venvScriptspython.exe -m pip install --upgrade pip)",
+      "Bash(dir)",
+      "Bash(venvScriptspython.exe:*)",
+      "Bash(timeout:*)",
+      "Bash(\"venv/Scripts/pip.exe\" uninstall bcrypt -y)",
+      "Bash(netsh advfirewall firewall add rule name=\"Zeus Backend Port 8000\" dir=in action=allow protocol=TCP localport=8000)",
+      "Bash(dir:*)",
+      "Bash(del:*)",
+      "Bash(git add:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
