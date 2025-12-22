@@ -1,19 +1,15 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createStackNavigator } from '@react-navigation/stack';
 import { FeedScreen } from '../screens/home/FeedScreen';
 import { ProfileScreen } from '../screens/profile/ProfileScreen';
 import { MealPlanScreen } from '../screens/mealplan/MealPlanScreen';
-import { View, Text, StyleSheet, Platform } from 'react-native';
+import { CreateScreen } from '../screens/create/CreateScreen';
+import { AIScreen } from '../screens/create/AIScreen';
+import { View, Text, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Placeholder screens for now
-
-const CreateScreen = () => (
-  <View style={styles.placeholder}>
-    <Text style={styles.placeholderTitle}>Create Recipe</Text>
-    <Text style={styles.placeholderText}>Coming soon!</Text>
-  </View>
-);
 
 const SocialScreen = () => (
   <View style={styles.placeholder}>
@@ -21,6 +17,11 @@ const SocialScreen = () => (
     <Text style={styles.placeholderText}>Coming soon!</Text>
   </View>
 );
+
+export type CreateStackParamList = {
+  CreateMain: undefined;
+  AIRecipe: undefined;
+};
 
 export type MainTabParamList = {
   Feed: undefined;
@@ -31,6 +32,16 @@ export type MainTabParamList = {
 };
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
+const CreateStack = createStackNavigator<CreateStackParamList>();
+
+const CreateStackNavigator = () => {
+  return (
+    <CreateStack.Navigator screenOptions={{ headerShown: false }}>
+      <CreateStack.Screen name="CreateMain" component={CreateScreen} />
+      <CreateStack.Screen name="AIRecipe" component={AIScreen} />
+    </CreateStack.Navigator>
+  );
+};
 
 export const MainTabNavigator: React.FC = () => {
   const insets = useSafeAreaInsets();
@@ -78,7 +89,7 @@ export const MainTabNavigator: React.FC = () => {
       />
       <Tab.Screen
         name="Create"
-        component={CreateScreen}
+        component={CreateStackNavigator}
         options={{
           tabBarLabel: () => null,
           tabBarIcon: ({ color }) => (
