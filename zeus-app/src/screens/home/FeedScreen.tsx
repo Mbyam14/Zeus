@@ -9,9 +9,11 @@ import {
   Dimensions,
   Image,
   Animated,
+  ActivityIndicator,
 } from 'react-native';
 import { PanGestureHandler, State, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Recipe } from '../../types/recipe';
+import { recipeService } from '../../services/recipeService';
 
 // Mock data for now - we'll connect to API later
 const mockRecipes: Recipe[] = [
@@ -110,8 +112,11 @@ const mockRecipes: Recipe[] = [
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
 export const FeedScreen: React.FC = () => {
-  const [recipes, setRecipes] = useState<Recipe[]>(mockRecipes);
+  const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [loading, setLoading] = useState(true);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [isInteracting, setIsInteracting] = useState(false);
 
   // Animation values
   const translateX = useRef(new Animated.Value(0)).current;
@@ -119,7 +124,38 @@ export const FeedScreen: React.FC = () => {
 
   const currentRecipe = recipes[currentIndex];
 
+  // Load recipes from API on mount
+  useEffect(() => {
+    loadRecipes();
+  }, []);
+
+  const loadRecipes = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const fetchedRecipes = await recipeService.getRecipeFeed();
+
+      if (fetchedRecipes.length > 0) {
+        setRecipes(fetchedRecipes);
+      } else {
+        // If no recipes from API, use mock data as fallback
+        setRecipes(mockRecipes);
+      }
+    } catch (err: any) {
+      console.error('Error loading recipes:', err);
+      setError(err.message);
+      // Fallback to mock recipes if API fails
+      setRecipes(mockRecipes);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSwipeLeft = () => {
+    // Prevent multiple interactions on the same card
+    if (isInteracting) return;
+    setIsInteracting(true);
+
     // Skip recipe with animation
     Animated.timing(translateX, {
       toValue: -500,
@@ -131,8 +167,23 @@ export const FeedScreen: React.FC = () => {
   };
 
   const handleSwipeRight = () => {
-    // Like recipe with animation
-    // TODO: When backend is connected, call API to like recipe
+    // Prevent multiple interactions on the same card
+    if (isInteracting) return;
+    setIsInteracting(true);
+
+    // Like recipe (don't await - let it happen in background)
+    if (currentRecipe) {
+      recipeService.likeRecipe(currentRecipe.id)
+        .then(() => {
+          console.log('Recipe liked:', currentRecipe.title);
+        })
+        .catch((err: any) => {
+          console.error('Error liking recipe:', err);
+          Alert.alert('Error', 'Failed to like recipe. Please try again.');
+        });
+    }
+
+    // Start animation immediately
     Animated.timing(translateX, {
       toValue: 500,
       duration: 200,
@@ -143,8 +194,23 @@ export const FeedScreen: React.FC = () => {
   };
 
   const handleSwipeUp = () => {
-    // Save recipe with animation
-    // TODO: When backend is connected, call API to save recipe
+    // Prevent multiple interactions on the same card
+    if (isInteracting) return;
+    setIsInteracting(true);
+
+    // Save recipe with animation (don't await - let it happen in background)
+    if (currentRecipe) {
+      recipeService.saveRecipe(currentRecipe.id)
+        .then(() => {
+          console.log('Recipe saved:', currentRecipe.title);
+        })
+        .catch((err: any) => {
+          console.error('Error saving recipe:', err);
+          Alert.alert('Error', 'Failed to save recipe. Please try again.');
+        });
+    }
+
+    // Start animation immediately
     Animated.timing(translateY, {
       toValue: -500,
       duration: 200,
@@ -156,10 +222,11 @@ export const FeedScreen: React.FC = () => {
 
   const nextRecipe = () => {
     if (currentIndex < recipes.length - 1) {
-      // Reset position
+      // Reset position and interaction flag
       translateX.setValue(0);
       translateY.setValue(0);
       setCurrentIndex(currentIndex + 1);
+      setIsInteracting(false);
     }
     // If no more recipes, just stay on last one (user can see it's the end)
   };
@@ -171,37 +238,22 @@ export const FeedScreen: React.FC = () => {
 
   const onHandlerStateChange = ({ nativeEvent }: any) => {
     if (nativeEvent.state === State.END) {
+      // Don't allow gesture if already interacting
+      if (isInteracting) return;
+
       const { translationX, translationY } = nativeEvent;
 
       // Swipe right (like)
       if (translationX > 120) {
-        Animated.timing(translateX, {
-          toValue: 500,
-          duration: 200,
-          useNativeDriver: true,
-        }).start(() => {
-          handleSwipeRight();
-        });
+        handleSwipeRight();
       }
       // Swipe left (skip)
       else if (translationX < -120) {
-        Animated.timing(translateX, {
-          toValue: -500,
-          duration: 200,
-          useNativeDriver: true,
-        }).start(() => {
-          handleSwipeLeft();
-        });
+        handleSwipeLeft();
       }
       // Swipe up (save)
       else if (translationY < -120) {
-        Animated.timing(translateY, {
-          toValue: -500,
-          duration: 200,
-          useNativeDriver: true,
-        }).start(() => {
-          handleSwipeUp();
-        });
+        handleSwipeUp();
       }
       // Return to center
       else {
@@ -240,10 +292,32 @@ export const FeedScreen: React.FC = () => {
     extrapolate: 'clamp',
   });
 
+  // Show loading screen while fetching recipes
+  if (loading) {
+    return (
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <SafeAreaView style={styles.container}>
+          <View style={styles.header}>
+            <Text style={styles.headerTitle}>Zeus</Text>
+          </View>
+          <View style={styles.emptyContainer}>
+            <ActivityIndicator size="large" color="#FF6B35" />
+            <Text style={[styles.emptySubtitle, { marginTop: 16 }]}>
+              Loading delicious recipes...
+            </Text>
+          </View>
+        </SafeAreaView>
+      </GestureHandlerRootView>
+    );
+  }
+
   if (!currentRecipe) {
     return (
       <GestureHandlerRootView style={{ flex: 1 }}>
         <SafeAreaView style={styles.container}>
+          <View style={styles.header}>
+            <Text style={styles.headerTitle}>Zeus</Text>
+          </View>
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyTitle}>No More Recipes</Text>
             <Text style={styles.emptySubtitle}>Check back later for more delicious discoveries!</Text>
@@ -348,19 +422,12 @@ export const FeedScreen: React.FC = () => {
           <Text style={styles.actionButtonText}>🔖</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity 
+        <TouchableOpacity
           style={[styles.actionButton, styles.likeButton]}
           onPress={handleSwipeRight}
         >
           <Text style={styles.actionButtonText}>❤️</Text>
         </TouchableOpacity>
-      </View>
-
-      {/* Progress Indicator */}
-      <View style={styles.progressContainer}>
-        <Text style={styles.progressText}>
-          {currentIndex + 1} of {recipes.length}
-        </Text>
       </View>
     </SafeAreaView>
     </GestureHandlerRootView>

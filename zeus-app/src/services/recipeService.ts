@@ -73,7 +73,7 @@ class RecipeService {
 
   // Get user's saved recipes
   async getSavedRecipes(limit = 20, offset = 0): Promise<Recipe[]> {
-    const response = await api.get<Recipe[]>(`/api/recipes/saved?limit=${limit}&offset=${offset}`);
+    const response = await api.get<Recipe[]>(`/api/recipes/saved/my?limit=${limit}&offset=${offset}`);
     return response.data;
   }
 

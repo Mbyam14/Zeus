@@ -1,9 +1,9 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
+import { config } from '../../config';
 
-// Base URL for your Zeus backend
-// Using localhost for emulator (use 10.0.2.2 for Android emulator or localhost for iOS)
-const BASE_URL = 'http://localhost:8000';
+// Base URL for your Zeus backend (configured in config.ts)
+const BASE_URL = config.API_BASE_URL;
 
 const api = axios.create({
   baseURL: BASE_URL,

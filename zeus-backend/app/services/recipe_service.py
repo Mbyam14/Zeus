@@ -257,19 +257,39 @@ class RecipeService:
                 users!recipes_user_id_fkey(username)
             )
         """).eq("user_id", user_id).order("created_at", desc=True)
-        
+
         query = query.range(offset, offset + limit - 1)
         result = query.execute()
-        
+
         recipes = []
         for save_data in result.data:
             recipe_data = save_data["recipes"]
             recipe_response = await self._format_recipe_response(recipe_data)
             recipe_response.is_saved = True
             recipes.append(recipe_response)
-        
+
         return recipes
-    
+
+    async def get_liked_recipes(self, user_id: str, limit: int = 20, offset: int = 0) -> List[RecipeResponse]:
+        """Get recipes liked by a user"""
+        query = self.db.table("recipe_likes").select("""
+            recipes!recipe_likes_recipe_id_fkey(*,
+                users!recipes_user_id_fkey(username)
+            )
+        """).eq("user_id", user_id).order("created_at", desc=True)
+
+        query = query.range(offset, offset + limit - 1)
+        result = query.execute()
+
+        recipes = []
+        for like_data in result.data:
+            recipe_data = like_data["recipes"]
+            recipe_response = await self._format_recipe_response(recipe_data)
+            recipe_response.is_liked = True
+            recipes.append(recipe_response)
+
+        return recipes
+
     async def _format_recipe_response(self, recipe_data: dict) -> RecipeResponse:
         """Format raw recipe data into RecipeResponse"""
         # Handle ingredients and instructions conversion

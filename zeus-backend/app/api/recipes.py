@@ -58,6 +58,34 @@ async def get_recipe_feed(
     return await recipe_service.get_recipe_feed(filters, user_id)
 
 
+@router.get("/saved/my", response_model=List[RecipeResponse])
+async def get_my_saved_recipes(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    current_user: UserResponse = Depends(get_current_active_user)
+):
+    """
+    Get recipes saved by the current user.
+
+    Requires authentication.
+    """
+    return await recipe_service.get_saved_recipes(current_user.id, limit, offset)
+
+
+@router.get("/liked", response_model=List[RecipeResponse])
+async def get_my_liked_recipes(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    current_user: UserResponse = Depends(get_current_active_user)
+):
+    """
+    Get recipes liked by the current user.
+
+    Requires authentication.
+    """
+    return await recipe_service.get_liked_recipes(current_user.id, limit, offset)
+
+
 @router.get("/{recipe_id}", response_model=RecipeResponse)
 async def get_recipe(
     recipe_id: str,
@@ -65,7 +93,7 @@ async def get_recipe(
 ):
     """
     Get a specific recipe by ID.
-    
+
     If authenticated, includes user-specific data like likes and saves.
     """
     user_id = current_user.id if current_user else None
@@ -165,24 +193,10 @@ async def get_user_recipes(
 ):
     """
     Get recipes created by a specific user.
-    
+
     Public endpoint - no authentication required.
     """
     return await recipe_service.get_user_recipes(user_id, limit, offset)
-
-
-@router.get("/saved/my", response_model=List[RecipeResponse])
-async def get_my_saved_recipes(
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-    current_user: UserResponse = Depends(get_current_active_user)
-):
-    """
-    Get recipes saved by the current user.
-    
-    Requires authentication.
-    """
-    return await recipe_service.get_saved_recipes(current_user.id, limit, offset)
 
 
 @router.post("/upload-image")

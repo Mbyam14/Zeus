@@ -1,7 +1,7 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { FeedScreen } from '../screens/home/FeedScreen';
-import { ProfileScreen } from '../screens/profile/ProfileScreen';
+import { ProfileNavigator } from './ProfileNavigator';
 import { MealPlanScreen } from '../screens/mealplan/MealPlanScreen';
 import { View, Text, StyleSheet, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -97,9 +97,9 @@ export const MainTabNavigator: React.FC = () => {
           ),
         }}
       />
-      <Tab.Screen 
-        name="Profile" 
-        component={ProfileScreen}
+      <Tab.Screen
+        name="Profile"
+        component={ProfileNavigator}
         options={{
           tabBarIcon: ({ color }) => (
             <Text style={[styles.tabIcon, { color }]}>👤</Text>

@@ -27,7 +27,12 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git remote add:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(npm install)",
+      "Bash(ipconfig:*)",
+      "Bash(nul)",
+      "Bash(netsh advfirewall firewall:*)",
+      "Bash(git pull:*)"
     ],
     "deny": [],
     "ask": []

@@ -6,26 +6,25 @@ import { useAuthStore } from '../store/authStore';
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 
 export const AppNavigator: React.FC = () => {
-  // AUTHENTICATION DISABLED FOR TESTING
-  // const { isAuthenticated, isLoading, checkAuthStatus } = useAuthStore();
+  const { isAuthenticated, isLoading, checkAuthStatus } = useAuthStore();
 
-  // useEffect(() => {
-  //   checkAuthStatus();
-  // }, []);
+  useEffect(() => {
+    checkAuthStatus();
+  }, []);
 
-  // if (isLoading) {
-  //   return (
-  //     <View style={styles.loadingContainer}>
-  //       <Text style={styles.loadingTitle}>Zeus</Text>
-  //       <ActivityIndicator size="large" color="#FF6B35" style={styles.spinner} />
-  //       <Text style={styles.loadingText}>Loading your culinary journey...</Text>
-  //     </View>
-  //   );
-  // }
+  if (isLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text style={styles.loadingTitle}>Zeus</Text>
+        <ActivityIndicator size="large" color="#FF6B35" style={styles.spinner} />
+        <Text style={styles.loadingText}>Loading your culinary journey...</Text>
+      </View>
+    );
+  }
 
   return (
     <NavigationContainer>
-      <MainTabNavigator />
+      {isAuthenticated ? <MainTabNavigator /> : <AuthNavigator />}
     </NavigationContainer>
   );
 };

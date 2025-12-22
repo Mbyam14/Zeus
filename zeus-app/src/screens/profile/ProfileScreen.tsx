@@ -9,9 +9,15 @@ import {
   Alert,
 } from 'react-native';
 import { useAuthStore } from '../../store/authStore';
+import { useNavigation } from '@react-navigation/native';
+import { StackNavigationProp } from '@react-navigation/stack';
+import { ProfileStackParamList } from '../../navigation/ProfileNavigator';
+
+type ProfileScreenNavigationProp = StackNavigationProp<ProfileStackParamList, 'ProfileMain'>;
 
 export const ProfileScreen: React.FC = () => {
   const { user, logout } = useAuthStore();
+  const navigation = useNavigation<ProfileScreenNavigationProp>();
 
   const handleLogout = () => {
     Alert.alert(
@@ -30,6 +36,23 @@ export const ProfileScreen: React.FC = () => {
     );
   };
 
+  const handleMenuItemPress = (label: string) => {
+    switch (label) {
+      case 'Liked Recipes':
+        navigation.navigate('LikedRecipes');
+        break;
+      case 'Saved Recipes':
+        navigation.navigate('SavedRecipes');
+        break;
+      case 'My Recipes':
+        // navigation.navigate('MyRecipes'); // TODO: Create MyRecipesScreen
+        Alert.alert('Coming Soon', 'My recipes feature is coming soon!');
+        break;
+      default:
+        Alert.alert('Coming Soon', `${label} feature is coming soon!`);
+    }
+  };
+
   const profileStats = [
     { label: 'Recipes', value: '24' },
     { label: 'Followers', value: '156' },
@@ -39,6 +62,7 @@ export const ProfileScreen: React.FC = () => {
   const menuItems = [
     { icon: '📖', label: 'My Recipes', badge: '24' },
     { icon: '🔖', label: 'Saved Recipes', badge: '47' },
+    { icon: '❤️', label: 'Liked Recipes', badge: null },
     { icon: '📅', label: 'Meal Plans', badge: '3' },
     { icon: '🥘', label: 'My Pantry', badge: null },
     { icon: '⚙️', label: 'Settings', badge: null },
@@ -84,7 +108,11 @@ export const ProfileScreen: React.FC = () => {
         {/* Menu Items */}
         <View style={styles.menuSection}>
           {menuItems.map((item, index) => (
-            <TouchableOpacity key={index} style={styles.menuItem}>
+            <TouchableOpacity
+              key={index}
+              style={styles.menuItem}
+              onPress={() => handleMenuItemPress(item.label)}
+            >
               <View style={styles.menuItemLeft}>
                 <Text style={styles.menuItemIcon}>{item.icon}</Text>
                 <Text style={styles.menuItemLabel}>{item.label}</Text>
