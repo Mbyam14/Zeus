@@ -221,14 +221,17 @@ export const FeedScreen: React.FC = () => {
   };
 
   const nextRecipe = () => {
+    // Reset position and interaction flag
+    translateX.setValue(0);
+    translateY.setValue(0);
+    setIsInteracting(false);
+
     if (currentIndex < recipes.length - 1) {
-      // Reset position and interaction flag
-      translateX.setValue(0);
-      translateY.setValue(0);
       setCurrentIndex(currentIndex + 1);
-      setIsInteracting(false);
+    } else {
+      // Loop back to the first recipe
+      setCurrentIndex(0);
     }
-    // If no more recipes, just stay on last one (user can see it's the end)
   };
 
   const onGestureEvent = Animated.event(
