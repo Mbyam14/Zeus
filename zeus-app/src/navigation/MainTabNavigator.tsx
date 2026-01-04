@@ -6,17 +6,9 @@ import { ProfileNavigator } from './ProfileNavigator';
 import { MealPlanScreen } from '../screens/mealplan/MealPlanScreen';
 import { CreateScreen } from '../screens/create/CreateScreen';
 import { AIScreen } from '../screens/create/AIScreen';
+import { PantryScreen } from '../screens/pantry/PantryScreen';
 import { View, Text, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
-// Placeholder screens for now
-
-const SocialScreen = () => (
-  <View style={styles.placeholder}>
-    <Text style={styles.placeholderTitle}>Social</Text>
-    <Text style={styles.placeholderText}>Coming soon!</Text>
-  </View>
-);
 
 export type CreateStackParamList = {
   CreateMain: undefined;
@@ -24,10 +16,10 @@ export type CreateStackParamList = {
 };
 
 export type MainTabParamList = {
-  Feed: undefined;
+  Pantry: undefined;
   MealPlan: undefined;
   Create: undefined;
-  Social: undefined;
+  Feed: undefined;
   Profile: undefined;
 };
 
@@ -48,6 +40,7 @@ export const MainTabNavigator: React.FC = () => {
 
   return (
     <Tab.Navigator
+      initialRouteName="MealPlan"
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
@@ -68,17 +61,17 @@ export const MainTabNavigator: React.FC = () => {
         },
       }}
     >
-      <Tab.Screen 
-        name="Feed" 
-        component={FeedScreen}
+      <Tab.Screen
+        name="Pantry"
+        component={PantryScreen}
         options={{
           tabBarIcon: ({ color }) => (
-            <Text style={[styles.tabIcon, { color }]}>🏠</Text>
+            <Text style={[styles.tabIcon, { color }]}>🥫</Text>
           ),
         }}
       />
-      <Tab.Screen 
-        name="MealPlan" 
+      <Tab.Screen
+        name="MealPlan"
         component={MealPlanScreen}
         options={{
           tabBarLabel: 'Meal Plan',
@@ -99,12 +92,12 @@ export const MainTabNavigator: React.FC = () => {
           ),
         }}
       />
-      <Tab.Screen 
-        name="Social" 
-        component={SocialScreen}
+      <Tab.Screen
+        name="Feed"
+        component={FeedScreen}
         options={{
           tabBarIcon: ({ color }) => (
-            <Text style={[styles.tabIcon, { color }]}>👥</Text>
+            <Text style={[styles.tabIcon, { color }]}>🏠</Text>
           ),
         }}
       />

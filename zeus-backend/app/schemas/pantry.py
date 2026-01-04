@@ -60,3 +60,13 @@ class PantryFilter(BaseModel):
 
 class BulkPantryAdd(BaseModel):
     items: List[PantryItemCreate] = Field(..., min_items=1, max_items=50)
+
+
+class IngredientLibraryItem(BaseModel):
+    id: str
+    name: str
+    category: str
+    common_units: List[str]
+
+    class Config:
+        from_attributes = True

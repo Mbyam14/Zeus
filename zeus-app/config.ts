@@ -14,7 +14,7 @@
 
 export const config = {
   // Backend API URL - UPDATE THIS WITH YOUR LOCAL IP
-  API_BASE_URL: 'http://192.168.86.31:8000',
+  API_BASE_URL: 'http://192.168.0.16:8000',
 
   // Other configuration options
   API_TIMEOUT: 10000, // 10 seconds

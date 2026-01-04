@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
-from app.api import auth, recipes, ai
+from app.api import auth, recipes, ai, pantry
 
 
 app = FastAPI(
@@ -24,6 +24,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(recipes.router)
 app.include_router(ai.router)
+app.include_router(pantry.router)
 
 
 @app.get("/")
