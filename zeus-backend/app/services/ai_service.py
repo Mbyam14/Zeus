@@ -33,7 +33,7 @@ class AIService:
         try:
             # Call Claude API
             response = self.client.messages.create(
-                model="claude-3-sonnet-20240229",
+                model="claude-3-7-sonnet-20250219",
                 max_tokens=2000,
                 temperature=0.7,
                 messages=[
@@ -62,16 +62,31 @@ class AIService:
                 meal_type=recipe_data.get("meal_type", []),
                 dietary_tags=recipe_data.get("dietary_tags", [])
             )
-            
+
             # Save as AI-generated recipe
             recipe_response = await recipe_service.create_recipe(recipe_create, user_id)
-            
-            # Mark as AI-generated
+
+            # Update with nutrition data
             from app.database import get_database
             db = get_database()
-            db.table("recipes").update({"is_ai_generated": True}).eq("id", recipe_response.id).execute()
+            nutrition_data = {
+                "is_ai_generated": True,
+                "calories": recipe_data.get("calories"),
+                "protein_grams": recipe_data.get("protein_grams"),
+                "carbs_grams": recipe_data.get("carbs_grams"),
+                "fat_grams": recipe_data.get("fat_grams"),
+                "serving_size": recipe_data.get("serving_size")
+            }
+            db.table("recipes").update(nutrition_data).eq("id", recipe_response.id).execute()
+
+            # Update response object with nutrition data
             recipe_response.is_ai_generated = True
-            
+            recipe_response.calories = recipe_data.get("calories")
+            recipe_response.protein_grams = recipe_data.get("protein_grams")
+            recipe_response.carbs_grams = recipe_data.get("carbs_grams")
+            recipe_response.fat_grams = recipe_data.get("fat_grams")
+            recipe_response.serving_size = recipe_data.get("serving_size")
+
             return recipe_response
             
         except Exception as e:
@@ -88,27 +103,33 @@ class AIService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="AI meal plan generation service not configured"
             )
-        
+
         # Build the prompt
         prompt = self._build_meal_plan_prompt(request)
-        
+
+        # Add variety note to encourage different results each time
+        import random
+        variety_note = f"\n\nIMPORTANT: This is meal plan request #{random.randint(1000, 9999)}. Generate completely unique and creative recipes different from any previous requests."
+        prompt += variety_note
+
         try:
-            # Call Claude API
+            # Call Claude API for simplified meal plan (details generated on-demand)
             response = self.client.messages.create(
-                model="claude-3-sonnet-20240229",
-                max_tokens=3000,
+                model="claude-3-7-sonnet-20250219",
+                max_tokens=4000,
                 temperature=0.7,
                 messages=[
                     {
-                        "role": "user", 
+                        "role": "user",
                         "content": prompt
                     }
                 ]
             )
-            
+
             # Parse the response
-            meal_plan_data = self._parse_meal_plan_response(response.content[0].text)
-            
+            raw_text = response.content[0].text
+            meal_plan_data = self._parse_meal_plan_response(raw_text)
+
             return {
                 "meal_plan": meal_plan_data,
                 "suggested_recipes": meal_plan_data.get("recipes", []),
@@ -156,7 +177,12 @@ class AIService:
             "cuisine_type": "cuisine name",
             "difficulty": "Easy/Medium/Hard",
             "meal_type": ["Breakfast/Lunch/Dinner/Snack"],
-            "dietary_tags": ["Vegetarian", "Gluten-Free", etc.]
+            "dietary_tags": ["Vegetarian", "Gluten-Free", etc.],
+            "calories": 450,
+            "protein_grams": 35.0,
+            "carbs_grams": 40.0,
+            "fat_grams": 15.0,
+            "serving_size": "1 plate"
         }}
 
         Guidelines:
@@ -168,16 +194,18 @@ class AIService:
         6. Include realistic cooking times
         7. Suggest appropriate cuisine type and meal type
         8. Add relevant dietary tags
+        9. IMPORTANT: Estimate nutrition values (calories, protein, carbs, fat) per serving based on ingredients and portions
+        10. Provide a clear serving size description (e.g., "1 plate", "2 cups", "4 pieces")
         """
-        
+
         return prompt
     
     def _build_meal_plan_prompt(self, request: AIMealPlanRequest) -> str:
         """Build a detailed prompt for meal plan generation"""
         meals_per_day = ', '.join([meal.value for meal in request.meals_per_day])
-        
+
         prompt = f"""
-        Please generate a weekly meal plan based on these preferences:
+        Please generate a complete weekly meal plan with FULL recipe details for each meal.
 
         Meals per day: {meals_per_day}
         Week starting: {request.week_start_date}
@@ -188,37 +216,75 @@ class AIService:
         Available pantry items: {', '.join(request.pantry_items) if request.pantry_items else 'None'}
         Servings per meal: {request.servings_per_meal}
 
-        Please respond with a JSON object in this exact format:
+        IMPORTANT:
+        1. For each meal, provide ONLY basic information (title, description, macros, times).
+        2. DO NOT include full ingredients lists or step-by-step instructions - we'll generate those separately.
+        3. You MUST respond with ONLY valid JSON - no markdown, no explanations before or after.
+        4. Ensure all JSON is properly formatted with correct commas, brackets, and quotes.
+        5. Complete all 7 days with all 3 meals each.
+        6. DO NOT use emojis or special unicode characters in any text fields - use plain ASCII text only.
+
+        Please respond with a JSON object in this EXACT format:
         {{
-            "week_plan": {{
+            "week_summary": {{
+                "total_unique_recipes": 21,
+                "estimated_weekly_calories": 14000,
+                "variety_score": "high"
+            }},
+            "meals": {{
                 "monday": {{
-                    "breakfast": {{"recipe_name": "name", "description": "brief desc"}} or null,
-                    "lunch": {{"recipe_name": "name", "description": "brief desc"}} or null,
-                    "dinner": {{"recipe_name": "name", "description": "brief desc"}} or null,
-                    "snack": {{"recipe_name": "name", "description": "brief desc"}} or null
+                    "breakfast": {{
+                        "title": "Scrambled Eggs with Toast",
+                        "description": "Fluffy scrambled eggs with whole grain toast",
+                        "prep_time": 5,
+                        "cook_time": 10,
+                        "servings": {request.servings_per_meal},
+                        "calories": 350,
+                        "protein_grams": 20.0,
+                        "carbs_grams": 45.0,
+                        "fat_grams": 12.0,
+                        "cuisine_type": "American",
+                        "difficulty": "Easy"  // Must be EXACTLY one of: "Easy", "Medium", or "Hard" - no other values allowed
+                    }},
+                    "lunch": {{
+                        "title": "Chicken Caesar Salad",
+                        "description": "Fresh romaine with grilled chicken",
+                        "prep_time": 10,
+                        "cook_time": 15,
+                        "servings": {request.servings_per_meal},
+                        "calories": 420,
+                        "protein_grams": 35.0,
+                        "carbs_grams": 20.0,
+                        "fat_grams": 18.0,
+                        "cuisine_type": "American",
+                        "difficulty": "Medium"
+                    }},
+                    "dinner": {{ /* same simplified structure */ }}
                 }},
-                ... (continue for all 7 days)
+                "tuesday": {{ /* same structure for all meals */ }},
+                ... (continue for all 7 days: monday through sunday)
             }},
             "grocery_list": [
-                {{"item": "ingredient name", "quantity": "amount", "category": "Produce/Dairy/etc"}}
-            ],
-            "tips": [
-                "Meal prep tip 1",
-                "Meal prep tip 2"
+                {{"ingredient": "tomatoes", "quantity": "6", "unit": "pieces", "already_have": false}}
             ]
         }}
 
         Guidelines:
-        1. Create varied, balanced meals
-        2. Consider meal prep opportunities (batch cooking)
-        3. Use pantry items when possible
-        4. Respect dietary preferences completely
-        5. Match cooking skill level
-        6. Include only requested meal types
-        7. Generate a comprehensive grocery list
-        8. Add helpful meal prep tips
+        1. Generate 21 SIMPLIFIED meal entries (breakfast, lunch, dinner for 7 days)
+        2. Each meal needs ONLY: title, description, prep/cook time, macros, cuisine, difficulty
+        3. DO NOT include ingredients or instructions in this response
+        4. Create varied, balanced meals across the week
+        5. Maximize use of pantry items to reduce grocery needs
+        6. Respect dietary preferences completely
+        7. Match cooking skill level
+        8. Estimate realistic macros (calories, protein, carbs, fat) per serving
+        9. CRITICAL: Ensure MAXIMUM variety - use diverse cuisines (Italian, Mexican, Asian, Mediterranean, Indian, Thai, etc.)
+        10. CRITICAL: Never repeat the same recipe name or concept - make each meal unique and creative
+        11. Mix up cooking methods (grilled, roasted, stir-fried, baked, etc.) for variety
+        12. Keep the response concise to ensure valid JSON
+        13. CRITICAL: difficulty must be EXACTLY "Easy", "Medium", or "Hard" - no other values like "Intermediate" are allowed
         """
-        
+
         return prompt
     
     def _parse_recipe_response(self, response_text: str) -> Dict[str, Any]:

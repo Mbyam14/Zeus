@@ -38,35 +38,24 @@ export const ProfileScreen: React.FC = () => {
 
   const handleMenuItemPress = (label: string) => {
     switch (label) {
-      case 'Liked Recipes':
-        navigation.navigate('LikedRecipes');
-        break;
-      case 'Saved Recipes':
-        navigation.navigate('SavedRecipes');
-        break;
       case 'My Recipes':
-        // navigation.navigate('MyRecipes'); // TODO: Create MyRecipesScreen
-        Alert.alert('Coming Soon', 'My recipes feature is coming soon!');
+        navigation.navigate('MyRecipes');
+        break;
+      case 'Meal Preferences':
+        navigation.navigate('EditPreferences');
+        break;
+      case 'Settings':
+        navigation.navigate('Settings');
         break;
       default:
         Alert.alert('Coming Soon', `${label} feature is coming soon!`);
     }
   };
 
-  const profileStats = [
-    { label: 'Recipes', value: '24' },
-    { label: 'Followers', value: '156' },
-    { label: 'Following', value: '89' },
-  ];
-
   const menuItems = [
-    { icon: '📖', label: 'My Recipes', badge: '24' },
-    { icon: '🔖', label: 'Saved Recipes', badge: '47' },
-    { icon: '❤️', label: 'Liked Recipes', badge: null },
-    { icon: '📅', label: 'Meal Plans', badge: '3' },
-    { icon: '🥘', label: 'My Pantry', badge: null },
+    { icon: '📖', label: 'My Recipes', badge: null },
+    { icon: '🎯', label: 'Meal Preferences', badge: null },
     { icon: '⚙️', label: 'Settings', badge: null },
-    { icon: '❓', label: 'Help & Support', badge: null },
   ];
 
   return (
@@ -89,20 +78,6 @@ export const ProfileScreen: React.FC = () => {
 
           <Text style={styles.username}>@{user?.username}</Text>
           <Text style={styles.email}>{user?.email}</Text>
-
-          {/* Stats */}
-          <View style={styles.statsContainer}>
-            {profileStats.map((stat, index) => (
-              <View key={index} style={styles.statItem}>
-                <Text style={styles.statValue}>{stat.value}</Text>
-                <Text style={styles.statLabel}>{stat.label}</Text>
-              </View>
-            ))}
-          </View>
-
-          <TouchableOpacity style={styles.editButton}>
-            <Text style={styles.editButtonText}>Edit Profile</Text>
-          </TouchableOpacity>
         </View>
 
         {/* Menu Items */}

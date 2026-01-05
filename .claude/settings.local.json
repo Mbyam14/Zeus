@@ -32,7 +32,11 @@
       "Bash(ipconfig:*)",
       "Bash(nul)",
       "Bash(netsh advfirewall firewall:*)",
-      "Bash(git pull:*)"
+      "Bash(git pull:*)",
+      "Bash(venv/Scripts/python.exe:*)",
+      "Bash(tasklist:*)",
+      "Bash(taskkill:*)",
+      "Bash(cat:*)"
     ],
     "deny": [],
     "ask": []

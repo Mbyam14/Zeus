@@ -112,6 +112,46 @@ export const RecipeDetailScreen: React.FC<RecipeDetailScreenProps> = ({
             </View>
           </View>
 
+          {/* Nutrition/Macros */}
+          {(recipe.calories || recipe.protein_grams || recipe.carbs_grams || recipe.fat_grams) && (
+            <View style={styles.macrosSection}>
+              <Text style={styles.macrosTitle}>Nutrition per Serving</Text>
+              {recipe.serving_size && (
+                <Text style={styles.servingSize}>Serving: {recipe.serving_size}</Text>
+              )}
+              <View style={styles.macrosRow}>
+                {recipe.calories && (
+                  <View style={styles.macroCard}>
+                    <Text style={styles.macroIcon}>🔥</Text>
+                    <Text style={styles.macroValue}>{recipe.calories}</Text>
+                    <Text style={styles.macroLabel}>Calories</Text>
+                  </View>
+                )}
+                {recipe.protein_grams && (
+                  <View style={styles.macroCard}>
+                    <Text style={styles.macroIcon}>💪</Text>
+                    <Text style={styles.macroValue}>{recipe.protein_grams}g</Text>
+                    <Text style={styles.macroLabel}>Protein</Text>
+                  </View>
+                )}
+                {recipe.carbs_grams && (
+                  <View style={styles.macroCard}>
+                    <Text style={styles.macroIcon}>🍞</Text>
+                    <Text style={styles.macroValue}>{recipe.carbs_grams}g</Text>
+                    <Text style={styles.macroLabel}>Carbs</Text>
+                  </View>
+                )}
+                {recipe.fat_grams && (
+                  <View style={styles.macroCard}>
+                    <Text style={styles.macroIcon}>🥑</Text>
+                    <Text style={styles.macroValue}>{recipe.fat_grams}g</Text>
+                    <Text style={styles.macroLabel}>Fat</Text>
+                  </View>
+                )}
+              </View>
+            </View>
+          )}
+
           {/* Description */}
           {recipe.description && (
             <View style={styles.section}>
@@ -411,5 +451,51 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+  macrosSection: {
+    backgroundColor: '#F8F9FA',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 24,
+  },
+  macrosTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#2C3E50',
+    marginBottom: 8,
+  },
+  servingSize: {
+    fontSize: 14,
+    color: '#7F8C8D',
+    marginBottom: 12,
+  },
+  macrosRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    gap: 8,
+  },
+  macroCard: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E1E8ED',
+  },
+  macroIcon: {
+    fontSize: 20,
+    marginBottom: 4,
+  },
+  macroValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#2C3E50',
+    marginBottom: 2,
+  },
+  macroLabel: {
+    fontSize: 12,
+    color: '#7F8C8D',
+    fontWeight: '500',
   },
 });

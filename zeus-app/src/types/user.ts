@@ -27,3 +27,19 @@ export interface UserProfile {
   username: string;
   profile_data?: Record<string, any>;
 }
+
+export interface UserPreferences {
+  dietary_restrictions: string[];
+  cuisine_preferences: string[];
+  cooking_skill: 'beginner' | 'intermediate' | 'advanced';
+  household_size: number;
+  calorie_target?: number;
+  protein_target_grams?: number;
+  allergies: string[];
+  disliked_ingredients: string[];
+}
+
+export interface UserProfileUpdate {
+  name?: string;
+  preferences?: UserPreferences;
+}

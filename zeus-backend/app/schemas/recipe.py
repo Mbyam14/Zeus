@@ -92,7 +92,14 @@ class RecipeResponse(BaseModel):
     is_ai_generated: bool
     likes_count: int
     created_at: datetime
-    
+
+    # Nutrition fields
+    calories: Optional[int] = None
+    protein_grams: Optional[float] = None
+    carbs_grams: Optional[float] = None
+    fat_grams: Optional[float] = None
+    serving_size: Optional[str] = None
+
     # Optional fields for feed/detailed views
     creator_username: Optional[str] = None
     is_liked: Optional[bool] = None

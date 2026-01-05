@@ -319,7 +319,12 @@ class RecipeService:
             is_ai_generated=recipe_data.get("is_ai_generated", False),
             likes_count=recipe_data.get("likes_count", 0),
             created_at=datetime.fromisoformat(recipe_data["created_at"].replace("Z", "+00:00")),
-            creator_username=creator_username
+            creator_username=creator_username,
+            calories=recipe_data.get("calories"),
+            protein_grams=recipe_data.get("protein_grams"),
+            carbs_grams=recipe_data.get("carbs_grams"),
+            fat_grams=recipe_data.get("fat_grams"),
+            serving_size=recipe_data.get("serving_size")
         )
     
     async def _is_recipe_liked(self, recipe_id: str, user_id: str) -> bool:

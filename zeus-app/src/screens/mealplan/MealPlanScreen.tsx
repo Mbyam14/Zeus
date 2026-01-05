@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,87 +6,353 @@ import {
   TouchableOpacity,
   SafeAreaView,
   ScrollView,
+  ActivityIndicator,
+  Alert,
+  Modal,
 } from 'react-native';
+import { mealPlanService } from '../../services/mealPlanService';
+import { MealPlan, Recipe, DayOfWeek, MealType } from '../../types/mealplan';
 
-interface MealPlan {
-  id: string;
-  date: string;
-  meal_type: string;
-  recipe_title: string;
+interface MealPlanScreenProps {
+  navigation: any;
 }
 
-const mockMealPlans: MealPlan[] = [
-  { id: '1', date: '2025-11-06', meal_type: 'Breakfast', recipe_title: 'Avocado Toast' },
-  { id: '2', date: '2025-11-06', meal_type: 'Lunch', recipe_title: 'Caesar Salad' },
-  { id: '3', date: '2025-11-06', meal_type: 'Dinner', recipe_title: 'Spaghetti Carbonara' },
-  { id: '4', date: '2025-11-07', meal_type: 'Breakfast', recipe_title: 'Pancakes' },
-  { id: '5', date: '2025-11-07', meal_type: 'Dinner', recipe_title: 'Asian Stir Fry' },
-];
+export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) => {
+  const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
+  const [mealPlan, setMealPlan] = useState<MealPlan | null>(null);
+  const [recipes, setRecipes] = useState<{ [key: string]: Recipe }>({});
+  const [selectedDay, setSelectedDay] = useState<DayOfWeek>('monday');
+  const [regeneratingMeal, setRegeneratingMeal] = useState<string | null>(null);
 
-export const MealPlanScreen: React.FC = () => {
-  const [selectedDate, setSelectedDate] = useState('2025-11-06');
+  useEffect(() => {
+    loadMealPlan();
+  }, []);
 
-  // Generate days for the week
-  const getDaysOfWeek = () => {
-    const days = [];
-    const today = new Date('2025-11-06');
+  const loadMealPlan = async () => {
+    try {
+      setLoading(true);
+      console.log('📱 Loading current meal plan...');
+      const plan = await mealPlanService.getCurrentWeekMealPlan();
 
-    for (let i = 0; i < 7; i++) {
-      const date = new Date(today);
-      date.setDate(today.getDate() + i);
-      days.push({
-        date: date.toISOString().split('T')[0],
-        dayName: date.toLocaleDateString('en-US', { weekday: 'short' }),
-        dayNum: date.getDate(),
-      });
+      if (plan) {
+        console.log('✅ Meal plan loaded:', plan.plan_name);
+        console.log('📊 Meal plan ID:', plan.id);
+        console.log('📅 Has meals data:', Object.keys(plan.meals).length > 0);
+        setMealPlan(plan);
+        await loadRecipes(plan);
+
+        // Set selected day to first day with meals
+        const daysWithMeals = Object.keys(plan.meals) as DayOfWeek[];
+        console.log('📅 Days with meals:', daysWithMeals);
+        if (daysWithMeals.length > 0) {
+          setSelectedDay(daysWithMeals[0]);
+        }
+      } else {
+        console.log('ℹ️ No meal plan found');
+      }
+    } catch (error) {
+      console.error('❌ Failed to load meal plan:', error);
+    } finally {
+      setLoading(false);
     }
-    return days;
   };
 
-  const daysOfWeek = getDaysOfWeek();
-  const mealsForSelectedDate = mockMealPlans.filter(m => m.date === selectedDate);
+  const loadRecipes = async (plan: MealPlan) => {
+    console.log('🔍 Loading recipes for meal plan:', plan.id);
+    console.log('📅 Meal plan structure:', JSON.stringify(plan.meals, null, 2));
 
-  const mealTypes = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
+    const recipeMap: { [key: string]: Recipe } = {};
+    const recipeIds: string[] = [];
+
+    // Collect all recipe IDs
+    Object.values(plan.meals).forEach(dayMeals => {
+      if (dayMeals) {
+        Object.values(dayMeals).forEach(recipeId => {
+          if (recipeId && !recipeIds.includes(recipeId)) {
+            recipeIds.push(recipeId);
+          }
+        });
+      }
+    });
+
+    console.log('📝 Found recipe IDs:', recipeIds);
+    console.log('🔢 Total recipes to load:', recipeIds.length);
+
+    // Load all recipes
+    try {
+      const loadedRecipes = await mealPlanService.getRecipes(recipeIds);
+      console.log('✅ Loaded recipes:', loadedRecipes.length);
+      loadedRecipes.forEach(recipe => {
+        console.log(`  - ${recipe.title} (${recipe.id})`);
+        recipeMap[recipe.id] = recipe;
+      });
+      setRecipes(recipeMap);
+    } catch (error) {
+      console.error('❌ Failed to load recipes:', error);
+    }
+  };
+
+  const handleGenerateMealPlan = async () => {
+    Alert.alert(
+      'Generate Meal Plan',
+      'This will create a full week of meals based on your pantry and preferences. This may take a minute.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Generate',
+          onPress: async () => {
+            try {
+              setGenerating(true);
+              const today = new Date();
+              const monday = new Date(today);
+              monday.setDate(today.getDate() - today.getDay() + 1);
+              const startDate = monday.toISOString().split('T')[0];
+
+              const generateResponse = await mealPlanService.generateMealPlan(startDate);
+              console.log('🆕 Generation response:', generateResponse);
+              console.log('🆕 New meal plan ID from generation:', generateResponse.meal_plan_id);
+
+              // Clear old state before loading new meal plan
+              setMealPlan(null);
+              setRecipes({});
+
+              // Add a small delay to ensure database has committed
+              await new Promise(resolve => setTimeout(resolve, 500));
+
+              // Load the newly generated meal plan
+              console.log('🔄 Now fetching current meal plan from API...');
+              await loadMealPlan();
+
+              Alert.alert('Success', 'Your meal plan has been generated!');
+            } catch (error) {
+              console.error('Failed to generate meal plan:', error);
+              Alert.alert('Error', 'Failed to generate meal plan. Please try again.');
+            } finally {
+              setGenerating(false);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleRegenerateMeal = async (day: DayOfWeek, mealType: MealType) => {
+    if (!mealPlan) return;
+
+    try {
+      setRegeneratingMeal(`${day}-${mealType}`);
+      const newRecipe = await mealPlanService.regenerateMeal(mealPlan.id, day, mealType);
+
+      // Update local state
+      setRecipes(prev => ({ ...prev, [newRecipe.id]: newRecipe }));
+      setMealPlan(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          meals: {
+            ...prev.meals,
+            [day]: {
+              ...prev.meals[day],
+              [mealType]: newRecipe.id
+            }
+          }
+        };
+      });
+
+      Alert.alert('Success', `${mealType} has been regenerated!`);
+    } catch (error) {
+      console.error('Failed to regenerate meal:', error);
+      Alert.alert('Error', 'Failed to regenerate meal. Please try again.');
+    } finally {
+      setRegeneratingMeal(null);
+    }
+  };
+
+  const handleViewRecipe = (recipeId: string) => {
+    const recipe = recipes[recipeId];
+    if (recipe) {
+      navigation.navigate('RecipeDetail', { recipe });
+    }
+  };
+
+  const getDaysOfWeek = (): Array<{ day: DayOfWeek; label: string; date: string }> => {
+    const days: DayOfWeek[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+    const today = new Date();
+    const monday = new Date(today);
+    monday.setDate(today.getDate() - today.getDay() + 1);
+
+    return days.map((day, index) => {
+      const date = new Date(monday);
+      date.setDate(monday.getDate() + index);
+      return {
+        day,
+        label: day.slice(0, 3).toUpperCase(),
+        date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+      };
+    });
+  };
+
+  const renderMealCard = (mealType: MealType) => {
+    const dayMeals = mealPlan?.meals[selectedDay];
+    const recipeId = dayMeals?.[mealType];
+    const recipe = recipeId ? recipes[recipeId] : null;
+    const isRegenerating = regeneratingMeal === `${selectedDay}-${mealType}`;
+
+    return (
+      <View key={mealType} style={styles.mealCard}>
+        <View style={styles.mealHeader}>
+          <Text style={styles.mealType}>{mealType.charAt(0).toUpperCase() + mealType.slice(1)}</Text>
+          {recipe && (
+            <TouchableOpacity
+              onPress={() => handleRegenerateMeal(selectedDay, mealType)}
+              disabled={isRegenerating}
+              style={styles.regenerateButton}
+            >
+              {isRegenerating ? (
+                <ActivityIndicator size="small" color="#FF6B35" />
+              ) : (
+                <Text style={styles.regenerateText}>🔄</Text>
+              )}
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {recipe ? (
+          <TouchableOpacity
+            style={styles.plannedMeal}
+            onPress={() => handleViewRecipe(recipe.id)}
+          >
+            <View style={styles.mealImagePlaceholder}>
+              <Text style={styles.mealEmoji}>🍽️</Text>
+            </View>
+            <View style={styles.mealInfo}>
+              <Text style={styles.mealTitle}>{recipe.title}</Text>
+              {recipe.calories && (
+                <View style={styles.macroPreview}>
+                  <Text style={styles.macroText}>🔥 {recipe.calories} cal</Text>
+                  {recipe.protein_grams && (
+                    <Text style={styles.macroText}>💪 {recipe.protein_grams}g P</Text>
+                  )}
+                </View>
+              )}
+              <Text style={styles.mealSubtext}>View Recipe →</Text>
+            </View>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.emptyMeal}>
+            <Text style={styles.emptyMealText}>No meal planned</Text>
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#FF6B35" />
+          <Text style={styles.loadingText}>Loading meal plan...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!mealPlan) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyTitle}>No Meal Plan Yet</Text>
+          <Text style={styles.emptyDescription}>
+            Generate your first AI-powered meal plan based on your pantry and preferences!
+          </Text>
+          <TouchableOpacity
+            style={styles.generateButton}
+            onPress={handleGenerateMealPlan}
+            disabled={generating}
+          >
+            {generating ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.generateButtonText}>Generate Meal Plan</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const daysOfWeek = getDaysOfWeek();
+
+  // Loading overlay component
+  const renderLoadingOverlay = () => (
+    <Modal
+      visible={generating}
+      transparent={true}
+      animationType="fade"
+    >
+      <View style={styles.loadingOverlay}>
+        <View style={styles.loadingCard}>
+          <ActivityIndicator size="large" color="#FF6B35" />
+          <Text style={styles.loadingTitle}>Generating Your Meal Plan</Text>
+          <Text style={styles.loadingSubtext}>
+            Creating 21 delicious recipes with ingredients, instructions, and nutrition info...
+          </Text>
+          <Text style={styles.loadingHint}>This may take up to a minute</Text>
+        </View>
+      </View>
+    </Modal>
+  );
 
   return (
     <SafeAreaView style={styles.container}>
+      {renderLoadingOverlay()}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Meal Plan</Text>
-        <TouchableOpacity style={styles.addButton}>
-          <Text style={styles.addButtonText}>+ Add</Text>
+        <TouchableOpacity
+          style={styles.regenerateAllButton}
+          onPress={handleGenerateMealPlan}
+          disabled={generating}
+        >
+          {generating ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Text style={styles.regenerateAllButtonText}>🔄 New Week</Text>
+          )}
         </TouchableOpacity>
       </View>
 
       <ScrollView>
-        {/* Calendar Week View */}
+        {/* Week Day Selector */}
         <View style={styles.calendarContainer}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            {daysOfWeek.map((day) => (
+            {daysOfWeek.map(({ day, label, date }) => (
               <TouchableOpacity
-                key={day.date}
+                key={day}
                 style={[
                   styles.dayCard,
-                  selectedDate === day.date && styles.dayCardSelected,
+                  selectedDay === day && styles.dayCardSelected,
                 ]}
-                onPress={() => setSelectedDate(day.date)}
+                onPress={() => setSelectedDay(day)}
               >
                 <Text
                   style={[
                     styles.dayName,
-                    selectedDate === day.date && styles.dayNameSelected,
+                    selectedDay === day && styles.dayNameSelected,
                   ]}
                 >
-                  {day.dayName}
+                  {label}
                 </Text>
                 <Text
                   style={[
-                    styles.dayNum,
-                    selectedDate === day.date && styles.dayNumSelected,
+                    styles.dayDate,
+                    selectedDay === day && styles.dayDateSelected,
                   ]}
                 >
-                  {day.dayNum}
+                  {date}
                 </Text>
-                {mockMealPlans.filter(m => m.date === day.date).length > 0 && (
+                {mealPlan.meals[day] && Object.keys(mealPlan.meals[day] || {}).length > 0 && (
                   <View style={styles.planIndicator} />
                 )}
               </TouchableOpacity>
@@ -94,78 +360,11 @@ export const MealPlanScreen: React.FC = () => {
           </ScrollView>
         </View>
 
-        {/* Selected Date */}
-        <View style={styles.selectedDateContainer}>
-          <Text style={styles.selectedDateText}>
-            {new Date(selectedDate).toLocaleDateString('en-US', {
-              weekday: 'long',
-              month: 'long',
-              day: 'numeric',
-            })}
-          </Text>
-        </View>
-
-        {/* Meals for Selected Date */}
+        {/* Meals for Selected Day */}
         <View style={styles.mealsContainer}>
-          {mealTypes.map((mealType) => {
-            const meal = mealsForSelectedDate.find(m => m.meal_type === mealType);
-
-            return (
-              <View key={mealType} style={styles.mealCard}>
-                <View style={styles.mealHeader}>
-                  <Text style={styles.mealType}>{mealType}</Text>
-                  <Text style={styles.mealTime}>
-                    {mealType === 'Breakfast' && '7:00 AM'}
-                    {mealType === 'Lunch' && '12:00 PM'}
-                    {mealType === 'Dinner' && '6:00 PM'}
-                    {mealType === 'Snack' && '3:00 PM'}
-                  </Text>
-                </View>
-
-                {meal ? (
-                  <TouchableOpacity style={styles.plannedMeal}>
-                    <View style={styles.mealImagePlaceholder}>
-                      <Text style={styles.mealEmoji}>🍽️</Text>
-                    </View>
-                    <View style={styles.mealInfo}>
-                      <Text style={styles.mealTitle}>{meal.recipe_title}</Text>
-                      <Text style={styles.mealSubtext}>View Recipe →</Text>
-                    </View>
-                  </TouchableOpacity>
-                ) : (
-                  <TouchableOpacity style={styles.emptyMeal}>
-                    <Text style={styles.addMealIcon}>+</Text>
-                    <Text style={styles.addMealText}>Add {mealType}</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            );
-          })}
-        </View>
-
-        {/* Shopping List Section */}
-        <View style={styles.shoppingListSection}>
-          <View style={styles.shoppingListHeader}>
-            <Text style={styles.shoppingListTitle}>Shopping List</Text>
-            <TouchableOpacity>
-              <Text style={styles.shoppingListLink}>View All →</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.shoppingListPreview}>
-            <View style={styles.shoppingItem}>
-              <Text style={styles.shoppingItemIcon}>✓</Text>
-              <Text style={styles.shoppingItemText}>Spaghetti - 400g</Text>
-            </View>
-            <View style={styles.shoppingItem}>
-              <Text style={styles.shoppingItemIcon}>○</Text>
-              <Text style={styles.shoppingItemText}>Eggs - 12 count</Text>
-            </View>
-            <View style={styles.shoppingItem}>
-              <Text style={styles.shoppingItemIcon}>○</Text>
-              <Text style={styles.shoppingItemText}>Mixed vegetables - 500g</Text>
-            </View>
-          </View>
+          {renderMealCard('breakfast')}
+          {renderMealCard('lunch')}
+          {renderMealCard('dinner')}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -176,6 +375,48 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F8F9FA',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#7F8C8D',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 40,
+  },
+  emptyTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#2C3E50',
+    marginBottom: 12,
+  },
+  emptyDescription: {
+    fontSize: 16,
+    color: '#7F8C8D',
+    textAlign: 'center',
+    marginBottom: 32,
+    lineHeight: 24,
+  },
+  generateButton: {
+    backgroundColor: '#FF6B35',
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    borderRadius: 12,
+    minWidth: 200,
+    alignItems: 'center',
+  },
+  generateButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
   header: {
     flexDirection: 'row',
@@ -192,13 +433,15 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#2C3E50',
   },
-  addButton: {
+  regenerateAllButton: {
     backgroundColor: '#FF6B35',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  addButtonText: {
+  regenerateAllButtonText: {
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '600',
@@ -219,7 +462,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderRadius: 12,
     backgroundColor: '#F8F9FA',
-    minWidth: 60,
+    minWidth: 70,
   },
   dayCardSelected: {
     backgroundColor: '#FF6B35',
@@ -233,12 +476,12 @@ const styles = StyleSheet.create({
   dayNameSelected: {
     color: '#FFFFFF',
   },
-  dayNum: {
-    fontSize: 20,
+  dayDate: {
+    fontSize: 14,
     fontWeight: 'bold',
     color: '#2C3E50',
   },
-  dayNumSelected: {
+  dayDateSelected: {
     color: '#FFFFFF',
   },
   planIndicator: {
@@ -247,17 +490,6 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     backgroundColor: '#004E89',
     marginTop: 4,
-  },
-  selectedDateContainer: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    backgroundColor: '#FFFFFF',
-    marginBottom: 16,
-  },
-  selectedDateText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#2C3E50',
   },
   mealsContainer: {
     paddingHorizontal: 16,
@@ -269,10 +501,7 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 12,
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 2,
@@ -288,9 +517,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#2C3E50',
   },
-  mealTime: {
-    fontSize: 14,
-    color: '#7F8C8D',
+  regenerateButton: {
+    padding: 4,
+  },
+  regenerateText: {
+    fontSize: 18,
   },
   plannedMeal: {
     flexDirection: 'row',
@@ -317,67 +548,71 @@ const styles = StyleSheet.create({
     color: '#2C3E50',
     marginBottom: 4,
   },
+  macroPreview: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 4,
+  },
+  macroText: {
+    fontSize: 12,
+    color: '#7F8C8D',
+  },
   mealSubtext: {
     fontSize: 14,
     color: '#FF6B35',
     fontWeight: '500',
   },
   emptyMeal: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
     paddingVertical: 16,
+    alignItems: 'center',
     borderWidth: 2,
     borderColor: '#E1E8ED',
     borderStyle: 'dashed',
     borderRadius: 8,
   },
-  addMealIcon: {
-    fontSize: 20,
-    color: '#7F8C8D',
-    marginRight: 8,
-  },
-  addMealText: {
+  emptyMealText: {
     fontSize: 14,
     color: '#7F8C8D',
     fontWeight: '500',
   },
-  shoppingListSection: {
-    backgroundColor: '#FFFFFF',
-    padding: 24,
-    marginBottom: 24,
-  },
-  shoppingListHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  loadingOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 16,
+    padding: 20,
   },
-  shoppingListTitle: {
+  loadingCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 32,
+    alignItems: 'center',
+    maxWidth: 340,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  loadingTitle: {
     fontSize: 20,
     fontWeight: 'bold',
     color: '#2C3E50',
+    marginTop: 20,
+    marginBottom: 12,
+    textAlign: 'center',
   },
-  shoppingListLink: {
-    fontSize: 14,
+  loadingSubtext: {
+    fontSize: 15,
+    color: '#7F8C8D',
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 16,
+  },
+  loadingHint: {
+    fontSize: 13,
     color: '#FF6B35',
-    fontWeight: '500',
-  },
-  shoppingListPreview: {
-    gap: 12,
-  },
-  shoppingItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  shoppingItemIcon: {
-    fontSize: 20,
-    marginRight: 12,
-    color: '#2ECC71',
-  },
-  shoppingItemText: {
-    fontSize: 16,
-    color: '#2C3E50',
+    fontWeight: '600',
+    textAlign: 'center',
   },
 });

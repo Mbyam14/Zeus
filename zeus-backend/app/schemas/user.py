@@ -38,3 +38,21 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     user_id: Optional[str] = None
+
+
+class UserPreferences(BaseModel):
+    """User dietary and cooking preferences"""
+    dietary_restrictions: list[str] = Field(default=[], description="Dietary restrictions (e.g., vegetarian, vegan, gluten-free)")
+    cuisine_preferences: list[str] = Field(default=[], description="Preferred cuisines (e.g., Italian, Mexican, Asian)")
+    cooking_skill: str = Field(default="intermediate", pattern="^(beginner|intermediate|advanced)$")
+    household_size: int = Field(default=2, ge=1, le=20, description="Number of people to cook for")
+    calorie_target: Optional[int] = Field(None, ge=1000, le=5000, description="Daily calorie target")
+    protein_target_grams: Optional[int] = Field(None, ge=20, le=500, description="Daily protein target in grams")
+    allergies: list[str] = Field(default=[], description="Food allergies")
+    disliked_ingredients: list[str] = Field(default=[], description="Ingredients to avoid")
+
+
+class UserProfileUpdate(BaseModel):
+    """Update user profile including preferences"""
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    preferences: Optional[UserPreferences] = None
