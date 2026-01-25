@@ -10,11 +10,14 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import { Ingredient, Instruction, DifficultyLevel, MealType } from '../../types/recipe';
+import { recipeService } from '../../services/recipeService';
+import { useThemeStore } from '../../store/themeStore';
 
 interface RecipeForm {
   title: string;
@@ -36,6 +39,9 @@ interface CreateScreenProps {
 }
 
 export const CreateScreen: React.FC<CreateScreenProps> = ({ navigation }) => {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const { colors } = useThemeStore();
+  const styles = createStyles(colors);
   const [recipe, setRecipe] = useState<RecipeForm>({
     title: '',
     description: '',
@@ -170,7 +176,7 @@ export const CreateScreen: React.FC<CreateScreenProps> = ({ navigation }) => {
     );
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!recipe.title.trim()) {
       Alert.alert('Error', 'Please enter a recipe title');
       return;
@@ -188,8 +194,72 @@ export const CreateScreen: React.FC<CreateScreenProps> = ({ navigation }) => {
       return;
     }
 
-    Alert.alert('Success', 'Recipe created successfully!');
-    console.log('Recipe to submit:', recipe);
+    try {
+      setIsSubmitting(true);
+
+      // Convert form data to API format
+      const recipeData = {
+        title: recipe.title,
+        description: recipe.description || '',
+        ingredients: recipe.ingredients
+          .filter(ing => ing.name.trim())
+          .map(ing => ({
+            item: ing.name,
+            quantity: ing.quantity || '',
+            unit: ing.unit || ''
+          })),
+        instructions: recipe.instructions
+          .filter(inst => inst.instruction.trim())
+          .map((inst, index) => ({
+            step: index + 1,
+            instruction: inst.instruction
+          })),
+        servings: parseInt(recipe.servings),
+        prep_time: recipe.prep_time ? parseInt(recipe.prep_time) : undefined,
+        cook_time: recipe.cook_time ? parseInt(recipe.cook_time) : undefined,
+        cuisine_type: recipe.cuisine_type || undefined,
+        difficulty: recipe.difficulty,
+        meal_type: recipe.meal_type,
+        dietary_tags: recipe.dietary_tags,
+        image_url: recipe.image_url || undefined,
+      };
+
+      console.log('📤 Creating recipe with data:', JSON.stringify(recipeData, null, 2));
+
+      try {
+        const createdRecipe = await recipeService.createRecipe(recipeData);
+        console.log('✅ Recipe created successfully:', createdRecipe);
+
+        // Navigate to the recipe detail screen
+        if (navigation) {
+          console.log('🧭 Navigating to RecipeDetail');
+          navigation.navigate('RecipeDetail', { recipe: createdRecipe });
+        }
+      } catch (apiError: any) {
+        console.error('❌ API Error:', apiError);
+        console.error('❌ Error details:', {
+          message: apiError?.message,
+          response: apiError?.response?.data,
+          status: apiError?.response?.status,
+        });
+        throw apiError;
+      }
+    } catch (error: any) {
+      console.error('❌ Failed to create recipe:', error);
+
+      let errorMessage = 'Failed to create recipe. ';
+      if (error?.response?.data?.detail) {
+        errorMessage += error.response.data.detail;
+      } else if (error?.message) {
+        errorMessage += error.message;
+      } else {
+        errorMessage += 'Please try again.';
+      }
+
+      Alert.alert('Error', errorMessage);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -510,15 +580,22 @@ export const CreateScreen: React.FC<CreateScreenProps> = ({ navigation }) => {
             style={styles.submitButton}
             onPress={handleSubmit}
             activeOpacity={0.8}
+            disabled={isSubmitting}
           >
             <LinearGradient
-              colors={['#FF6B35', '#FF8C42']}
+              colors={isSubmitting ? ['#BDC3C7', '#95A5A6'] : ['#FF6B35', '#FF8C42']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
               style={styles.submitGradient}
             >
-              <Text style={styles.submitIcon}>✓</Text>
-              <Text style={styles.submitButtonText}>Create Recipe</Text>
+              {isSubmitting ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <>
+                  <Text style={styles.submitIcon}>✓</Text>
+                  <Text style={styles.submitButtonText}>Create Recipe</Text>
+                </>
+              )}
             </LinearGradient>
           </TouchableOpacity>
 
@@ -529,10 +606,10 @@ export const CreateScreen: React.FC<CreateScreenProps> = ({ navigation }) => {
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (colors: any) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F7FA',
+    backgroundColor: colors.background,
   },
   header: {
     paddingHorizontal: 24,
@@ -540,7 +617,7 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
     borderBottomLeftRadius: 24,
     borderBottomRightRadius: 24,
-    shadowColor: '#FF6B35',
+    shadowColor: colors.primary,
     shadowOffset: {
       width: 0,
       height: 4,
@@ -591,7 +668,7 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   card: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.card,
     borderRadius: 16,
     padding: 20,
     marginBottom: 16,
@@ -613,12 +690,12 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#2C3E50',
+    color: colors.text,
     marginBottom: 4,
   },
   cardSubtitle: {
     fontSize: 14,
-    color: '#7F8C8D',
+    color: colors.textMuted,
   },
   imageContainer: {
     position: 'relative',
@@ -650,7 +727,7 @@ const styles = StyleSheet.create({
   changePhotoText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#2C3E50',
+    color: colors.text,
   },
   removeImageButton: {
     position: 'absolute',
@@ -676,7 +753,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#FFF5F2',
+    backgroundColor: colors.backgroundSecondary,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
@@ -687,12 +764,12 @@ const styles = StyleSheet.create({
   addPhotoTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#2C3E50',
+    color: colors.text,
     marginBottom: 4,
   },
   addPhotoSubtitle: {
     fontSize: 14,
-    color: '#7F8C8D',
+    color: colors.textMuted,
   },
   inputGroup: {
     marginBottom: 16,
@@ -700,21 +777,21 @@ const styles = StyleSheet.create({
   inputLabel: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#2C3E50',
+    color: colors.text,
     marginBottom: 8,
   },
   required: {
-    color: '#FF6B35',
+    color: colors.primary,
   },
   input: {
-    backgroundColor: '#F8F9FA',
+    backgroundColor: colors.background,
     borderWidth: 1,
-    borderColor: '#E1E8ED',
+    borderColor: colors.border,
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 16,
-    color: '#2C3E50',
+    color: colors.text,
   },
   textArea: {
     minHeight: 100,
@@ -727,7 +804,7 @@ const styles = StyleSheet.create({
   },
   factItem: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: colors.background,
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
@@ -739,32 +816,32 @@ const styles = StyleSheet.create({
   factLabel: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#7F8C8D',
+    color: colors.textMuted,
     marginBottom: 8,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   factInput: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.backgroundSecondary,
     borderWidth: 1,
-    borderColor: '#E1E8ED',
+    borderColor: colors.border,
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 8,
     fontSize: 18,
     fontWeight: '700',
-    color: '#2C3E50',
+    color: colors.text,
     textAlign: 'center',
     minWidth: 60,
   },
   factUnit: {
     fontSize: 12,
-    color: '#7F8C8D',
+    color: colors.textMuted,
     marginTop: 4,
   },
   divider: {
     height: 1,
-    backgroundColor: '#E1E8ED',
+    backgroundColor: colors.border,
     marginVertical: 16,
   },
   difficultyRow: {
@@ -776,18 +853,18 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: '#E1E8ED',
-    backgroundColor: '#F8F9FA',
+    borderColor: colors.border,
+    backgroundColor: colors.background,
     alignItems: 'center',
   },
   difficultyChipActive: {
-    backgroundColor: '#FF6B35',
-    borderColor: '#FF6B35',
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
   difficultyText: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#7F8C8D',
+    color: colors.textMuted,
   },
   difficultyTextActive: {
     color: '#FFFFFF',
@@ -803,17 +880,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     borderRadius: 24,
     borderWidth: 2,
-    borderColor: '#E1E8ED',
-    backgroundColor: '#F8F9FA',
+    borderColor: colors.border,
+    backgroundColor: colors.background,
   },
   chipActive: {
-    backgroundColor: '#FF6B35',
-    borderColor: '#FF6B35',
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
   chipText: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#7F8C8D',
+    color: colors.textMuted,
   },
   chipTextActive: {
     color: '#FFFFFF',
@@ -821,7 +898,7 @@ const styles = StyleSheet.create({
   addButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FF6B35',
+    backgroundColor: colors.primary,
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 20,
@@ -847,14 +924,14 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: '#FFF5F2',
+    backgroundColor: colors.backgroundSecondary,
     justifyContent: 'center',
     alignItems: 'center',
   },
   ingredientNumberText: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#FF6B35',
+    color: colors.primary,
   },
   ingredientName: {
     flex: 2,
@@ -875,11 +952,11 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#FF6B35',
+    backgroundColor: colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
     marginTop: 12,
-    shadowColor: '#FF6B35',
+    shadowColor: colors.primary,
     shadowOffset: {
       width: 0,
       height: 2,
@@ -902,7 +979,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#FFE5E0',
+    backgroundColor: colors.backgroundSecondary,
     justifyContent: 'center',
     alignItems: 'center',
     marginTop: 12,
@@ -910,13 +987,13 @@ const styles = StyleSheet.create({
   deleteButtonText: {
     fontSize: 24,
     fontWeight: '300',
-    color: '#E74C3C',
+    color: colors.error,
   },
   submitButton: {
     marginTop: 8,
     borderRadius: 16,
     overflow: 'hidden',
-    shadowColor: '#FF6B35',
+    shadowColor: colors.primary,
     shadowOffset: {
       width: 0,
       height: 6,

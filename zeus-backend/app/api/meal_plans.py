@@ -5,6 +5,7 @@ from app.schemas.user import UserResponse
 from app.utils.dependencies import get_current_active_user
 from app.database import get_database
 from app.services.ai_service import ai_service
+from app.services.nutrition_service import nutrition_service
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 import logging
@@ -332,4 +333,144 @@ async def regenerate_single_meal(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to regenerate meal: {str(e)}"
+        )
+
+
+@router.get("/{meal_plan_id}/macro-summary")
+async def get_meal_plan_macro_summary(
+    meal_plan_id: str,
+    current_user: UserResponse = Depends(get_current_active_user)
+) -> Dict[str, Any]:
+    """
+    Get nutrition macro summary for a meal plan.
+
+    Returns weekly totals, daily averages, and macro percentages.
+    Also includes per-day breakdowns and validation warnings.
+    """
+    try:
+        db = get_database()
+
+        # Get meal plan and verify ownership
+        mp_result = db.table("meal_plans")\
+            .select("*")\
+            .eq("id", meal_plan_id)\
+            .eq("user_id", current_user.id)\
+            .execute()
+
+        if not mp_result.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Meal plan not found"
+            )
+
+        meal_plan = mp_result.data[0]
+        meals = meal_plan.get("meals", {})
+
+        # Collect all recipe IDs
+        recipe_ids = []
+        for day_meals in meals.values():
+            if isinstance(day_meals, dict):
+                for recipe_id in day_meals.values():
+                    if recipe_id and isinstance(recipe_id, str):
+                        recipe_ids.append(recipe_id)
+
+        if not recipe_ids:
+            return {
+                "meal_plan_id": meal_plan_id,
+                "weekly_summary": nutrition_service.calculate_weekly_summary([]),
+                "daily_breakdown": {},
+                "validation_warnings": ["No recipes found in meal plan"]
+            }
+
+        # Fetch all recipes
+        recipes_result = db.table("recipes")\
+            .select("id, title, calories, protein_grams, carbs_grams, fat_grams")\
+            .in_("id", recipe_ids)\
+            .execute()
+
+        recipes_by_id = {r["id"]: r for r in recipes_result.data}
+
+        # Build list of all recipes for weekly summary
+        all_recipes = list(recipes_by_id.values())
+
+        # Calculate weekly summary
+        weekly_summary = nutrition_service.calculate_weekly_summary(all_recipes)
+
+        # Calculate per-day breakdown
+        daily_breakdown = {}
+        days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+
+        for day in days:
+            day_meals = meals.get(day, {})
+            day_recipes = []
+
+            for meal_type in ["breakfast", "lunch", "dinner"]:
+                recipe_id = day_meals.get(meal_type)
+                if recipe_id and recipe_id in recipes_by_id:
+                    day_recipes.append(recipes_by_id[recipe_id])
+
+            if day_recipes:
+                daily_breakdown[day] = nutrition_service.calculate_daily_summary(day_recipes)
+                daily_breakdown[day]["meal_count"] = len(day_recipes)
+
+        # Validate nutrition data for each recipe
+        validation_warnings = []
+        for recipe in all_recipes:
+            validation = nutrition_service.validate_nutrition(
+                recipe.get("calories"),
+                recipe.get("protein_grams"),
+                recipe.get("carbs_grams"),
+                recipe.get("fat_grams")
+            )
+            if validation.warnings:
+                for warning in validation.warnings:
+                    validation_warnings.append(f"{recipe.get('title', 'Unknown')}: {warning}")
+            if validation.errors:
+                for error in validation.errors:
+                    validation_warnings.append(f"{recipe.get('title', 'Unknown')}: {error}")
+
+        # Get user targets for comparison
+        user_result = db.table("users").select("profile_data").eq("id", current_user.id).execute()
+        profile_data = user_result.data[0].get("profile_data", {}) if user_result.data else {}
+        preferences = profile_data.get("preferences", {})
+
+        targets = {
+            "calorie_target": preferences.get("calorie_target"),
+            "protein_target_grams": preferences.get("protein_target_grams")
+        }
+
+        # Calculate target comparison if targets are set
+        target_comparison = None
+        if targets["calorie_target"]:
+            daily_avg = weekly_summary["daily_averages"]["calories"]
+            target_comparison = {
+                "calorie_target": targets["calorie_target"],
+                "calorie_daily_avg": daily_avg,
+                "calorie_difference": daily_avg - targets["calorie_target"],
+                "calorie_on_target": abs(daily_avg - targets["calorie_target"]) <= 200
+            }
+        if targets["protein_target_grams"]:
+            protein_avg = weekly_summary["daily_averages"]["protein_grams"]
+            if target_comparison is None:
+                target_comparison = {}
+            target_comparison["protein_target_grams"] = targets["protein_target_grams"]
+            target_comparison["protein_daily_avg"] = protein_avg
+            target_comparison["protein_difference"] = protein_avg - targets["protein_target_grams"]
+            target_comparison["protein_on_target"] = abs(protein_avg - targets["protein_target_grams"]) <= 20
+
+        return {
+            "meal_plan_id": meal_plan_id,
+            "weekly_summary": weekly_summary,
+            "daily_breakdown": daily_breakdown,
+            "target_comparison": target_comparison,
+            "validation_warnings": validation_warnings[:10]  # Limit to first 10 warnings
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get macro summary: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to calculate macro summary"
         )

@@ -11,12 +11,15 @@ import {
   ScrollView,
 } from 'react-native';
 import { useAuthStore } from '../../store/authStore';
+import { useThemeStore } from '../../store/themeStore';
 
 interface LoginScreenProps {
   navigation: any;
 }
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
+  const { colors } = useThemeStore();
+  const styles = createStyles(colors);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -109,114 +112,115 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-  },
-  scrollContainer: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    padding: 24,
-  },
-  header: {
-    alignItems: 'center',
-    marginBottom: 48,
-  },
-  title: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: '#FF6B35',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 18,
-    color: '#7F8C8D',
-    textAlign: 'center',
-  },
-  form: {
-    marginBottom: 32,
-  },
-  inputContainer: {
-    marginBottom: 24,
-  },
-  label: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#2C3E50',
-    marginBottom: 8,
-  },
-  input: {
-    height: 48,
-    borderWidth: 1,
-    borderColor: '#E1E8ED',
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    fontSize: 16,
-    color: '#2C3E50',
-    backgroundColor: '#F8F9FA',
-  },
-  passwordContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    position: 'relative',
-  },
-  passwordInput: {
-    flex: 1,
-    height: 48,
-    borderWidth: 1,
-    borderColor: '#E1E8ED',
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingRight: 48,
-    fontSize: 16,
-    color: '#2C3E50',
-    backgroundColor: '#F8F9FA',
-  },
-  eyeIcon: {
-    position: 'absolute',
-    right: 12,
-    padding: 8,
-  },
-  eyeIconText: {
-    fontSize: 20,
-  },
-  loginButton: {
-    backgroundColor: '#FF6B35',
-    height: 48,
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 16,
-  },
-  disabledButton: {
-    opacity: 0.7,
-  },
-  loginButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  forgotPassword: {
-    alignItems: 'center',
-    marginTop: 16,
-  },
-  forgotPasswordText: {
-    color: '#004E89',
-    fontSize: 14,
-  },
-  footer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  footerText: {
-    fontSize: 14,
-    color: '#7F8C8D',
-  },
-  signUpText: {
-    fontSize: 14,
-    color: '#FF6B35',
-    fontWeight: '600',
-  },
-});
+const createStyles = (colors: any) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    scrollContainer: {
+      flexGrow: 1,
+      justifyContent: 'center',
+      padding: 24,
+    },
+    header: {
+      alignItems: 'center',
+      marginBottom: 48,
+    },
+    title: {
+      fontSize: 48,
+      fontWeight: 'bold',
+      color: colors.primary,
+      marginBottom: 8,
+    },
+    subtitle: {
+      fontSize: 18,
+      color: colors.textMuted,
+      textAlign: 'center',
+    },
+    form: {
+      marginBottom: 32,
+    },
+    inputContainer: {
+      marginBottom: 24,
+    },
+    label: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: colors.text,
+      marginBottom: 8,
+    },
+    input: {
+      height: 48,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 8,
+      paddingHorizontal: 16,
+      fontSize: 16,
+      color: colors.text,
+      backgroundColor: colors.backgroundSecondary,
+    },
+    passwordContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      position: 'relative',
+    },
+    passwordInput: {
+      flex: 1,
+      height: 48,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 8,
+      paddingHorizontal: 16,
+      paddingRight: 48,
+      fontSize: 16,
+      color: colors.text,
+      backgroundColor: colors.backgroundSecondary,
+    },
+    eyeIcon: {
+      position: 'absolute',
+      right: 12,
+      padding: 8,
+    },
+    eyeIconText: {
+      fontSize: 20,
+    },
+    loginButton: {
+      backgroundColor: colors.primary,
+      height: 48,
+      borderRadius: 8,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginTop: 16,
+    },
+    disabledButton: {
+      opacity: 0.7,
+    },
+    loginButtonText: {
+      color: '#FFFFFF',
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    forgotPassword: {
+      alignItems: 'center',
+      marginTop: 16,
+    },
+    forgotPasswordText: {
+      color: colors.secondary,
+      fontSize: 14,
+    },
+    footer: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    footerText: {
+      fontSize: 14,
+      color: colors.textMuted,
+    },
+    signUpText: {
+      fontSize: 14,
+      color: colors.primary,
+      fontWeight: '600',
+    },
+  });

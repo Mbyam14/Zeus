@@ -4,7 +4,9 @@ import {
   PantryItemCreate,
   PantryItemUpdate,
   PantryFilter,
-  IngredientLibraryItem
+  IngredientLibraryItem,
+  ImageAnalysisRequest,
+  ImageAnalysisResponse
 } from '../types/pantry';
 
 class PantryService {
@@ -73,6 +75,19 @@ class PantryService {
   // Get expiring items
   async getExpiringItems(days: number = 7): Promise<PantryItem[]> {
     const response = await api.get<PantryItem[]>(`/api/pantry/expiring/alerts?days=${days}`);
+    return response.data;
+  }
+
+  // Analyze pantry image using AI vision
+  async analyzeImage(imageBase64: string, imageType: string = 'image/jpeg'): Promise<ImageAnalysisResponse> {
+    const request: ImageAnalysisRequest = {
+      image_base64: imageBase64,
+      image_type: imageType
+    };
+
+    const response = await api.post<ImageAnalysisResponse>('/api/pantry/analyze-image', request, {
+      timeout: 60000 // 60 second timeout for image analysis
+    });
     return response.data;
   }
 }

@@ -9,6 +9,7 @@ import {
   Alert,
 } from 'react-native';
 import { useAuthStore } from '../../store/authStore';
+import { useThemeStore } from '../../store/themeStore';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { ProfileStackParamList } from '../../navigation/ProfileNavigator';
@@ -17,6 +18,7 @@ type ProfileScreenNavigationProp = StackNavigationProp<ProfileStackParamList, 'P
 
 export const ProfileScreen: React.FC = () => {
   const { user, logout } = useAuthStore();
+  const { colors } = useThemeStore();
   const navigation = useNavigation<ProfileScreenNavigationProp>();
 
   const handleLogout = () => {
@@ -38,6 +40,9 @@ export const ProfileScreen: React.FC = () => {
 
   const handleMenuItemPress = (label: string) => {
     switch (label) {
+      case 'Edit Profile':
+        navigation.navigate('EditProfile');
+        break;
       case 'My Recipes':
         navigation.navigate('MyRecipes');
         break;
@@ -53,10 +58,13 @@ export const ProfileScreen: React.FC = () => {
   };
 
   const menuItems = [
+    { icon: '✏️', label: 'Edit Profile', badge: null },
     { icon: '📖', label: 'My Recipes', badge: null },
     { icon: '🎯', label: 'Meal Preferences', badge: null },
     { icon: '⚙️', label: 'Settings', badge: null },
   ];
+
+  const styles = createStyles(colors);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -118,168 +126,169 @@ export const ProfileScreen: React.FC = () => {
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F8F9FA',
-  },
-  header: {
-    paddingHorizontal: 24,
-    paddingVertical: 16,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E1E8ED',
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#2C3E50',
-  },
-  profileSection: {
-    backgroundColor: '#FFFFFF',
-    padding: 24,
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  avatarContainer: {
-    marginBottom: 16,
-  },
-  avatar: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: '#FF6B35',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 4,
-    borderColor: '#FFFFFF',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
+const createStyles = (colors: any) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
     },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  avatarText: {
-    fontSize: 40,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-  username: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#2C3E50',
-    marginBottom: 4,
-  },
-  email: {
-    fontSize: 16,
-    color: '#7F8C8D',
-    marginBottom: 24,
-  },
-  statsContainer: {
-    flexDirection: 'row',
-    width: '100%',
-    justifyContent: 'space-around',
-    marginBottom: 24,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#E1E8ED',
-  },
-  statItem: {
-    alignItems: 'center',
-  },
-  statValue: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#FF6B35',
-    marginBottom: 4,
-  },
-  statLabel: {
-    fontSize: 14,
-    color: '#7F8C8D',
-  },
-  editButton: {
-    backgroundColor: '#004E89',
-    paddingHorizontal: 32,
-    paddingVertical: 12,
-    borderRadius: 24,
-  },
-  editButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  menuSection: {
-    backgroundColor: '#FFFFFF',
-    marginBottom: 16,
-  },
-  menuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 16,
-    paddingHorizontal: 24,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E1E8ED',
-  },
-  menuItemLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  menuItemIcon: {
-    fontSize: 24,
-    marginRight: 16,
-  },
-  menuItemLabel: {
-    fontSize: 16,
-    color: '#2C3E50',
-    fontWeight: '500',
-  },
-  menuItemRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  badge: {
-    backgroundColor: '#FF6B35',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-    marginRight: 8,
-  },
-  badgeText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  menuItemArrow: {
-    fontSize: 28,
-    color: '#7F8C8D',
-    fontWeight: '300',
-  },
-  logoutSection: {
-    padding: 24,
-  },
-  logoutButton: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 2,
-    borderColor: '#E74C3C',
-    height: 48,
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  logoutButtonText: {
-    color: '#E74C3C',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  versionText: {
-    textAlign: 'center',
-    color: '#7F8C8D',
-    fontSize: 14,
-    marginBottom: 32,
-  },
-});
+    header: {
+      paddingHorizontal: 24,
+      paddingVertical: 16,
+      backgroundColor: colors.backgroundSecondary,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    headerTitle: {
+      fontSize: 28,
+      fontWeight: 'bold',
+      color: colors.text,
+    },
+    profileSection: {
+      backgroundColor: colors.backgroundSecondary,
+      padding: 24,
+      alignItems: 'center',
+      marginBottom: 16,
+    },
+    avatarContainer: {
+      marginBottom: 16,
+    },
+    avatar: {
+      width: 100,
+      height: 100,
+      borderRadius: 50,
+      backgroundColor: colors.primary,
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderWidth: 4,
+      borderColor: colors.backgroundSecondary,
+      shadowColor: colors.shadow,
+      shadowOffset: {
+        width: 0,
+        height: 4,
+      },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 4,
+    },
+    avatarText: {
+      fontSize: 40,
+      fontWeight: 'bold',
+      color: '#FFFFFF',
+    },
+    username: {
+      fontSize: 24,
+      fontWeight: 'bold',
+      color: colors.text,
+      marginBottom: 4,
+    },
+    email: {
+      fontSize: 16,
+      color: colors.textMuted,
+      marginBottom: 24,
+    },
+    statsContainer: {
+      flexDirection: 'row',
+      width: '100%',
+      justifyContent: 'space-around',
+      marginBottom: 24,
+      paddingTop: 16,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+    },
+    statItem: {
+      alignItems: 'center',
+    },
+    statValue: {
+      fontSize: 24,
+      fontWeight: 'bold',
+      color: colors.primary,
+      marginBottom: 4,
+    },
+    statLabel: {
+      fontSize: 14,
+      color: colors.textMuted,
+    },
+    editButton: {
+      backgroundColor: colors.secondary,
+      paddingHorizontal: 32,
+      paddingVertical: 12,
+      borderRadius: 24,
+    },
+    editButtonText: {
+      color: '#FFFFFF',
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    menuSection: {
+      backgroundColor: colors.backgroundSecondary,
+      marginBottom: 16,
+    },
+    menuItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: 16,
+      paddingHorizontal: 24,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    menuItemLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flex: 1,
+    },
+    menuItemIcon: {
+      fontSize: 24,
+      marginRight: 16,
+    },
+    menuItemLabel: {
+      fontSize: 16,
+      color: colors.text,
+      fontWeight: '500',
+    },
+    menuItemRight: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    badge: {
+      backgroundColor: colors.primary,
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderRadius: 10,
+      marginRight: 8,
+    },
+    badgeText: {
+      color: '#FFFFFF',
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    menuItemArrow: {
+      fontSize: 28,
+      color: colors.textMuted,
+      fontWeight: '300',
+    },
+    logoutSection: {
+      padding: 24,
+    },
+    logoutButton: {
+      backgroundColor: colors.backgroundSecondary,
+      borderWidth: 2,
+      borderColor: colors.error,
+      height: 48,
+      borderRadius: 8,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    logoutButtonText: {
+      color: colors.error,
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    versionText: {
+      textAlign: 'center',
+      color: colors.textMuted,
+      fontSize: 14,
+      marginBottom: 32,
+    },
+  });

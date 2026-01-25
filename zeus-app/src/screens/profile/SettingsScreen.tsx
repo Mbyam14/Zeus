@@ -11,65 +11,46 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { ProfileStackParamList } from '../../navigation/ProfileNavigator';
+import { useThemeStore } from '../../store/themeStore';
 
 type SettingsScreenNavigationProp = StackNavigationProp<ProfileStackParamList, 'Settings'>;
 
 export const SettingsScreen: React.FC = () => {
   const navigation = useNavigation<SettingsScreenNavigationProp>();
+  const { mode, colors } = useThemeStore();
 
   const handleComingSoon = (feature: string) => {
     Alert.alert('Coming Soon', `${feature} settings will be available in a future update.`);
   };
 
+  const getThemeDescription = () => {
+    switch (mode) {
+      case 'light':
+        return 'Light mode';
+      case 'dark':
+        return 'Dark mode';
+      case 'system':
+        return 'System default';
+      default:
+        return 'Light mode';
+    }
+  };
+
   const settingsSections = [
-    {
-      title: 'Personalization',
-      items: [
-        {
-          icon: '🌐',
-          label: 'App Language',
-          description: 'English',
-          onPress: () => handleComingSoon('Language'),
-        },
-      ],
-    },
     {
       title: 'Appearance',
       items: [
         {
           icon: '🌙',
           label: 'Theme',
-          description: 'Light mode',
-          onPress: () => handleComingSoon('Theme'),
+          description: getThemeDescription(),
+          onPress: () => navigation.navigate('Theme'),
         },
         {
-          icon: '🎨',
-          label: 'Color Scheme',
-          description: 'Default',
-          onPress: () => handleComingSoon('Color Scheme'),
-        },
-      ],
-    },
-    {
-      title: 'Accessibility',
-      items: [
-        {
-          icon: '📱',
-          label: 'Text Size',
-          description: 'Medium',
-          onPress: () => handleComingSoon('Text Size'),
-        },
-        {
-          icon: '♿',
-          label: 'Screen Reader',
-          description: 'Off',
-          onPress: () => handleComingSoon('Screen Reader'),
-        },
-        {
-          icon: '🔊',
-          label: 'Audio Feedback',
-          description: 'Off',
-          onPress: () => handleComingSoon('Audio Feedback'),
+          icon: '🌐',
+          label: 'App Language',
+          description: 'English',
+          onPress: () => handleComingSoon('Language'),
         },
       ],
     },
@@ -80,19 +61,19 @@ export const SettingsScreen: React.FC = () => {
           icon: '🔔',
           label: 'Notifications',
           description: 'Manage notification preferences',
-          onPress: () => handleComingSoon('Notifications'),
+          onPress: () => navigation.navigate('Notifications'),
         },
         {
           icon: '🔒',
           label: 'Privacy & Security',
           description: 'Manage your data and privacy',
-          onPress: () => handleComingSoon('Privacy'),
+          onPress: () => navigation.navigate('PrivacySecurity'),
         },
         {
           icon: '📊',
           label: 'Data & Storage',
           description: 'Manage app data and cache',
-          onPress: () => handleComingSoon('Data & Storage'),
+          onPress: () => navigation.navigate('DataStorage'),
         },
       ],
     },
@@ -103,23 +84,25 @@ export const SettingsScreen: React.FC = () => {
           icon: '❓',
           label: 'Help & Support',
           description: 'FAQs and contact support',
-          onPress: () => handleComingSoon('Help & Support'),
+          onPress: () => navigation.navigate('HelpSupport'),
         },
         {
           icon: '📄',
           label: 'Terms of Service',
           description: 'Read our terms and conditions',
-          onPress: () => handleComingSoon('Terms'),
+          onPress: () => navigation.navigate('Terms'),
         },
         {
           icon: '🔐',
           label: 'Privacy Policy',
           description: 'How we protect your data',
-          onPress: () => handleComingSoon('Privacy Policy'),
+          onPress: () => navigation.navigate('PrivacyPolicy'),
         },
       ],
     },
   ];
+
+  const styles = createStyles(colors);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -170,107 +153,108 @@ export const SettingsScreen: React.FC = () => {
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F8F9FA',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E1E8ED',
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  backButtonText: {
-    fontSize: 28,
-    color: '#2C3E50',
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#2C3E50',
-  },
-  scrollView: {
-    flex: 1,
-  },
-  section: {
-    marginTop: 24,
-  },
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#7F8C8D',
-    marginBottom: 8,
-    marginLeft: 24,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  sectionContent: {
-    backgroundColor: '#FFFFFF',
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: '#E1E8ED',
-  },
-  settingItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E1E8ED',
-  },
-  lastSettingItem: {
-    borderBottomWidth: 0,
-  },
-  settingItemLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  settingIcon: {
-    fontSize: 24,
-    marginRight: 16,
-  },
-  settingTextContainer: {
-    flex: 1,
-  },
-  settingLabel: {
-    fontSize: 16,
-    color: '#2C3E50',
-    fontWeight: '500',
-    marginBottom: 2,
-  },
-  settingDescription: {
-    fontSize: 14,
-    color: '#7F8C8D',
-  },
-  settingArrow: {
-    fontSize: 28,
-    color: '#7F8C8D',
-    fontWeight: '300',
-  },
-  versionSection: {
-    alignItems: 'center',
-    paddingVertical: 32,
-  },
-  versionText: {
-    fontSize: 14,
-    color: '#7F8C8D',
-    marginBottom: 4,
-  },
-  copyrightText: {
-    fontSize: 12,
-    color: '#BDC3C7',
-  },
-});
+const createStyles = (colors: any) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingVertical: 16,
+      backgroundColor: colors.backgroundSecondary,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    backButton: {
+      width: 40,
+      height: 40,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    backButtonText: {
+      fontSize: 28,
+      color: colors.text,
+    },
+    headerTitle: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      color: colors.text,
+    },
+    scrollView: {
+      flex: 1,
+    },
+    section: {
+      marginTop: 24,
+    },
+    sectionTitle: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.textMuted,
+      marginBottom: 8,
+      marginLeft: 24,
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+    },
+    sectionContent: {
+      backgroundColor: colors.backgroundSecondary,
+      borderTopWidth: 1,
+      borderBottomWidth: 1,
+      borderColor: colors.border,
+    },
+    settingItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: 16,
+      paddingHorizontal: 24,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    lastSettingItem: {
+      borderBottomWidth: 0,
+    },
+    settingItemLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flex: 1,
+    },
+    settingIcon: {
+      fontSize: 24,
+      marginRight: 16,
+    },
+    settingTextContainer: {
+      flex: 1,
+    },
+    settingLabel: {
+      fontSize: 16,
+      color: colors.text,
+      fontWeight: '500',
+      marginBottom: 2,
+    },
+    settingDescription: {
+      fontSize: 14,
+      color: colors.textMuted,
+    },
+    settingArrow: {
+      fontSize: 28,
+      color: colors.textMuted,
+      fontWeight: '300',
+    },
+    versionSection: {
+      alignItems: 'center',
+      paddingVertical: 32,
+    },
+    versionText: {
+      fontSize: 14,
+      color: colors.textMuted,
+      marginBottom: 4,
+    },
+    copyrightText: {
+      fontSize: 12,
+      color: colors.textMuted,
+    },
+  });

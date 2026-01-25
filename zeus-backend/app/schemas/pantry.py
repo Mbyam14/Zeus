@@ -70,3 +70,29 @@ class IngredientLibraryItem(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class DetectedPantryItem(BaseModel):
+    """Item detected from image analysis"""
+    item_name: str
+    quantity: Optional[float] = None
+    unit: Optional[str] = None
+    category: PantryCategory = PantryCategory.OTHER
+    confidence: float = Field(..., ge=0, le=1)
+    already_in_pantry: bool = False
+    existing_pantry_id: Optional[str] = None
+
+
+class ImageAnalysisResponse(BaseModel):
+    """Response from pantry image analysis"""
+    detected_items: List[DetectedPantryItem]
+    total_detected: int
+    new_items_count: int
+    existing_items_count: int
+    analysis_notes: Optional[str] = None
+
+
+class ImageAnalysisRequest(BaseModel):
+    """Request for pantry image analysis"""
+    image_base64: str = Field(..., description="Base64 encoded image data")
+    image_type: str = Field("image/jpeg", description="MIME type of the image")

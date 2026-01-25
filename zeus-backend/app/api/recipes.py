@@ -86,6 +86,20 @@ async def get_my_liked_recipes(
     return await recipe_service.get_liked_recipes(current_user.id, limit, offset)
 
 
+@router.get("/my-recipes", response_model=List[RecipeResponse])
+async def get_my_recipes(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    current_user: UserResponse = Depends(get_current_active_user)
+):
+    """
+    Get recipes created by the current user.
+
+    Requires authentication.
+    """
+    return await recipe_service.get_user_recipes(current_user.id, limit, offset)
+
+
 @router.get("/{recipe_id}", response_model=RecipeResponse)
 async def get_recipe(
     recipe_id: str,

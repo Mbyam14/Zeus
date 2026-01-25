@@ -14,6 +14,7 @@ import {
 import { PanGestureHandler, State, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Recipe } from '../../types/recipe';
 import { recipeService } from '../../services/recipeService';
+import { useThemeStore } from '../../store/themeStore';
 
 // Mock data for now - we'll connect to API later
 const mockRecipes: Recipe[] = [
@@ -112,11 +113,14 @@ const mockRecipes: Recipe[] = [
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
 export const FeedScreen: React.FC = () => {
+  const { colors } = useThemeStore();
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [isInteracting, setIsInteracting] = useState(false);
+
+  const styles = createStyles(colors);
 
   // Animation values
   const translateX = useRef(new Animated.Value(0)).current;
@@ -450,223 +454,224 @@ const getDifficultyColor = (difficulty: string) => {
   }
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F8F9FA',
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 16,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E1E8ED',
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#FF6B35',
-  },
-  filterButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#F8F9FA',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  filterButtonText: {
-    fontSize: 18,
-  },
-  cardContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 16,
-  },
-  card: {
-    width: screenWidth - 32,
-    height: screenHeight * 0.58,
-    borderRadius: 16,
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 8,
+const createStyles = (colors: any) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
     },
-    shadowOpacity: 0.1,
-    shadowRadius: 16,
-    elevation: 8,
-  },
-  imageContainer: {
-    flex: 1,
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  recipeImage: {
-    width: '100%',
-    height: '100%',
-  },
-  imageOverlay: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    padding: 24,
-  },
-  recipeInfo: {
-    flex: 1,
-  },
-  recipeTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 4,
-  },
-  recipeSubtitle: {
-    fontSize: 18,
-    color: '#F8F9FA',
-    marginBottom: 16,
-  },
-  metaRow: {
-    flexDirection: 'row',
-    marginBottom: 12,
-  },
-  metaItem: {
-    marginRight: 16,
-  },
-  metaLabel: {
-    fontSize: 14,
-    color: '#F8F9FA',
-  },
-  difficultyContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  difficultyBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '600',
-    marginRight: 8,
-  },
-  aiBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-    backgroundColor: '#004E89',
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  description: {
-    fontSize: 16,
-    color: '#F8F9FA',
-    lineHeight: 22,
-  },
-  actionButtons: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 24,
-    paddingHorizontal: 32,
-  },
-  actionButton: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginHorizontal: 16,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
+    header: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: 24,
+      paddingVertical: 16,
+      backgroundColor: colors.backgroundSecondary,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
     },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  skipButton: {
-    backgroundColor: '#E74C3C',
-  },
-  saveButton: {
-    backgroundColor: '#F7B32B',
-  },
-  likeButton: {
-    backgroundColor: '#2ECC71',
-  },
-  actionButtonText: {
-    fontSize: 24,
-  },
-  progressContainer: {
-    alignItems: 'center',
-    paddingBottom: 16,
-  },
-  progressText: {
-    fontSize: 14,
-    color: '#7F8C8D',
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 32,
-  },
-  emptyTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#2C3E50',
-    marginBottom: 8,
-  },
-  emptySubtitle: {
-    fontSize: 16,
-    color: '#7F8C8D',
-    textAlign: 'center',
-  },
-  overlayLabel: {
-    position: 'absolute',
-    paddingVertical: 16,
-    paddingHorizontal: 28,
-    borderRadius: 16,
-    borderWidth: 6,
-    zIndex: 100,
-  },
-  likeLabel: {
-    top: 60,
-    right: 30,
-    borderColor: '#2ECC71',
-    backgroundColor: 'rgba(46, 204, 113, 0.5)',
-    transform: [{ rotate: '20deg' }],
-  },
-  nopeLabel: {
-    top: 60,
-    left: 30,
-    borderColor: '#E74C3C',
-    backgroundColor: 'rgba(231, 76, 60, 0.5)',
-    transform: [{ rotate: '-20deg' }],
-  },
-  saveLabel: {
-    top: 60,
-    alignSelf: 'center',
-    borderColor: '#F7B32B',
-    backgroundColor: 'rgba(247, 179, 43, 0.5)',
-  },
-  overlayText: {
-    fontSize: 48,
-    fontWeight: '900',
-    color: '#FFFFFF',
-    letterSpacing: 8,
-    textShadowColor: 'rgba(0, 0, 0, 0.9)',
-    textShadowOffset: { width: 3, height: 3 },
-    textShadowRadius: 6,
-  },
-});
+    headerTitle: {
+      fontSize: 28,
+      fontWeight: 'bold',
+      color: colors.primary,
+    },
+    filterButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: colors.background,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    filterButtonText: {
+      fontSize: 18,
+    },
+    cardContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingHorizontal: 16,
+      paddingTop: 16,
+    },
+    card: {
+      width: screenWidth - 32,
+      height: screenHeight * 0.58,
+      borderRadius: 16,
+      backgroundColor: colors.card,
+      shadowColor: colors.shadow,
+      shadowOffset: {
+        width: 0,
+        height: 8,
+      },
+      shadowOpacity: 0.1,
+      shadowRadius: 16,
+      elevation: 8,
+    },
+    imageContainer: {
+      flex: 1,
+      borderRadius: 16,
+      overflow: 'hidden',
+    },
+    recipeImage: {
+      width: '100%',
+      height: '100%',
+    },
+    imageOverlay: {
+      position: 'absolute',
+      bottom: 0,
+      left: 0,
+      right: 0,
+      backgroundColor: 'rgba(0,0,0,0.6)',
+      padding: 24,
+    },
+    recipeInfo: {
+      flex: 1,
+    },
+    recipeTitle: {
+      fontSize: 28,
+      fontWeight: 'bold',
+      color: '#FFFFFF',
+      marginBottom: 4,
+    },
+    recipeSubtitle: {
+      fontSize: 18,
+      color: '#F8F9FA',
+      marginBottom: 16,
+    },
+    metaRow: {
+      flexDirection: 'row',
+      marginBottom: 12,
+    },
+    metaItem: {
+      marginRight: 16,
+    },
+    metaLabel: {
+      fontSize: 14,
+      color: '#F8F9FA',
+    },
+    difficultyContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 12,
+    },
+    difficultyBadge: {
+      paddingHorizontal: 12,
+      paddingVertical: 4,
+      borderRadius: 12,
+      color: '#FFFFFF',
+      fontSize: 12,
+      fontWeight: '600',
+      marginRight: 8,
+    },
+    aiBadge: {
+      paddingHorizontal: 12,
+      paddingVertical: 4,
+      borderRadius: 12,
+      backgroundColor: colors.secondary,
+      color: '#FFFFFF',
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    description: {
+      fontSize: 16,
+      color: '#F8F9FA',
+      lineHeight: 22,
+    },
+    actionButtons: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingVertical: 24,
+      paddingHorizontal: 32,
+    },
+    actionButton: {
+      width: 64,
+      height: 64,
+      borderRadius: 32,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginHorizontal: 16,
+      shadowColor: colors.shadow,
+      shadowOffset: {
+        width: 0,
+        height: 4,
+      },
+      shadowOpacity: 0.2,
+      shadowRadius: 8,
+      elevation: 4,
+    },
+    skipButton: {
+      backgroundColor: colors.error,
+    },
+    saveButton: {
+      backgroundColor: colors.warning,
+    },
+    likeButton: {
+      backgroundColor: colors.success,
+    },
+    actionButtonText: {
+      fontSize: 24,
+    },
+    progressContainer: {
+      alignItems: 'center',
+      paddingBottom: 16,
+    },
+    progressText: {
+      fontSize: 14,
+      color: colors.textMuted,
+    },
+    emptyContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 32,
+    },
+    emptyTitle: {
+      fontSize: 24,
+      fontWeight: 'bold',
+      color: colors.text,
+      marginBottom: 8,
+    },
+    emptySubtitle: {
+      fontSize: 16,
+      color: colors.textMuted,
+      textAlign: 'center',
+    },
+    overlayLabel: {
+      position: 'absolute',
+      paddingVertical: 16,
+      paddingHorizontal: 28,
+      borderRadius: 16,
+      borderWidth: 6,
+      zIndex: 100,
+    },
+    likeLabel: {
+      top: 60,
+      right: 30,
+      borderColor: '#2ECC71',
+      backgroundColor: 'rgba(46, 204, 113, 0.5)',
+      transform: [{ rotate: '20deg' }],
+    },
+    nopeLabel: {
+      top: 60,
+      left: 30,
+      borderColor: '#E74C3C',
+      backgroundColor: 'rgba(231, 76, 60, 0.5)',
+      transform: [{ rotate: '-20deg' }],
+    },
+    saveLabel: {
+      top: 60,
+      alignSelf: 'center',
+      borderColor: '#F7B32B',
+      backgroundColor: 'rgba(247, 179, 43, 0.5)',
+    },
+    overlayText: {
+      fontSize: 48,
+      fontWeight: '900',
+      color: '#FFFFFF',
+      letterSpacing: 8,
+      textShadowColor: 'rgba(0, 0, 0, 0.9)',
+      textShadowOffset: { width: 3, height: 3 },
+      textShadowRadius: 6,
+    },
+  });

@@ -7,13 +7,17 @@ import { MealPlanScreen } from '../screens/mealplan/MealPlanScreen';
 import { CreateScreen } from '../screens/create/CreateScreen';
 import { AIScreen } from '../screens/create/AIScreen';
 import { PantryScreen } from '../screens/pantry/PantryScreen';
+import { ImageReviewScreen } from '../screens/pantry/ImageReviewScreen';
 import { RecipeDetailScreen } from '../screens/recipe/RecipeDetailScreen';
-import { View, Text, StyleSheet } from 'react-native';
+import { GroceryListScreen } from '../screens/grocerylist/GroceryListScreen';
+import { View, Text, StyleSheet, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { DetectedPantryItem } from '../types/pantry';
 
 export type CreateStackParamList = {
   CreateMain: undefined;
   AIRecipe: undefined;
+  RecipeDetail: { recipe: any };
 };
 
 export type MealPlanStackParamList = {
@@ -21,23 +25,43 @@ export type MealPlanStackParamList = {
   RecipeDetail: { recipe: any };
 };
 
+export type PantryStackParamList = {
+  PantryMain: undefined;
+  ImageReview: {
+    detectedItems: DetectedPantryItem[];
+    imageUri: string;
+    analysisNotes?: string;
+  };
+};
+
 export type MainTabParamList = {
   Pantry: undefined;
   MealPlan: undefined;
   Create: undefined;
-  Feed: undefined;
+  GroceryList: undefined;
   Profile: undefined;
 };
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
 const CreateStack = createStackNavigator<CreateStackParamList>();
 const MealPlanStack = createStackNavigator<MealPlanStackParamList>();
+const PantryStack = createStackNavigator<PantryStackParamList>();
+
+const PantryStackNavigator = () => {
+  return (
+    <PantryStack.Navigator screenOptions={{ headerShown: false }}>
+      <PantryStack.Screen name="PantryMain" component={PantryScreen} />
+      <PantryStack.Screen name="ImageReview" component={ImageReviewScreen} />
+    </PantryStack.Navigator>
+  );
+};
 
 const CreateStackNavigator = () => {
   return (
     <CreateStack.Navigator screenOptions={{ headerShown: false }}>
       <CreateStack.Screen name="CreateMain" component={CreateScreen} />
       <CreateStack.Screen name="AIRecipe" component={AIScreen} />
+      <CreateStack.Screen name="RecipeDetail" component={RecipeDetailScreen} />
     </CreateStack.Navigator>
   );
 };
@@ -79,7 +103,7 @@ export const MainTabNavigator: React.FC = () => {
     >
       <Tab.Screen
         name="Pantry"
-        component={PantryScreen}
+        component={PantryStackNavigator}
         options={{
           tabBarIcon: ({ color }) => (
             <Text style={[styles.tabIcon, { color }]}>🥫</Text>
@@ -109,11 +133,12 @@ export const MainTabNavigator: React.FC = () => {
         }}
       />
       <Tab.Screen
-        name="Feed"
-        component={FeedScreen}
+        name="GroceryList"
+        component={GroceryListScreen}
         options={{
+          tabBarLabel: 'Grocery',
           tabBarIcon: ({ color }) => (
-            <Text style={[styles.tabIcon, { color }]}>🏠</Text>
+            <Text style={[styles.tabIcon, { color }]}>🛒</Text>
           ),
         }}
       />

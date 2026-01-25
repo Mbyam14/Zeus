@@ -4,7 +4,8 @@ import {
   Recipe,
   MealPlanGenerateResponse,
   DayOfWeek,
-  MealType
+  MealType,
+  MacroSummaryResponse
 } from '../types/mealplan';
 
 export const mealPlanService = {
@@ -66,11 +67,64 @@ export const mealPlanService = {
   },
 
   /**
-   * Get multiple recipes by IDs (batch fetch)
+   * Get multiple recipes by IDs (batch fetch with resilient error handling)
+   * Uses Promise.allSettled to handle partial failures gracefully
    */
   async getRecipes(recipeIds: string[]): Promise<Recipe[]> {
-    const promises = recipeIds.map(id => this.getRecipe(id));
-    return Promise.all(promises);
+    if (!recipeIds || recipeIds.length === 0) {
+      return [];
+    }
+
+    // Filter out any invalid IDs
+    const validIds = recipeIds.filter(id => typeof id === 'string' && id.trim().length > 0);
+
+    if (validIds.length === 0) {
+      return [];
+    }
+
+    const promises = validIds.map(id => this.getRecipe(id));
+    const results = await Promise.allSettled(promises);
+
+    const recipes: Recipe[] = [];
+    const failures: string[] = [];
+
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') {
+        recipes.push(result.value);
+      } else {
+        failures.push(validIds[index]);
+        console.warn(`Failed to load recipe ${validIds[index]}:`, result.reason);
+      }
+    });
+
+    // Retry failed recipes once
+    if (failures.length > 0 && failures.length < validIds.length) {
+      console.log(`Retrying ${failures.length} failed recipe(s)...`);
+
+      const retryPromises = failures.map(id => this.getRecipe(id));
+      const retryResults = await Promise.allSettled(retryPromises);
+
+      retryResults.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          recipes.push(result.value);
+          console.log(`Successfully loaded recipe ${failures[index]} on retry`);
+        } else {
+          console.error(`Failed to load recipe ${failures[index]} after retry:`, result.reason);
+        }
+      });
+    }
+
+    return recipes;
+  },
+
+  /**
+   * Get macro nutrition summary for a meal plan
+   */
+  async getMacroSummary(mealPlanId: string): Promise<MacroSummaryResponse> {
+    const response = await api.get<MacroSummaryResponse>(
+      `/api/meal-plans/${mealPlanId}/macro-summary`
+    );
+    return response.data;
   }
 };
 

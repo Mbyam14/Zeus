@@ -14,8 +14,11 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { PantryItem, PantryCategory, PantryItemCreate, IngredientLibraryItem } from '../../types/pantry';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import * as ImagePicker from 'expo-image-picker';
+import { PantryItem, PantryCategory, PantryItemCreate, IngredientLibraryItem, DetectedPantryItem } from '../../types/pantry';
 import { pantryService } from '../../services/pantryService';
+import { useThemeStore } from '../../store/themeStore';
 
 const CATEGORIES: PantryCategory[] = [
   'Produce', 'Dairy', 'Protein', 'Grains', 'Spices', 'Condiments', 'Beverages', 'Frozen', 'Pantry', 'Other'
@@ -41,6 +44,9 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
   const [showAddModal, setShowAddModal] = useState(false);
 
   const [editingItem, setEditingItem] = useState<PantryItem | null>(null);
+
+  const { colors } = useThemeStore();
+  const styles = createStyles(colors);
   const [newItem, setNewItem] = useState<PantryItemCreate>({
     item_name: '',
     quantity: undefined,
@@ -55,7 +61,8 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
   const [showUnitPicker, setShowUnitPicker] = useState(false);
   const [customUnit, setCustomUnit] = useState('');
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [tempDate, setTempDate] = useState(new Date());
+  const [analyzingImage, setAnalyzingImage] = useState(false);
 
   useEffect(() => {
     loadPantryItems();
@@ -64,14 +71,16 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
   const loadPantryItems = async () => {
     try {
       setLoading(true);
+      console.log('🔄 Loading pantry items...');
       const items = await pantryService.getPantryItems({
         category: selectedCategory || undefined,
         search: searchQuery || undefined
       });
+      console.log(`✅ Loaded ${items.length} pantry items`);
       setPantryItems(items);
     } catch (error) {
       Alert.alert('Error', 'Failed to load pantry items');
-      console.error('Load pantry items error:', error);
+      console.error('❌ Load pantry items error:', error);
     } finally {
       setLoading(false);
     }
@@ -111,7 +120,20 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
 
     try {
       if (editingItem) {
-        await pantryService.updatePantryItem(editingItem.id, newItem);
+        console.log('📝 Updating pantry item:', editingItem.id, 'expires_at:', newItem.expires_at);
+
+        // Update on backend
+        const updatedItem = await pantryService.updatePantryItem(editingItem.id, newItem);
+        console.log('✅ Backend returned:', JSON.stringify(updatedItem, null, 2));
+
+        // Optimistically update local state immediately with the backend response
+        setPantryItems(prevItems =>
+          prevItems.map(item =>
+            item.id === editingItem.id ? updatedItem : item
+          )
+        );
+
+        console.log('🔄 Updated local state with backend response');
         Alert.alert('Success', 'Pantry item updated!');
       } else {
         await pantryService.createPantryItem(newItem);
@@ -120,7 +142,9 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
 
       setShowAddModal(false);
       resetForm();
-      loadPantryItems();
+
+      // Force reload pantry items from backend to ensure sync
+      await loadPantryItems();
     } catch (error) {
       Alert.alert('Error', 'Failed to save pantry item');
       console.error('Save pantry item error:', error);
@@ -150,6 +174,13 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
   };
 
   const handleEditItem = (item: PantryItem) => {
+    console.log('📝 Editing pantry item:', {
+      id: item.id,
+      name: item.item_name,
+      expires_at: item.expires_at,
+      expires_at_type: typeof item.expires_at
+    });
+
     setEditingItem(item);
     setNewItem({
       item_name: item.item_name,
@@ -174,12 +205,30 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
     setCustomUnit('');
   };
 
-  const handleDateSelect = (date: Date) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const formatted = `${year}-${month}-${day}`;
-    setNewItem(prev => ({ ...prev, expires_at: formatted }));
+  const handleDateChange = (event: any, selectedDate?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowDatePicker(false);
+    }
+
+    if (event.type === 'set' && selectedDate) {
+      // Format as YYYY-MM-DD
+      const year = selectedDate.getFullYear();
+      const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+      const day = String(selectedDate.getDate()).padStart(2, '0');
+      const formatted = `${year}-${month}-${day}`;
+
+      console.log('📅 Selected date:', { year, month, day, formatted });
+      setNewItem(prev => ({ ...prev, expires_at: formatted }));
+
+      if (Platform.OS === 'ios') {
+        setTempDate(selectedDate);
+      }
+    } else if (event.type === 'dismissed') {
+      setShowDatePicker(false);
+    }
+  };
+
+  const confirmIOSDate = () => {
     setShowDatePicker(false);
   };
 
@@ -187,15 +236,107 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
     if (newItem.expires_at) {
       const parts = newItem.expires_at.split('-');
       if (parts.length === 3) {
-        const date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-        setSelectedDate(date);
+        const year = parseInt(parts[0]);
+        const month = parseInt(parts[1]) - 1;
+        const day = parseInt(parts[2]);
+        setTempDate(new Date(year, month, day));
       }
+    } else {
+      setTempDate(new Date());
     }
     setShowDatePicker(true);
   };
 
   const handlePhotoUpload = () => {
-    Alert.alert('Photo Upload', 'Coming soon - S3 integration pending', [{ text: 'OK' }]);
+    Alert.alert(
+      'Scan Pantry Items',
+      'Take a photo of your fridge, pantry, or cabinet to automatically detect items.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Take Photo',
+          onPress: () => launchCamera()
+        },
+        {
+          text: 'Choose from Gallery',
+          onPress: () => launchGallery()
+        }
+      ]
+    );
+  };
+
+  const launchCamera = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission Denied', 'Camera permission is required to take photos.');
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: 'images',
+      quality: 0.7,
+      base64: true,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      await processImage(result.assets[0]);
+    }
+  };
+
+  const launchGallery = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission Denied', 'Gallery permission is required to select photos.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: 'images',
+      quality: 0.7,
+      base64: true,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      await processImage(result.assets[0]);
+    }
+  };
+
+  const processImage = async (asset: ImagePicker.ImagePickerAsset) => {
+    if (!asset.base64) {
+      Alert.alert('Error', 'Failed to process image. Please try again.');
+      return;
+    }
+
+    setAnalyzingImage(true);
+
+    try {
+      console.log('Analyzing image...');
+      const imageType = asset.mimeType || 'image/jpeg';
+      const response = await pantryService.analyzeImage(asset.base64, imageType);
+      console.log('Analysis complete:', response.analysis_notes);
+
+      if (response.detected_items.length === 0) {
+        Alert.alert(
+          'No Items Found',
+          'Could not detect any food items in this image. Try taking a clearer photo with better lighting.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+
+      // Navigate to review screen
+      navigation?.navigate('ImageReview', {
+        detectedItems: response.detected_items,
+        imageUri: asset.uri,
+        analysisNotes: response.analysis_notes
+      });
+    } catch (error: any) {
+      console.error('Image analysis failed:', error);
+      const message = error.response?.data?.detail || 'Failed to analyze image. Please try again.';
+      Alert.alert('Analysis Failed', message);
+    } finally {
+      setAnalyzingImage(false);
+    }
   };
 
   const groupedItems = () => {
@@ -220,7 +361,7 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
   };
 
   const renderPantryItem = ({ item }: { item: PantryItem }) => {
-    const expirationColor = item.is_expired ? '#E74C3C' : item.is_expiring_soon ? '#F39C12' : '#2C3E50';
+    const expirationColor = item.is_expired ? colors.error : item.is_expiring_soon ? '#F39C12' : colors.text;
 
     return (
       <TouchableOpacity
@@ -246,7 +387,14 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
           )}
           {item.expires_at && (
             <Text style={[styles.itemExpiry, { color: expirationColor }]}>
-              Exp: {new Date(item.expires_at).toLocaleDateString()}
+              Exp: {(() => {
+                // Format YYYY-MM-DD to MM/DD/YYYY without timezone conversion
+                const parts = item.expires_at.split('-');
+                if (parts.length === 3) {
+                  return `${parts[1]}/${parts[2]}/${parts[0]}`;
+                }
+                return item.expires_at;
+              })()}
             </Text>
           )}
         </View>
@@ -281,8 +429,16 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Pantry</Text>
         <View style={styles.headerButtons}>
-          <TouchableOpacity style={styles.photoButton} onPress={handlePhotoUpload}>
-            <Text style={styles.photoButtonText}>📷</Text>
+          <TouchableOpacity
+            style={[styles.photoButton, analyzingImage && styles.photoButtonDisabled]}
+            onPress={handlePhotoUpload}
+            disabled={analyzingImage}
+          >
+            {analyzingImage ? (
+              <ActivityIndicator size="small" color={colors.primary} />
+            ) : (
+              <Text style={styles.photoButtonText}>📷</Text>
+            )}
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.addButton}
@@ -303,28 +459,30 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
         />
       </View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
-        <TouchableOpacity
-          style={[styles.filterPill, !selectedCategory && styles.filterPillActive]}
-          onPress={() => setSelectedCategory(null)}
-        >
-          <Text style={[styles.filterPillText, !selectedCategory && styles.filterPillTextActive]}>
-            All
-          </Text>
-        </TouchableOpacity>
-
-        {CATEGORIES.map(category => (
+      <View style={styles.filterContainer}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
           <TouchableOpacity
-            key={category}
-            style={[styles.filterPill, selectedCategory === category && styles.filterPillActive]}
-            onPress={() => setSelectedCategory(category)}
+            style={[styles.filterPill, !selectedCategory && styles.filterPillActive]}
+            onPress={() => setSelectedCategory(null)}
           >
-            <Text style={[styles.filterPillText, selectedCategory === category && styles.filterPillTextActive]}>
-              {CATEGORY_EMOJIS[category]} {category}
+            <Text style={[styles.filterPillText, !selectedCategory && styles.filterPillTextActive]}>
+              All
             </Text>
           </TouchableOpacity>
-        ))}
-      </ScrollView>
+
+          {CATEGORIES.map(category => (
+            <TouchableOpacity
+              key={category}
+              style={[styles.filterPill, selectedCategory === category && styles.filterPillActive]}
+              onPress={() => setSelectedCategory(category)}
+            >
+              <Text style={[styles.filterPillText, selectedCategory === category && styles.filterPillTextActive]}>
+                {CATEGORY_EMOJIS[category]} {category}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
 
       {loading ? (
         <View style={styles.loadingContainer}>
@@ -339,8 +497,19 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
           renderSectionHeader={renderSectionHeader}
           keyExtractor={item => item.id}
           contentContainerStyle={styles.listContent}
-          stickySectionHeadersEnabled={true}
+          stickySectionHeadersEnabled={false}
         />
+      )}
+
+      {/* Analyzing Image Overlay */}
+      {analyzingImage && (
+        <View style={styles.analyzingOverlay}>
+          <View style={styles.analyzingContent}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={styles.analyzingTitle}>Analyzing Image...</Text>
+            <Text style={styles.analyzingText}>Our AI is detecting pantry items in your photo</Text>
+          </View>
+        </View>
       )}
 
       <Modal visible={showAddModal} animationType="slide" transparent={true} onRequestClose={() => { setShowAddModal(false); resetForm(); }}>
@@ -465,7 +634,14 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
                 {newItem.expires_at && (
                   <TouchableOpacity
                     style={styles.clearDateButton}
-                    onPress={() => setNewItem(prev => ({ ...prev, expires_at: undefined }))}
+                    onPress={() => {
+                      console.log('Clearing expiration date');
+                      setNewItem(prev => {
+                        const updated = { ...prev, expires_at: undefined };
+                        console.log('Updated newItem:', updated);
+                        return updated;
+                      });
+                    }}
                   >
                     <Text style={styles.clearDateText}>Clear Date</Text>
                   </TouchableOpacity>
@@ -560,78 +736,44 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
         </TouchableOpacity>
       </Modal>
 
-          {/* Date Picker Modal */}
-          <Modal visible={showDatePicker} animationType="fade" transparent={true} onRequestClose={() => setShowDatePicker(false)}>
-            <TouchableOpacity style={styles.pickerOverlay} activeOpacity={1} onPress={() => setShowDatePicker(false)}>
-              <TouchableOpacity activeOpacity={1} onPress={() => {}}>
-                <View style={styles.datePickerContainer}>
-                  <View style={styles.pickerHeader}>
-                    <Text style={styles.pickerTitle}>Select Expiration Date</Text>
-                    <TouchableOpacity onPress={() => setShowDatePicker(false)}>
-                      <Text style={styles.pickerClose}>✕</Text>
-                    </TouchableOpacity>
-                  </View>
-                  <View style={styles.datePickerContent}>
-                    <View style={styles.dateInputRow}>
-                      <TextInput
-                        style={styles.dateInput}
-                        value={selectedDate.getMonth() + 1 + ''}
-                        onChangeText={(text) => {
-                          const month = parseInt(text) || 1;
-                          if (month >= 1 && month <= 12) {
-                            const newDate = new Date(selectedDate);
-                            newDate.setMonth(month - 1);
-                            setSelectedDate(newDate);
-                          }
-                        }}
-                        placeholder="MM"
-                        keyboardType="numeric"
-                        maxLength={2}
-                      />
-                      <Text style={styles.dateSeparator}>/</Text>
-                      <TextInput
-                        style={styles.dateInput}
-                        value={selectedDate.getDate() + ''}
-                        onChangeText={(text) => {
-                          const day = parseInt(text) || 1;
-                          if (day >= 1 && day <= 31) {
-                            const newDate = new Date(selectedDate);
-                            newDate.setDate(day);
-                            setSelectedDate(newDate);
-                          }
-                        }}
-                        placeholder="DD"
-                        keyboardType="numeric"
-                        maxLength={2}
-                      />
-                      <Text style={styles.dateSeparator}>/</Text>
-                      <TextInput
-                        style={[styles.dateInput, { flex: 1.5 }]}
-                        value={selectedDate.getFullYear() + ''}
-                        onChangeText={(text) => {
-                          const year = parseInt(text);
-                          if (year && year >= 2000 && year <= 2100) {
-                            const newDate = new Date(selectedDate);
-                            newDate.setFullYear(year);
-                            setSelectedDate(newDate);
-                          }
-                        }}
-                        placeholder="YYYY"
-                        keyboardType="numeric"
-                        maxLength={4}
+          {/* Date Picker */}
+          {showDatePicker && (
+            <>
+              {Platform.OS === 'ios' && (
+                <Modal visible={showDatePicker} animationType="slide" transparent={true}>
+                  <View style={styles.iosDatePickerModal}>
+                    <View style={styles.iosDatePickerContainer}>
+                      <View style={styles.iosDatePickerHeader}>
+                        <TouchableOpacity onPress={() => setShowDatePicker(false)}>
+                          <Text style={styles.iosDatePickerCancel}>Cancel</Text>
+                        </TouchableOpacity>
+                        <Text style={styles.iosDatePickerTitle}>Select Date</Text>
+                        <TouchableOpacity onPress={confirmIOSDate}>
+                          <Text style={styles.iosDatePickerDone}>Done</Text>
+                        </TouchableOpacity>
+                      </View>
+                      <DateTimePicker
+                        value={tempDate}
+                        mode="date"
+                        display="spinner"
+                        onChange={handleDateChange}
+                        minimumDate={new Date()}
                       />
                     </View>
-                    <TouchableOpacity
-                      style={styles.dateConfirmButton}
-                      onPress={() => handleDateSelect(selectedDate)}
-                    >
-                      <Text style={styles.dateConfirmText}>Confirm</Text>
-                    </TouchableOpacity>
                   </View>
-                </View>
-              </TouchableOpacity>
-            </TouchableOpacity>
-          </Modal>
+                </Modal>
+              )}
+              {Platform.OS === 'android' && (
+                <DateTimePicker
+                  value={tempDate}
+                  mode="date"
+                  display="default"
+                  onChange={handleDateChange}
+                  minimumDate={new Date()}
+                />
+              )}
+            </>
+          )}
 
         </View>
         </KeyboardAvoidingView>
@@ -640,78 +782,93 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
   );
 };
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F8F9FA' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, paddingVertical: 16, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E1E8ED' },
-  headerTitle: { fontSize: 28, fontWeight: 'bold', color: '#FF6B35' },
+const createStyles = (colors: any) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.background },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, paddingVertical: 16, backgroundColor: colors.backgroundSecondary, borderBottomWidth: 1, borderBottomColor: colors.border },
+  headerTitle: { fontSize: 28, fontWeight: 'bold', color: colors.primary },
   headerButtons: { flexDirection: 'row', gap: 12 },
-  photoButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#F8F9FA', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#E1E8ED' },
+  photoButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: colors.border },
+  photoButtonDisabled: { opacity: 0.5 },
   photoButtonText: { fontSize: 20 },
-  addButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FF6B35', justifyContent: 'center', alignItems: 'center' },
-  addButtonText: { fontSize: 28, fontWeight: 'bold', color: '#FFFFFF' },
-  searchContainer: { paddingHorizontal: 20, paddingVertical: 12, backgroundColor: '#FFFFFF' },
-  searchInput: { backgroundColor: '#F8F9FA', borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16, color: '#2C3E50', borderWidth: 1, borderColor: '#E1E8ED' },
-  filterScroll: { backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E1E8ED', paddingHorizontal: 20, paddingVertical: 12, height: 60, flexGrow: 0 },
-  filterPill: { paddingHorizontal: 16, paddingVertical: 8, height: 36, borderRadius: 20, backgroundColor: '#F8F9FA', borderWidth: 1, borderColor: '#E1E8ED', marginRight: 8, justifyContent: 'center', alignItems: 'center' },
-  filterPillActive: { backgroundColor: '#FF6B35', borderColor: '#FF6B35' },
-  filterPillText: { fontSize: 14, fontWeight: '600', color: '#7F8C8D' },
-  filterPillTextActive: { color: '#FFFFFF' },
+  addButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center' },
+  addButtonText: { fontSize: 28, fontWeight: 'bold', color: colors.backgroundSecondary },
+  searchContainer: { paddingHorizontal: 20, paddingVertical: 12, backgroundColor: colors.backgroundSecondary },
+  searchInput: { backgroundColor: colors.background, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16, color: colors.text, borderWidth: 1, borderColor: colors.border },
+  filterContainer: { backgroundColor: colors.backgroundSecondary, borderBottomWidth: 1, borderBottomColor: colors.border, zIndex: 10, elevation: 5 },
+  filterScroll: { paddingHorizontal: 20, paddingVertical: 12, height: 60, flexGrow: 0 },
+  filterPill: { paddingHorizontal: 16, paddingVertical: 8, height: 36, borderRadius: 20, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, marginRight: 8, justifyContent: 'center', alignItems: 'center' },
+  filterPillActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  filterPillText: { fontSize: 14, fontWeight: '600', color: colors.textMuted },
+  filterPillTextActive: { color: colors.backgroundSecondary },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   listContent: { padding: 20 },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#F8F9FA', paddingHorizontal: 16, paddingVertical: 12, borderRadius: 8, marginBottom: 12 },
-  sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#2C3E50' },
-  sectionCount: { fontSize: 14, color: '#7F8C8D' },
-  itemCard: { backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: '#E1E8ED', elevation: 2 },
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: colors.background, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 8, marginBottom: 12 },
+  sectionTitle: { fontSize: 18, fontWeight: 'bold', color: colors.text },
+  sectionCount: { fontSize: 14, color: colors.textMuted },
+  itemCard: { backgroundColor: colors.card, borderRadius: 12, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: colors.border, elevation: 2 },
   itemHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  itemName: { fontSize: 16, fontWeight: '600', color: '#2C3E50', flex: 1 },
+  itemName: { fontSize: 16, fontWeight: '600', color: colors.text, flex: 1 },
   expirationBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 },
-  expirationText: { fontSize: 11, fontWeight: '600', color: '#FFFFFF' },
+  expirationText: { fontSize: 11, fontWeight: '600', color: colors.backgroundSecondary },
   itemDetails: { flexDirection: 'row', gap: 12 },
-  itemQuantity: { fontSize: 14, color: '#7F8C8D' },
+  itemQuantity: { fontSize: 14, color: colors.textMuted },
   itemExpiry: { fontSize: 14 },
   emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
   emptyIcon: { fontSize: 64, marginBottom: 16 },
-  emptyTitle: { fontSize: 20, fontWeight: 'bold', color: '#2C3E50', marginBottom: 8 },
-  emptyText: { fontSize: 16, color: '#7F8C8D', textAlign: 'center', marginBottom: 24 },
-  emptyButton: { backgroundColor: '#FF6B35', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 8 },
-  emptyButtonText: { fontSize: 16, fontWeight: '600', color: '#FFFFFF' },
+  emptyTitle: { fontSize: 20, fontWeight: 'bold', color: colors.text, marginBottom: 8 },
+  emptyText: { fontSize: 16, color: colors.textMuted, textAlign: 'center', marginBottom: 24 },
+  emptyButton: { backgroundColor: colors.primary, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 8 },
+  emptyButtonText: { fontSize: 16, fontWeight: '600', color: colors.backgroundSecondary },
+  analyzingOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.7)', justifyContent: 'center', alignItems: 'center', zIndex: 1000 },
+  analyzingContent: { backgroundColor: colors.backgroundSecondary, borderRadius: 16, padding: 32, alignItems: 'center', marginHorizontal: 32 },
+  analyzingTitle: { fontSize: 20, fontWeight: 'bold', color: colors.text, marginTop: 16, marginBottom: 8 },
+  analyzingText: { fontSize: 14, color: colors.textMuted, textAlign: 'center' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.5)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 20, maxHeight: '90%' },
+  modalContent: { backgroundColor: colors.backgroundSecondary, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 20, maxHeight: '90%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, marginBottom: 20 },
-  modalTitle: { fontSize: 24, fontWeight: 'bold', color: '#2C3E50' },
-  modalClose: { fontSize: 28, color: '#7F8C8D' },
+  modalTitle: { fontSize: 24, fontWeight: 'bold', color: colors.text },
+  modalClose: { fontSize: 28, color: colors.textMuted },
   modalScroll: { paddingHorizontal: 24 },
   formSection: { marginBottom: 20 },
-  label: { fontSize: 16, fontWeight: '600', color: '#2C3E50', marginBottom: 8 },
-  input: { backgroundColor: '#F8F9FA', borderWidth: 1, borderColor: '#E1E8ED', borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16, color: '#2C3E50' },
-  suggestionsContainer: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E1E8ED', borderRadius: 8, marginTop: 8, maxHeight: 200 },
-  suggestionItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: '#E1E8ED' },
-  suggestionText: { fontSize: 16, color: '#2C3E50' },
-  suggestionCategory: { fontSize: 12, color: '#7F8C8D' },
-  dropdown: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#F8F9FA', borderWidth: 1, borderColor: '#E1E8ED', borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12 },
-  dropdownText: { fontSize: 16, color: '#2C3E50', flex: 1 },
-  dropdownArrow: { fontSize: 12, color: '#7F8C8D', marginLeft: 8 },
+  label: { fontSize: 16, fontWeight: '600', color: colors.text, marginBottom: 8 },
+  input: { backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16, color: colors.text },
+  suggestionsContainer: { backgroundColor: colors.backgroundSecondary, borderWidth: 1, borderColor: colors.border, borderRadius: 8, marginTop: 8, maxHeight: 200 },
+  suggestionItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: colors.border },
+  suggestionText: { fontSize: 16, color: colors.text },
+  suggestionCategory: { fontSize: 12, color: colors.textMuted },
+  dropdown: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12 },
+  dropdownText: { fontSize: 16, color: colors.text, flex: 1 },
+  dropdownArrow: { fontSize: 12, color: colors.textMuted, marginLeft: 8 },
   rowSection: { flexDirection: 'row', gap: 12, marginBottom: 20 },
   rowItem: { flex: 1 },
-  saveButton: { backgroundColor: '#FF6B35', paddingVertical: 16, borderRadius: 12, alignItems: 'center', marginTop: 8, marginBottom: 16, elevation: 4 },
-  saveButtonText: { fontSize: 18, fontWeight: 'bold', color: '#FFFFFF' },
-  deleteButtonModal: { backgroundColor: '#E74C3C', paddingVertical: 16, borderRadius: 12, alignItems: 'center', marginBottom: 32, elevation: 4 },
-  deleteButtonModalText: { fontSize: 18, fontWeight: 'bold', color: '#FFFFFF' },
+  saveButton: { backgroundColor: colors.primary, paddingVertical: 16, borderRadius: 12, alignItems: 'center', marginTop: 8, marginBottom: 16, elevation: 4 },
+  saveButtonText: { fontSize: 18, fontWeight: 'bold', color: colors.backgroundSecondary },
+  deleteButtonModal: { backgroundColor: colors.error, paddingVertical: 16, borderRadius: 12, alignItems: 'center', marginBottom: 32, elevation: 4 },
+  deleteButtonModalText: { fontSize: 18, fontWeight: 'bold', color: colors.backgroundSecondary },
   pickerOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  pickerContainer: { backgroundColor: '#FFFFFF', borderRadius: 16, width: '100%', maxHeight: '70%', overflow: 'hidden' },
-  pickerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: '#E1E8ED' },
-  pickerTitle: { fontSize: 20, fontWeight: 'bold', color: '#2C3E50' },
-  pickerClose: { fontSize: 24, color: '#7F8C8D' },
-  pickerOption: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#F8F9FA' },
-  pickerOptionText: { fontSize: 16, color: '#2C3E50' },
-  pickerCheck: { fontSize: 20, color: '#FF6B35', fontWeight: 'bold' },
-  datePickerContainer: { backgroundColor: '#FFFFFF', borderRadius: 16, width: '100%', padding: 20 },
+  pickerContainer: { backgroundColor: colors.backgroundSecondary, borderRadius: 16, width: '100%', maxHeight: '70%', overflow: 'hidden' },
+  pickerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: colors.border },
+  pickerTitle: { fontSize: 20, fontWeight: 'bold', color: colors.text },
+  pickerClose: { fontSize: 24, color: colors.textMuted },
+  pickerOption: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: colors.background },
+  pickerOptionText: { fontSize: 16, color: colors.text },
+  pickerCheck: { fontSize: 20, color: colors.primary, fontWeight: 'bold' },
+  datePickerContainer: { backgroundColor: colors.backgroundSecondary, borderRadius: 16, width: '100%', padding: 20 },
   datePickerContent: { paddingTop: 20 },
-  dateInputRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 24 },
-  dateInput: { flex: 1, backgroundColor: '#F8F9FA', borderWidth: 1, borderColor: '#E1E8ED', borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12, fontSize: 18, color: '#2C3E50', textAlign: 'center', marginHorizontal: 4 },
-  dateSeparator: { fontSize: 24, color: '#7F8C8D', marginHorizontal: 4 },
-  dateConfirmButton: { backgroundColor: '#FF6B35', paddingVertical: 16, borderRadius: 12, alignItems: 'center', elevation: 4 },
-  dateConfirmText: { fontSize: 18, fontWeight: 'bold', color: '#FFFFFF' },
+  dateFormatLabel: { fontSize: 14, color: colors.textMuted, textAlign: 'center', marginBottom: 12, fontWeight: '600' },
+  dateInputRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'center', marginBottom: 24 },
+  dateInputContainer: { flex: 1, alignItems: 'center' },
+  dateInputLabel: { fontSize: 12, color: colors.textMuted, marginBottom: 4, fontWeight: '600' },
+  dateInput: { flex: 1, width: '100%', backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12, fontSize: 18, color: colors.text, textAlign: 'center', marginHorizontal: 4 },
+  dateSeparator: { fontSize: 24, color: colors.textMuted, marginHorizontal: 4, marginBottom: 8 },
+  dateConfirmButton: { backgroundColor: colors.primary, paddingVertical: 16, borderRadius: 12, alignItems: 'center', elevation: 4 },
+  dateConfirmText: { fontSize: 18, fontWeight: 'bold', color: colors.backgroundSecondary },
   clearDateButton: { marginTop: 8, alignItems: 'center', paddingVertical: 8 },
-  clearDateText: { fontSize: 14, color: '#E74C3C', textDecorationLine: 'underline' },
+  clearDateText: { fontSize: 14, color: colors.error, textDecorationLine: 'underline' },
+  iosDatePickerModal: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0, 0, 0, 0.5)' },
+  iosDatePickerContainer: { backgroundColor: colors.backgroundSecondary, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 20 },
+  iosDatePickerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: colors.border },
+  iosDatePickerCancel: { fontSize: 16, color: colors.primary },
+  iosDatePickerTitle: { fontSize: 18, fontWeight: '600', color: colors.text },
+  iosDatePickerDone: { fontSize: 16, fontWeight: '600', color: colors.primary },
 });

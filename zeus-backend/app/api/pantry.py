@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from typing import List, Optional
 from app.schemas.pantry import (
     PantryItemCreate, PantryItemUpdate, PantryItemResponse,
-    PantryFilter, BulkPantryAdd, PantryCategory
+    PantryFilter, BulkPantryAdd, PantryCategory,
+    ImageAnalysisRequest, ImageAnalysisResponse
 )
 from app.schemas.user import UserResponse
 from app.services.pantry_service import pantry_service
@@ -126,3 +127,20 @@ async def get_expiring_items(
     Default is 7 days. Useful for expiration alerts.
     """
     return await pantry_service.get_expiring_items(current_user.id, days)
+
+
+@router.post("/analyze-image", response_model=ImageAnalysisResponse)
+async def analyze_pantry_image(
+    request: ImageAnalysisRequest,
+    current_user: UserResponse = Depends(get_current_active_user)
+):
+    """
+    Analyze an image to detect pantry items using AI vision.
+
+    Upload a base64-encoded image of your fridge, pantry, or cabinet.
+    The AI will identify food items and check against your existing pantry
+    to flag duplicates.
+
+    Returns a list of detected items with confidence scores and duplicate flags.
+    """
+    return await pantry_service.analyze_pantry_image(request, current_user.id)

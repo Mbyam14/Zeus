@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { UserPreferences } from '../../types/user';
 import { userService } from '../../services/userService';
+import { useThemeStore } from '../../store/themeStore';
 
 const DIETARY_OPTIONS = ['Vegetarian', 'Vegan', 'Gluten-Free', 'Dairy-Free', 'Keto', 'Paleo', 'Pescatarian'];
 const CUISINE_OPTIONS = ['Italian', 'Mexican', 'Asian', 'Mediterranean', 'American', 'Indian', 'French', 'Thai'];
@@ -24,6 +25,7 @@ interface EditPreferencesScreenProps {
 }
 
 export const EditPreferencesScreen: React.FC<EditPreferencesScreenProps> = ({ navigation }) => {
+  const { colors } = useThemeStore();
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -111,6 +113,8 @@ export const EditPreferencesScreen: React.FC<EditPreferencesScreenProps> = ({ na
       setLoading(false);
     }
   };
+
+  const styles = createStyles(colors);
 
   if (initialLoading) {
     return (
@@ -292,175 +296,176 @@ export const EditPreferencesScreen: React.FC<EditPreferencesScreenProps> = ({ na
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F8F9FA',
-  },
-  contentContainer: {
-    padding: 20,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#F8F9FA',
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: '#7F8C8D',
-  },
-  header: {
-    marginBottom: 24,
-  },
-  backButton: {
-    marginBottom: 16,
-  },
-  backButtonText: {
-    fontSize: 16,
-    color: '#FF6B35',
-    fontWeight: '600',
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#2C3E50',
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#2C3E50',
-    marginTop: 24,
-    marginBottom: 12,
-  },
-  helperText: {
-    fontSize: 14,
-    color: '#7F8C8D',
-    marginBottom: 8,
-  },
-  chipContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  chip: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E1E8ED',
-  },
-  chipSelected: {
-    backgroundColor: '#FF6B35',
-    borderColor: '#FF6B35',
-  },
-  chipText: {
-    fontSize: 14,
-    color: '#2C3E50',
-    fontWeight: '500',
-  },
-  chipTextSelected: {
-    color: '#FFFFFF',
-  },
-  skillContainer: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  skillButton: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E1E8ED',
-    alignItems: 'center',
-  },
-  skillButtonSelected: {
-    backgroundColor: '#FF6B35',
-    borderColor: '#FF6B35',
-  },
-  skillButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#2C3E50',
-  },
-  skillButtonTextSelected: {
-    color: '#FFFFFF',
-  },
-  input: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E1E8ED',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    color: '#2C3E50',
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#2C3E50',
-    marginBottom: 6,
-  },
-  row: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  halfInput: {
-    flex: 1,
-  },
-  saveButton: {
-    backgroundColor: '#FF6B35',
-    paddingVertical: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: 32,
-  },
-  saveButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  bottomSpacer: {
-    height: 40,
-  },
-  successOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  successCircle: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: '#27AE60',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
+const createStyles = (colors: any) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
     },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  successCheckmark: {
-    fontSize: 60,
-    color: '#FFFFFF',
-    fontWeight: 'bold',
-  },
-  successText: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-});
+    contentContainer: {
+      padding: 20,
+    },
+    loadingContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: colors.background,
+    },
+    loadingText: {
+      marginTop: 12,
+      fontSize: 16,
+      color: colors.textMuted,
+    },
+    header: {
+      marginBottom: 24,
+    },
+    backButton: {
+      marginBottom: 16,
+    },
+    backButtonText: {
+      fontSize: 16,
+      color: colors.primary,
+      fontWeight: '600',
+    },
+    title: {
+      fontSize: 28,
+      fontWeight: 'bold',
+      color: colors.text,
+    },
+    sectionTitle: {
+      fontSize: 18,
+      fontWeight: '600',
+      color: colors.text,
+      marginTop: 24,
+      marginBottom: 12,
+    },
+    helperText: {
+      fontSize: 14,
+      color: colors.textMuted,
+      marginBottom: 8,
+    },
+    chipContainer: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    chip: {
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      borderRadius: 20,
+      backgroundColor: colors.backgroundSecondary,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    chipSelected: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    chipText: {
+      fontSize: 14,
+      color: colors.text,
+      fontWeight: '500',
+    },
+    chipTextSelected: {
+      color: '#FFFFFF',
+    },
+    skillContainer: {
+      flexDirection: 'row',
+      gap: 12,
+    },
+    skillButton: {
+      flex: 1,
+      paddingVertical: 12,
+      borderRadius: 8,
+      backgroundColor: colors.backgroundSecondary,
+      borderWidth: 1,
+      borderColor: colors.border,
+      alignItems: 'center',
+    },
+    skillButtonSelected: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    skillButtonText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.text,
+    },
+    skillButtonTextSelected: {
+      color: '#FFFFFF',
+    },
+    input: {
+      backgroundColor: colors.backgroundSecondary,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 8,
+      padding: 12,
+      fontSize: 16,
+      color: colors.text,
+    },
+    inputLabel: {
+      fontSize: 14,
+      fontWeight: '500',
+      color: colors.text,
+      marginBottom: 6,
+    },
+    row: {
+      flexDirection: 'row',
+      gap: 12,
+    },
+    halfInput: {
+      flex: 1,
+    },
+    saveButton: {
+      backgroundColor: colors.primary,
+      paddingVertical: 16,
+      borderRadius: 8,
+      alignItems: 'center',
+      marginTop: 32,
+    },
+    saveButtonText: {
+      color: '#FFFFFF',
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    bottomSpacer: {
+      height: 40,
+    },
+    successOverlay: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    successCircle: {
+      width: 100,
+      height: 100,
+      borderRadius: 50,
+      backgroundColor: colors.success,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginBottom: 16,
+      shadowColor: '#000',
+      shadowOffset: {
+        width: 0,
+        height: 4,
+      },
+      shadowOpacity: 0.3,
+      shadowRadius: 8,
+      elevation: 8,
+    },
+    successCheckmark: {
+      fontSize: 60,
+      color: '#FFFFFF',
+      fontWeight: 'bold',
+    },
+    successText: {
+      fontSize: 24,
+      fontWeight: 'bold',
+      color: '#FFFFFF',
+    },
+  });

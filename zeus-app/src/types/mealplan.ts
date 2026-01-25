@@ -107,3 +107,51 @@ export interface UserPreferences {
 
 export type DayOfWeek = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
 export type MealType = 'breakfast' | 'lunch' | 'dinner';
+
+// Macro Summary Types
+export interface MacroTotals {
+  calories: number;
+  protein_grams: number;
+  carbs_grams: number;
+  fat_grams: number;
+}
+
+export interface MacroPercentages {
+  protein_pct: number;
+  carbs_pct: number;
+  fat_pct: number;
+}
+
+export interface WeeklySummary {
+  recipe_count: number;
+  weekly_totals: MacroTotals;
+  daily_averages: MacroTotals;
+  macro_percentages: MacroPercentages;
+}
+
+export interface DailySummary {
+  totals: MacroTotals;
+  macro_percentages: MacroPercentages;
+  meal_count: number;
+}
+
+export interface TargetComparison {
+  calorie_target?: number;
+  calorie_daily_avg?: number;
+  calorie_difference?: number;
+  calorie_on_target?: boolean;
+  protein_target_grams?: number;
+  protein_daily_avg?: number;
+  protein_difference?: number;
+  protein_on_target?: boolean;
+}
+
+export interface MacroSummaryResponse {
+  meal_plan_id: string;
+  weekly_summary: WeeklySummary;
+  daily_breakdown: {
+    [day: string]: DailySummary;
+  };
+  target_comparison?: TargetComparison;
+  validation_warnings: string[];
+}

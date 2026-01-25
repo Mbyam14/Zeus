@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { UserPreferences } from '../../types/user';
 import { userService } from '../../services/userService';
+import { useThemeStore } from '../../store/themeStore';
 
 const DIETARY_OPTIONS = ['Vegetarian', 'Vegan', 'Gluten-Free', 'Dairy-Free', 'Keto', 'Paleo', 'Pescatarian'];
 const CUISINE_OPTIONS = ['Italian', 'Mexican', 'Asian', 'Mediterranean', 'American', 'Indian', 'French', 'Thai'];
@@ -21,6 +22,8 @@ interface PreferencesSetupScreenProps {
 }
 
 export const PreferencesSetupScreen: React.FC<PreferencesSetupScreenProps> = ({ navigation }) => {
+  const { colors } = useThemeStore();
+  const styles = createStyles(colors);
   const [loading, setLoading] = useState(false);
   const [preferences, setPreferences] = useState<UserPreferences>({
     dietary_restrictions: [],
@@ -210,129 +213,130 @@ export const PreferencesSetupScreen: React.FC<PreferencesSetupScreenProps> = ({ 
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F8F9FA',
-  },
-  contentContainer: {
-    padding: 20,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#2C3E50',
-    marginTop: 20,
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#7F8C8D',
-    marginBottom: 32,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#2C3E50',
-    marginTop: 24,
-    marginBottom: 12,
-  },
-  helperText: {
-    fontSize: 14,
-    color: '#7F8C8D',
-    marginBottom: 8,
-  },
-  chipContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  chip: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E1E8ED',
-  },
-  chipSelected: {
-    backgroundColor: '#FF6B35',
-    borderColor: '#FF6B35',
-  },
-  chipText: {
-    fontSize: 14,
-    color: '#2C3E50',
-    fontWeight: '500',
-  },
-  chipTextSelected: {
-    color: '#FFFFFF',
-  },
-  skillContainer: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  skillButton: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E1E8ED',
-    alignItems: 'center',
-  },
-  skillButtonSelected: {
-    backgroundColor: '#FF6B35',
-    borderColor: '#FF6B35',
-  },
-  skillButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#2C3E50',
-  },
-  skillButtonTextSelected: {
-    color: '#FFFFFF',
-  },
-  input: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E1E8ED',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    color: '#2C3E50',
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#2C3E50',
-    marginBottom: 6,
-  },
-  row: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  halfInput: {
-    flex: 1,
-  },
-  saveButton: {
-    backgroundColor: '#FF6B35',
-    paddingVertical: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: 32,
-  },
-  saveButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  skipText: {
-    textAlign: 'center',
-    color: '#7F8C8D',
-    fontSize: 16,
-    marginTop: 16,
-  },
-  bottomSpacer: {
-    height: 40,
-  },
-});
+const createStyles = (colors: any) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    contentContainer: {
+      padding: 20,
+    },
+    title: {
+      fontSize: 28,
+      fontWeight: 'bold',
+      color: colors.text,
+      marginTop: 20,
+      marginBottom: 8,
+    },
+    subtitle: {
+      fontSize: 16,
+      color: colors.textMuted,
+      marginBottom: 32,
+    },
+    sectionTitle: {
+      fontSize: 18,
+      fontWeight: '600',
+      color: colors.text,
+      marginTop: 24,
+      marginBottom: 12,
+    },
+    helperText: {
+      fontSize: 14,
+      color: colors.textMuted,
+      marginBottom: 8,
+    },
+    chipContainer: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    chip: {
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      borderRadius: 20,
+      backgroundColor: colors.backgroundSecondary,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    chipSelected: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    chipText: {
+      fontSize: 14,
+      color: colors.text,
+      fontWeight: '500',
+    },
+    chipTextSelected: {
+      color: '#FFFFFF',
+    },
+    skillContainer: {
+      flexDirection: 'row',
+      gap: 12,
+    },
+    skillButton: {
+      flex: 1,
+      paddingVertical: 12,
+      borderRadius: 8,
+      backgroundColor: colors.backgroundSecondary,
+      borderWidth: 1,
+      borderColor: colors.border,
+      alignItems: 'center',
+    },
+    skillButtonSelected: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    skillButtonText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.text,
+    },
+    skillButtonTextSelected: {
+      color: '#FFFFFF',
+    },
+    input: {
+      backgroundColor: colors.backgroundSecondary,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 8,
+      padding: 12,
+      fontSize: 16,
+      color: colors.text,
+    },
+    inputLabel: {
+      fontSize: 14,
+      fontWeight: '500',
+      color: colors.text,
+      marginBottom: 6,
+    },
+    row: {
+      flexDirection: 'row',
+      gap: 12,
+    },
+    halfInput: {
+      flex: 1,
+    },
+    saveButton: {
+      backgroundColor: colors.primary,
+      paddingVertical: 16,
+      borderRadius: 8,
+      alignItems: 'center',
+      marginTop: 32,
+    },
+    saveButtonText: {
+      color: '#FFFFFF',
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    skipText: {
+      textAlign: 'center',
+      color: colors.textMuted,
+      fontSize: 16,
+      marginTop: 16,
+    },
+    bottomSpacer: {
+      height: 40,
+    },
+  });

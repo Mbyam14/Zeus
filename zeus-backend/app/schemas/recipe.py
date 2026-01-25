@@ -19,19 +19,19 @@ class MealType(str, Enum):
 
 
 class Ingredient(BaseModel):
-    name: str = Field(..., min_length=1, max_length=100)
-    quantity: str = Field(..., min_length=1, max_length=50)
-    unit: str = Field(..., min_length=1, max_length=20)
+    name: str = Field(..., min_length=1, max_length=200)
+    quantity: str = Field(..., min_length=1, max_length=100)
+    unit: str = Field(..., min_length=1, max_length=50)
 
 
 class Instruction(BaseModel):
     step: int = Field(..., ge=1)
-    instruction: str = Field(..., min_length=1, max_length=500)
+    instruction: str = Field(..., min_length=1, max_length=2000)
 
 
 class RecipeCreate(BaseModel):
-    title: str = Field(..., min_length=1, max_length=200)
-    description: Optional[str] = Field(None, max_length=1000)
+    title: str = Field(..., min_length=1, max_length=300)
+    description: Optional[str] = Field(None, max_length=2000)
     ingredients: List[Ingredient] = Field(..., min_items=1)
     instructions: List[Instruction] = Field(..., min_items=1)
     servings: int = Field(4, ge=1, le=20)

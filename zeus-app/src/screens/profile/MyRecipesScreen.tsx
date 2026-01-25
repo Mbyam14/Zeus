@@ -12,9 +12,12 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { recipeService } from '../../services/recipeService';
 import { Recipe } from '../../types/recipe';
+import { useThemeStore } from '../../store/themeStore';
 
 export const MyRecipesScreen: React.FC = () => {
   const navigation = useNavigation();
+  const { colors } = useThemeStore();
+  const styles = createStyles(colors);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -148,134 +151,135 @@ export const MyRecipesScreen: React.FC = () => {
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F8F9FA',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E1E8ED',
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  backButtonText: {
-    fontSize: 28,
-    color: '#2C3E50',
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#2C3E50',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  listContainer: {
-    padding: 16,
-  },
-  emptyListContainer: {
-    flex: 1,
-  },
-  recipeCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
+const createStyles = (colors: any) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
     },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  recipeInfo: {
-    padding: 16,
-  },
-  recipeTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#2C3E50',
-    marginBottom: 8,
-  },
-  recipeDescription: {
-    fontSize: 14,
-    color: '#7F8C8D',
-    marginBottom: 12,
-    lineHeight: 20,
-  },
-  recipeDetails: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginBottom: 12,
-  },
-  detailItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginRight: 16,
-    marginBottom: 4,
-  },
-  detailIcon: {
-    fontSize: 14,
-    marginRight: 4,
-  },
-  detailText: {
-    fontSize: 14,
-    color: '#7F8C8D',
-  },
-  macrosContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#E1E8ED',
-  },
-  macroItem: {
-    marginRight: 16,
-    marginBottom: 4,
-  },
-  macroValue: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#FF6B35',
-  },
-  macroLabel: {
-    fontSize: 12,
-    color: '#7F8C8D',
-  },
-  emptyState: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 32,
-  },
-  emptyStateIcon: {
-    fontSize: 64,
-    marginBottom: 16,
-  },
-  emptyStateTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#2C3E50',
-    marginBottom: 8,
-  },
-  emptyStateText: {
-    fontSize: 16,
-    color: '#7F8C8D',
-    textAlign: 'center',
-    lineHeight: 24,
-  },
-});
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingVertical: 16,
+      backgroundColor: colors.backgroundSecondary,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    backButton: {
+      width: 40,
+      height: 40,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    backButtonText: {
+      fontSize: 28,
+      color: colors.text,
+    },
+    headerTitle: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      color: colors.text,
+    },
+    loadingContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    listContainer: {
+      padding: 16,
+    },
+    emptyListContainer: {
+      flex: 1,
+    },
+    recipeCard: {
+      backgroundColor: colors.backgroundSecondary,
+      borderRadius: 12,
+      marginBottom: 16,
+      shadowColor: '#000',
+      shadowOffset: {
+        width: 0,
+        height: 2,
+      },
+      shadowOpacity: 0.1,
+      shadowRadius: 4,
+      elevation: 3,
+    },
+    recipeInfo: {
+      padding: 16,
+    },
+    recipeTitle: {
+      fontSize: 18,
+      fontWeight: 'bold',
+      color: colors.text,
+      marginBottom: 8,
+    },
+    recipeDescription: {
+      fontSize: 14,
+      color: colors.textMuted,
+      marginBottom: 12,
+      lineHeight: 20,
+    },
+    recipeDetails: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      marginBottom: 12,
+    },
+    detailItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginRight: 16,
+      marginBottom: 4,
+    },
+    detailIcon: {
+      fontSize: 14,
+      marginRight: 4,
+    },
+    detailText: {
+      fontSize: 14,
+      color: colors.textMuted,
+    },
+    macrosContainer: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      paddingTop: 12,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+    },
+    macroItem: {
+      marginRight: 16,
+      marginBottom: 4,
+    },
+    macroValue: {
+      fontSize: 16,
+      fontWeight: 'bold',
+      color: colors.primary,
+    },
+    macroLabel: {
+      fontSize: 12,
+      color: colors.textMuted,
+    },
+    emptyState: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingHorizontal: 32,
+    },
+    emptyStateIcon: {
+      fontSize: 64,
+      marginBottom: 16,
+    },
+    emptyStateTitle: {
+      fontSize: 24,
+      fontWeight: 'bold',
+      color: colors.text,
+      marginBottom: 8,
+    },
+    emptyStateText: {
+      fontSize: 16,
+      color: colors.textMuted,
+      textAlign: 'center',
+      lineHeight: 24,
+    },
+  });

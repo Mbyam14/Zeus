@@ -66,3 +66,27 @@ export interface IngredientLibraryItem {
   category: PantryCategory;
   common_units: string[];
 }
+
+// Image Analysis Types
+export interface DetectedPantryItem {
+  item_name: string;
+  quantity?: number;
+  unit?: string;
+  category: PantryCategory;
+  confidence: number;
+  already_in_pantry: boolean;
+  existing_pantry_id?: string;
+}
+
+export interface ImageAnalysisRequest {
+  image_base64: string;
+  image_type: string;
+}
+
+export interface ImageAnalysisResponse {
+  detected_items: DetectedPantryItem[];
+  total_detected: number;
+  new_items_count: number;
+  existing_items_count: number;
+  analysis_notes?: string;
+}

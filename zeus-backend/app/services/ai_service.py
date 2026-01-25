@@ -5,19 +5,70 @@ from app.config import settings
 from app.schemas.recipe import AIRecipeRequest, RecipeResponse, Ingredient, Instruction, DifficultyLevel
 from app.schemas.meal_plan import AIMealPlanRequest, MealPlanResponse
 from app.services.recipe_service import recipe_service
+from app.services.nutrition_service import nutrition_service
 import json
 import logging
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
+
+# Timeout settings (in seconds)
+RECIPE_GENERATION_TIMEOUT = 60  # 60 seconds for single recipe
+MEAL_PLAN_GENERATION_TIMEOUT = 120  # 120 seconds for full meal plan (21 recipes)
 
 
 class AIService:
     def __init__(self):
         try:
             self.client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+            self.executor = ThreadPoolExecutor(max_workers=2)
         except Exception as e:
             logger.warning(f"Claude API not configured: {e}")
             self.client = None
+            self.executor = None
+
+    def _call_claude_sync(self, model: str, max_tokens: int, temperature: float, messages: list) -> str:
+        """Synchronous Claude API call for use in executor"""
+        response = self.client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            messages=messages
+        )
+        return response.content[0].text
+
+    async def _call_claude_with_timeout(
+        self,
+        model: str,
+        max_tokens: int,
+        temperature: float,
+        messages: list,
+        timeout: int
+    ) -> str:
+        """Call Claude API with timeout handling"""
+        loop = asyncio.get_event_loop()
+
+        try:
+            # Run the synchronous API call in a thread pool with timeout
+            result = await asyncio.wait_for(
+                loop.run_in_executor(
+                    self.executor,
+                    self._call_claude_sync,
+                    model,
+                    max_tokens,
+                    temperature,
+                    messages
+                ),
+                timeout=timeout
+            )
+            return result
+        except asyncio.TimeoutError:
+            logger.error(f"Claude API call timed out after {timeout} seconds")
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail=f"AI generation timed out after {timeout} seconds. Please try again."
+            )
     
     async def generate_recipe(self, request: AIRecipeRequest, user_id: str) -> RecipeResponse:
         """Generate a recipe using Claude AI based on user preferences"""
@@ -31,8 +82,9 @@ class AIService:
         prompt = self._build_recipe_prompt(request)
         
         try:
-            # Call Claude API
-            response = self.client.messages.create(
+            # Call Claude API with timeout
+            logger.info(f"Calling Claude API for recipe generation (timeout: {RECIPE_GENERATION_TIMEOUT}s)")
+            response_text = await self._call_claude_with_timeout(
                 model="claude-3-7-sonnet-20250219",
                 max_tokens=2000,
                 temperature=0.7,
@@ -41,11 +93,12 @@ class AIService:
                         "role": "user",
                         "content": prompt
                     }
-                ]
+                ],
+                timeout=RECIPE_GENERATION_TIMEOUT
             )
-            
+
             # Parse the response
-            recipe_data = self._parse_recipe_response(response.content[0].text)
+            recipe_data = self._parse_recipe_response(response_text)
             
             # Create recipe using the recipe service
             from app.schemas.recipe import RecipeCreate
@@ -113,8 +166,9 @@ class AIService:
         prompt += variety_note
 
         try:
-            # Call Claude API for simplified meal plan (details generated on-demand)
-            response = self.client.messages.create(
+            # Call Claude API for simplified meal plan with timeout
+            logger.info(f"Calling Claude API for meal plan generation (timeout: {MEAL_PLAN_GENERATION_TIMEOUT}s)")
+            raw_text = await self._call_claude_with_timeout(
                 model="claude-3-7-sonnet-20250219",
                 max_tokens=4000,
                 temperature=0.7,
@@ -123,11 +177,11 @@ class AIService:
                         "role": "user",
                         "content": prompt
                     }
-                ]
+                ],
+                timeout=MEAL_PLAN_GENERATION_TIMEOUT
             )
 
             # Parse the response
-            raw_text = response.content[0].text
             meal_plan_data = self._parse_meal_plan_response(raw_text)
 
             return {
@@ -271,7 +325,7 @@ class AIService:
 
         Guidelines:
         1. Generate 21 SIMPLIFIED meal entries (breakfast, lunch, dinner for 7 days)
-        2. Each meal needs ONLY: title, description, prep/cook time, macros, cuisine, difficulty
+        2. REQUIRED: Follow dietary restrictions completely - this is non-negotiable
         3. DO NOT include ingredients or instructions in this response
         4. Create varied, balanced meals across the week
         5. Maximize use of pantry items to reduce grocery needs
@@ -293,26 +347,49 @@ class AIService:
             # Extract JSON from response
             start_idx = response_text.find('{')
             end_idx = response_text.rfind('}') + 1
-            
+
             if start_idx == -1 or end_idx == 0:
                 raise ValueError("No JSON found in response")
-            
+
             json_str = response_text[start_idx:end_idx]
             recipe_data = json.loads(json_str)
-            
+
             # Validate required fields
             required_fields = ['title', 'ingredients', 'instructions']
             for field in required_fields:
                 if field not in recipe_data:
                     raise ValueError(f"Missing required field: {field}")
-            
+
             # Ensure instructions have proper step numbers
             for i, instruction in enumerate(recipe_data['instructions']):
                 if 'step' not in instruction:
                     instruction['step'] = i + 1
-            
+
+            # Validate nutrition data
+            nutrition_validation = nutrition_service.validate_nutrition(
+                recipe_data.get("calories"),
+                recipe_data.get("protein_grams"),
+                recipe_data.get("carbs_grams"),
+                recipe_data.get("fat_grams")
+            )
+
+            # Log validation warnings
+            if nutrition_validation.warnings:
+                for warning in nutrition_validation.warnings:
+                    logger.warning(f"Nutrition warning for {recipe_data.get('title')}: {warning}")
+
+            # Apply corrected values if there were severe calculation errors
+            if "calories" in nutrition_validation.corrected_values:
+                logger.info(f"Correcting calories for {recipe_data.get('title')}: "
+                           f"{recipe_data.get('calories')} -> {nutrition_validation.corrected_values['calories']}")
+                recipe_data["calories"] = nutrition_validation.corrected_values["calories"]
+
+            # Store validation metadata
+            recipe_data["_nutrition_validated"] = nutrition_validation.valid
+            recipe_data["_nutrition_warnings"] = nutrition_validation.warnings
+
             return recipe_data
-            
+
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse recipe JSON: {e}")
             raise ValueError("Invalid JSON in recipe response")
