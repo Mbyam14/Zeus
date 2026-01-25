@@ -13,6 +13,7 @@ import {
   PanResponder,
   Share,
   Alert,
+  Clipboard,
 } from 'react-native';
 import { Recipe } from '../../types/recipe';
 import { useThemeStore } from '../../store/themeStore';
@@ -154,17 +155,36 @@ ${ingredients ? `📝 Ingredients:\n${ingredients}` : ''}
 
 Shared from Zeus - Your AI Meal Planner`;
 
-    // Delay to let the options menu close before opening share sheet
-    setTimeout(async () => {
-      try {
-        await Share.share({
-          message: shareMessage,
-          title: recipe.title,
-        });
-      } catch (error: any) {
-        Alert.alert('Share Failed', error.message || 'Could not share recipe.');
-      }
-    }, 500);
+    // Delay to let the options menu close first
+    setTimeout(() => {
+      Alert.alert(
+        'Share Recipe',
+        'How would you like to share?',
+        [
+          {
+            text: 'Copy to Clipboard',
+            onPress: () => {
+              Clipboard.setString(shareMessage);
+              Alert.alert('Copied!', 'Recipe copied to clipboard.');
+            },
+          },
+          {
+            text: 'Share',
+            onPress: async () => {
+              try {
+                await Share.share({
+                  message: shareMessage,
+                  title: recipe.title,
+                });
+              } catch (error: any) {
+                Alert.alert('Share Failed', error.message || 'Could not share recipe.');
+              }
+            },
+          },
+          { text: 'Cancel', style: 'cancel' },
+        ]
+      );
+    }, 300);
   };
 
   const handleAddToMealPlan = () => {
