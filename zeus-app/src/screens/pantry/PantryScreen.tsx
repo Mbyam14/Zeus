@@ -33,6 +33,101 @@ const CATEGORY_EMOJIS: Record<PantryCategory, string> = {
   Pantry: '🥫', Other: '📦'
 };
 
+// Common pantry staples for quick-add
+interface QuickAddItem {
+  name: string;
+  category: PantryCategory;
+  defaultUnit: string;
+}
+
+const QUICK_ADD_ITEMS: { category: string; emoji: string; items: QuickAddItem[] }[] = [
+  {
+    category: 'Dairy & Eggs',
+    emoji: '🥛',
+    items: [
+      { name: 'Eggs', category: 'Dairy', defaultUnit: 'pieces' },
+      { name: 'Milk', category: 'Dairy', defaultUnit: 'cups' },
+      { name: 'Butter', category: 'Dairy', defaultUnit: 'tbsp' },
+      { name: 'Cheese', category: 'Dairy', defaultUnit: 'oz' },
+      { name: 'Greek Yogurt', category: 'Dairy', defaultUnit: 'cups' },
+      { name: 'Heavy Cream', category: 'Dairy', defaultUnit: 'cups' },
+      { name: 'Sour Cream', category: 'Dairy', defaultUnit: 'cups' },
+    ]
+  },
+  {
+    category: 'Produce',
+    emoji: '🥬',
+    items: [
+      { name: 'Onions', category: 'Produce', defaultUnit: 'pieces' },
+      { name: 'Garlic', category: 'Produce', defaultUnit: 'cloves' },
+      { name: 'Tomatoes', category: 'Produce', defaultUnit: 'pieces' },
+      { name: 'Potatoes', category: 'Produce', defaultUnit: 'lbs' },
+      { name: 'Carrots', category: 'Produce', defaultUnit: 'pieces' },
+      { name: 'Bell Peppers', category: 'Produce', defaultUnit: 'pieces' },
+      { name: 'Lemons', category: 'Produce', defaultUnit: 'pieces' },
+      { name: 'Limes', category: 'Produce', defaultUnit: 'pieces' },
+      { name: 'Lettuce', category: 'Produce', defaultUnit: 'heads' },
+      { name: 'Spinach', category: 'Produce', defaultUnit: 'oz' },
+    ]
+  },
+  {
+    category: 'Proteins',
+    emoji: '🍗',
+    items: [
+      { name: 'Chicken Breast', category: 'Protein', defaultUnit: 'lbs' },
+      { name: 'Ground Beef', category: 'Protein', defaultUnit: 'lbs' },
+      { name: 'Bacon', category: 'Protein', defaultUnit: 'oz' },
+      { name: 'Salmon', category: 'Protein', defaultUnit: 'lbs' },
+      { name: 'Shrimp', category: 'Protein', defaultUnit: 'lbs' },
+      { name: 'Tofu', category: 'Protein', defaultUnit: 'oz' },
+    ]
+  },
+  {
+    category: 'Pantry Staples',
+    emoji: '🥫',
+    items: [
+      { name: 'Olive Oil', category: 'Pantry', defaultUnit: 'cups' },
+      { name: 'Vegetable Oil', category: 'Pantry', defaultUnit: 'cups' },
+      { name: 'All-Purpose Flour', category: 'Grains', defaultUnit: 'cups' },
+      { name: 'Sugar', category: 'Pantry', defaultUnit: 'cups' },
+      { name: 'Brown Sugar', category: 'Pantry', defaultUnit: 'cups' },
+      { name: 'Rice', category: 'Grains', defaultUnit: 'cups' },
+      { name: 'Pasta', category: 'Grains', defaultUnit: 'oz' },
+      { name: 'Bread', category: 'Grains', defaultUnit: 'pieces' },
+      { name: 'Chicken Broth', category: 'Pantry', defaultUnit: 'cups' },
+      { name: 'Canned Tomatoes', category: 'Pantry', defaultUnit: 'cans' },
+      { name: 'Beans', category: 'Pantry', defaultUnit: 'cans' },
+    ]
+  },
+  {
+    category: 'Spices & Seasonings',
+    emoji: '🌶️',
+    items: [
+      { name: 'Salt', category: 'Spices', defaultUnit: 'tsp' },
+      { name: 'Black Pepper', category: 'Spices', defaultUnit: 'tsp' },
+      { name: 'Garlic Powder', category: 'Spices', defaultUnit: 'tsp' },
+      { name: 'Onion Powder', category: 'Spices', defaultUnit: 'tsp' },
+      { name: 'Paprika', category: 'Spices', defaultUnit: 'tsp' },
+      { name: 'Cumin', category: 'Spices', defaultUnit: 'tsp' },
+      { name: 'Italian Seasoning', category: 'Spices', defaultUnit: 'tsp' },
+      { name: 'Cinnamon', category: 'Spices', defaultUnit: 'tsp' },
+    ]
+  },
+  {
+    category: 'Condiments',
+    emoji: '🧂',
+    items: [
+      { name: 'Soy Sauce', category: 'Condiments', defaultUnit: 'tbsp' },
+      { name: 'Hot Sauce', category: 'Condiments', defaultUnit: 'tbsp' },
+      { name: 'Ketchup', category: 'Condiments', defaultUnit: 'tbsp' },
+      { name: 'Mustard', category: 'Condiments', defaultUnit: 'tbsp' },
+      { name: 'Mayonnaise', category: 'Condiments', defaultUnit: 'tbsp' },
+      { name: 'Honey', category: 'Condiments', defaultUnit: 'tbsp' },
+      { name: 'Vinegar', category: 'Condiments', defaultUnit: 'tbsp' },
+    ]
+  },
+];
+
 interface PantryScreenProps {
   navigation?: any;
 }
@@ -64,6 +159,9 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [tempDate, setTempDate] = useState(new Date());
   const [analyzingImage, setAnalyzingImage] = useState(false);
+  const [showQuickAddModal, setShowQuickAddModal] = useState(false);
+  const [selectedQuickItems, setSelectedQuickItems] = useState<Set<string>>(new Set());
+  const [addingQuickItems, setAddingQuickItems] = useState(false);
 
   useEffect(() => {
     loadPantryItems();
@@ -91,6 +189,56 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
       console.error('❌ Load pantry items error:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Quick-add handlers
+  const toggleQuickItem = (itemName: string) => {
+    setSelectedQuickItems(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(itemName)) {
+        newSet.delete(itemName);
+      } else {
+        newSet.add(itemName);
+      }
+      return newSet;
+    });
+  };
+
+  const handleQuickAdd = async () => {
+    if (selectedQuickItems.size === 0) {
+      Alert.alert('No Items Selected', 'Please select at least one item to add.');
+      return;
+    }
+
+    setAddingQuickItems(true);
+    try {
+      // Find the selected items and create pantry items
+      const itemsToAdd: PantryItemCreate[] = [];
+      QUICK_ADD_ITEMS.forEach(category => {
+        category.items.forEach(item => {
+          if (selectedQuickItems.has(item.name)) {
+            itemsToAdd.push({
+              item_name: item.name,
+              quantity: 1,
+              unit: item.defaultUnit,
+              category: item.category,
+              expires_at: undefined
+            });
+          }
+        });
+      });
+
+      await pantryService.bulkAddPantryItems(itemsToAdd);
+      Alert.alert('Success!', `Added ${itemsToAdd.length} item${itemsToAdd.length > 1 ? 's' : ''} to your pantry.`);
+      setShowQuickAddModal(false);
+      setSelectedQuickItems(new Set());
+      loadPantryItems();
+    } catch (error) {
+      console.error('Quick add error:', error);
+      Alert.alert('Error', 'Failed to add items. Please try again.');
+    } finally {
+      setAddingQuickItems(false);
     }
   };
 
@@ -438,6 +586,12 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
         <Text style={styles.headerTitle}>Pantry</Text>
         <View style={styles.headerButtons}>
           <TouchableOpacity
+            style={styles.quickAddButton}
+            onPress={() => setShowQuickAddModal(true)}
+          >
+            <Text style={styles.quickAddButtonText}>⚡</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
             style={[styles.photoButton, analyzingImage && styles.photoButtonDisabled]}
             onPress={handlePhotoUpload}
             disabled={analyzingImage}
@@ -519,6 +673,76 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
           </View>
         </View>
       )}
+
+      {/* Quick Add Modal */}
+      <Modal visible={showQuickAddModal} animationType="slide" transparent={true} onRequestClose={() => { setShowQuickAddModal(false); setSelectedQuickItems(new Set()); }}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.quickAddModalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Quick Add Staples</Text>
+              <TouchableOpacity onPress={() => { setShowQuickAddModal(false); setSelectedQuickItems(new Set()); }}>
+                <Text style={styles.modalClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.quickAddSubtitle}>
+              Tap items to select, then add them all at once
+            </Text>
+
+            <ScrollView style={styles.quickAddScroll} showsVerticalScrollIndicator={false}>
+              {QUICK_ADD_ITEMS.map((category, categoryIndex) => (
+                <View key={categoryIndex} style={styles.quickAddCategory}>
+                  <Text style={styles.quickAddCategoryTitle}>
+                    {category.emoji} {category.category}
+                  </Text>
+                  <View style={styles.quickAddItemsGrid}>
+                    {category.items.map((item, itemIndex) => (
+                      <TouchableOpacity
+                        key={itemIndex}
+                        style={[
+                          styles.quickAddItem,
+                          selectedQuickItems.has(item.name) && styles.quickAddItemSelected
+                        ]}
+                        onPress={() => toggleQuickItem(item.name)}
+                      >
+                        <Text style={[
+                          styles.quickAddItemText,
+                          selectedQuickItems.has(item.name) && styles.quickAddItemTextSelected
+                        ]}>
+                          {item.name}
+                        </Text>
+                        {selectedQuickItems.has(item.name) && (
+                          <Text style={styles.quickAddCheckmark}>✓</Text>
+                        )}
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              ))}
+              <View style={{ height: 100 }} />
+            </ScrollView>
+
+            <View style={styles.quickAddFooter}>
+              <TouchableOpacity
+                style={[
+                  styles.quickAddButton2,
+                  selectedQuickItems.size === 0 && styles.quickAddButtonDisabled
+                ]}
+                onPress={handleQuickAdd}
+                disabled={addingQuickItems || selectedQuickItems.size === 0}
+              >
+                {addingQuickItems ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.quickAddButtonText2}>
+                    Add {selectedQuickItems.size} Item{selectedQuickItems.size !== 1 ? 's' : ''} to Pantry
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={showAddModal} animationType="slide" transparent={true} onRequestClose={() => { setShowAddModal(false); resetForm(); }}>
         <KeyboardAvoidingView
@@ -800,6 +1024,23 @@ const createStyles = (colors: any) => StyleSheet.create({
   photoButtonText: { fontSize: 20 },
   addButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center' },
   addButtonText: { fontSize: 28, fontWeight: 'bold', color: colors.backgroundSecondary },
+  quickAddButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFF3E0', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#FFB74D' },
+  quickAddButtonText: { fontSize: 20 },
+  quickAddModalContent: { backgroundColor: colors.background, borderTopLeftRadius: 20, borderTopRightRadius: 20, height: '85%', marginTop: 'auto' },
+  quickAddSubtitle: { fontSize: 14, color: colors.textMuted, textAlign: 'center', paddingHorizontal: 20, marginBottom: 16 },
+  quickAddScroll: { flex: 1, paddingHorizontal: 20 },
+  quickAddCategory: { marginBottom: 20 },
+  quickAddCategoryTitle: { fontSize: 16, fontWeight: 'bold', color: colors.text, marginBottom: 12 },
+  quickAddItemsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  quickAddItem: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 20, backgroundColor: colors.backgroundSecondary, borderWidth: 1, borderColor: colors.border, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  quickAddItemSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
+  quickAddItemText: { fontSize: 14, color: colors.text },
+  quickAddItemTextSelected: { color: '#FFFFFF', fontWeight: '600' },
+  quickAddCheckmark: { fontSize: 12, color: '#FFFFFF', fontWeight: 'bold' },
+  quickAddFooter: { padding: 20, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.background },
+  quickAddButton2: { backgroundColor: colors.primary, paddingVertical: 16, borderRadius: 12, alignItems: 'center' },
+  quickAddButtonDisabled: { backgroundColor: colors.textMuted, opacity: 0.5 },
+  quickAddButtonText2: { fontSize: 18, fontWeight: 'bold', color: '#FFFFFF' },
   searchContainer: { paddingHorizontal: 20, paddingVertical: 12, backgroundColor: colors.backgroundSecondary },
   searchInput: { backgroundColor: colors.background, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16, color: colors.text, borderWidth: 1, borderColor: colors.border },
   filterContainer: { backgroundColor: colors.backgroundSecondary, borderBottomWidth: 1, borderBottomColor: colors.border, zIndex: 10, elevation: 5 },
