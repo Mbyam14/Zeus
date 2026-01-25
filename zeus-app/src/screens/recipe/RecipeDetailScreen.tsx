@@ -743,13 +743,14 @@ const createStyles = (colors: any) =>
       backgroundColor: colors.backgroundSecondary,
     },
     contentNoImage: {
-      paddingTop: 100, // Extra padding when no image to account for header
+      paddingTop: 80, // Extra padding when no image to account for header
     },
     title: {
       fontSize: 28,
       fontWeight: 'bold',
       color: colors.text,
-      marginBottom: 16,
+      marginTop: 8,
+      marginBottom: 20,
     },
     creatorRow: {
       flexDirection: 'row',
