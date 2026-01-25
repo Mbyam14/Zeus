@@ -44,51 +44,66 @@ export const RecipeDetailScreen: React.FC<RecipeDetailScreenProps> = ({
   const currentStepRef = useRef(currentStep);
   currentStepRef.current = currentStep;
 
-  // Swipe animation
-  const pan = useRef(new Animated.ValueXY()).current;
+  // Slide animation for smooth transitions
+  const slideAnim = useRef(new Animated.Value(0)).current;
+  const [isAnimating, setIsAnimating] = useState(false);
 
-  const handleSwipe = (direction: 'next' | 'prev') => {
+  const animateToStep = (direction: 'next' | 'prev') => {
+    if (isAnimating) return;
+
     const step = currentStepRef.current;
     const totalSteps = recipe.instructions?.length || 0;
 
-    if (direction === 'prev' && step > 0) {
-      setCurrentStep(step - 1);
-    } else if (direction === 'next' && step < totalSteps - 1) {
-      setCurrentStep(step + 1);
-    }
+    const canGoNext = direction === 'next' && step < totalSteps - 1;
+    const canGoPrev = direction === 'prev' && step > 0;
+
+    if (!canGoNext && !canGoPrev) return;
+
+    setIsAnimating(true);
+
+    // Slide out
+    Animated.timing(slideAnim, {
+      toValue: direction === 'next' ? -screenWidth : screenWidth,
+      duration: 150,
+      useNativeDriver: true,
+    }).start(() => {
+      // Update step
+      if (direction === 'next') {
+        setCurrentStep(step + 1);
+      } else {
+        setCurrentStep(step - 1);
+      }
+
+      // Reset to opposite side (off-screen)
+      slideAnim.setValue(direction === 'next' ? screenWidth : -screenWidth);
+
+      // Slide in
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 150,
+        useNativeDriver: true,
+      }).start(() => {
+        setIsAnimating(false);
+      });
+    });
   };
 
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: (_, gestureState) => {
-        return Math.abs(gestureState.dx) > 5 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
+        return Math.abs(gestureState.dx) > 10 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy * 2);
       },
-      onPanResponderGrant: () => {
-        pan.setOffset({ x: 0, y: 0 });
-        pan.setValue({ x: 0, y: 0 });
-      },
-      onPanResponderMove: Animated.event(
-        [null, { dx: pan.x }],
-        { useNativeDriver: false }
-      ),
       onPanResponderRelease: (_, gestureState) => {
-        pan.flattenOffset();
+        const isSwipe = Math.abs(gestureState.dx) > 40 || Math.abs(gestureState.vx) > 0.5;
 
-        const isQuickSwipe = Math.abs(gestureState.vx) > 0.3;
-        const threshold = isQuickSwipe ? 15 : SWIPE_THRESHOLD;
-
-        if (gestureState.dx > threshold || (isQuickSwipe && gestureState.vx > 0.3)) {
-          handleSwipe('prev');
-        } else if (gestureState.dx < -threshold || (isQuickSwipe && gestureState.vx < -0.3)) {
-          handleSwipe('next');
+        if (isSwipe) {
+          if (gestureState.dx > 0 || gestureState.vx > 0.5) {
+            animateToStep('prev');
+          } else {
+            animateToStep('next');
+          }
         }
-
-        Animated.spring(pan, {
-          toValue: { x: 0, y: 0 },
-          useNativeDriver: false,
-          friction: 5,
-        }).start();
       },
     })
   ).current;
@@ -105,15 +120,11 @@ export const RecipeDetailScreen: React.FC<RecipeDetailScreenProps> = ({
   };
 
   const goToNextStep = () => {
-    if (recipe.instructions && currentStep < recipe.instructions.length - 1) {
-      setCurrentStep(currentStep + 1);
-    }
+    animateToStep('next');
   };
 
   const goToPreviousStep = () => {
-    if (currentStep > 0) {
-      setCurrentStep(currentStep - 1);
-    }
+    animateToStep('prev');
   };
 
   const getDifficultyColor = (difficulty: string) => {
@@ -389,7 +400,7 @@ export const RecipeDetailScreen: React.FC<RecipeDetailScreenProps> = ({
           <Animated.View
             style={[
               styles.cookingStepContainer,
-              { transform: [{ translateX: pan.x }] },
+              { transform: [{ translateX: slideAnim }] },
             ]}
             {...panResponder.panHandlers}
           >
