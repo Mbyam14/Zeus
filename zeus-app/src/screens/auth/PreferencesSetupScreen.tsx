@@ -12,6 +12,7 @@ import {
 import { UserPreferences } from '../../types/user';
 import { userService } from '../../services/userService';
 import { useThemeStore } from '../../store/themeStore';
+import { useAuthStore } from '../../store/authStore';
 
 const DIETARY_OPTIONS = ['Vegetarian', 'Vegan', 'Gluten-Free', 'Dairy-Free', 'Keto', 'Paleo', 'Pescatarian'];
 const CUISINE_OPTIONS = ['Italian', 'Mexican', 'Asian', 'Mediterranean', 'American', 'Indian', 'French', 'Thai'];
@@ -23,6 +24,7 @@ interface PreferencesSetupScreenProps {
 
 export const PreferencesSetupScreen: React.FC<PreferencesSetupScreenProps> = ({ navigation }) => {
   const { colors } = useThemeStore();
+  const { setSetupCompleted } = useAuthStore();
   const styles = createStyles(colors);
   const [loading, setLoading] = useState(false);
   const [preferences, setPreferences] = useState<UserPreferences>({
@@ -59,18 +61,18 @@ export const PreferencesSetupScreen: React.FC<PreferencesSetupScreenProps> = ({ 
       setLoading(true);
       await userService.updatePreferences(preferences);
       Alert.alert('Success', 'Your preferences have been saved!');
-      navigation.navigate('Main');
+      setSetupCompleted();  // AppNavigator will auto-navigate to main app
     } catch (error) {
       console.error('Failed to save preferences:', error);
       Alert.alert('Error', 'Failed to save preferences. You can update them later in your profile.');
-      navigation.navigate('Main');
+      setSetupCompleted();  // Still allow access even if save fails
     } finally {
       setLoading(false);
     }
   };
 
   const handleSkip = () => {
-    navigation.navigate('Main');
+    setSetupCompleted();  // AppNavigator will auto-navigate to main app
   };
 
   return (

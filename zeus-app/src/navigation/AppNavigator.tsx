@@ -1,12 +1,16 @@
 import React, { useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
+import { createStackNavigator } from '@react-navigation/stack';
 import { AuthNavigator } from './AuthNavigator';
 import { MainTabNavigator } from './MainTabNavigator';
+import { PreferencesSetupScreen } from '../screens/auth/PreferencesSetupScreen';
 import { useAuthStore } from '../store/authStore';
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 
+const SetupStack = createStackNavigator();
+
 export const AppNavigator: React.FC = () => {
-  const { isAuthenticated, isLoading, checkAuthStatus } = useAuthStore();
+  const { isAuthenticated, isLoading, hasCompletedSetup, checkAuthStatus } = useAuthStore();
 
   useEffect(() => {
     checkAuthStatus();
@@ -24,7 +28,15 @@ export const AppNavigator: React.FC = () => {
 
   return (
     <NavigationContainer>
-      {isAuthenticated ? <MainTabNavigator /> : <AuthNavigator />}
+      {!isAuthenticated ? (
+        <AuthNavigator />
+      ) : !hasCompletedSetup ? (
+        <SetupStack.Navigator screenOptions={{ headerShown: false }}>
+          <SetupStack.Screen name="PreferencesSetup" component={PreferencesSetupScreen} />
+        </SetupStack.Navigator>
+      ) : (
+        <MainTabNavigator />
+      )}
     </NavigationContainer>
   );
 };
