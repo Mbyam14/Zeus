@@ -250,20 +250,22 @@ Shared from Zeus - Your AI Meal Planner`;
         <View style={[styles.content, !recipe.image_url && styles.contentNoImage]}>
           <Text style={styles.title}>{recipe.title}</Text>
 
-          {/* Creator Info */}
-          <View style={styles.creatorRow}>
-            <View style={styles.creatorAvatar}>
-              <Text style={styles.creatorAvatarText}>
-                {recipe.creator_username?.charAt(0).toUpperCase() || 'U'}
-              </Text>
+          {/* Creator Info - only show for user-created recipes, not AI generated */}
+          {recipe.creator_username && !recipe.is_ai_generated && recipe.creator_username.toLowerCase() !== 'ai' && (
+            <View style={styles.creatorRow}>
+              <View style={styles.creatorAvatar}>
+                <Text style={styles.creatorAvatarText}>
+                  {recipe.creator_username.charAt(0).toUpperCase()}
+                </Text>
+              </View>
+              <View style={styles.creatorInfo}>
+                <Text style={styles.creatorName}>@{recipe.creator_username}</Text>
+                <Text style={styles.creatorSubtext}>
+                  {new Date(recipe.created_at).toLocaleDateString()}
+                </Text>
+              </View>
             </View>
-            <View style={styles.creatorInfo}>
-              <Text style={styles.creatorName}>@{recipe.creator_username}</Text>
-              <Text style={styles.creatorSubtext}>
-                {new Date(recipe.created_at).toLocaleDateString()}
-              </Text>
-            </View>
-          </View>
+          )}
 
           {/* Stats */}
           <View style={styles.statsRow}>
@@ -626,8 +628,8 @@ const createStyles = (colors: any) =>
       justifyContent: 'space-between',
       alignItems: 'center',
       paddingHorizontal: 16,
-      paddingTop: 48,
-      paddingBottom: 16,
+      paddingTop: 8,
+      paddingBottom: 12,
       zIndex: 10,
       backgroundColor: 'rgba(0,0,0,0.3)',
     },
@@ -732,13 +734,13 @@ const createStyles = (colors: any) =>
       backgroundColor: colors.backgroundSecondary,
     },
     contentNoImage: {
-      paddingTop: 80, // Extra padding when no image to account for header
+      paddingTop: 50, // Extra padding when no image to account for header
     },
     title: {
       fontSize: 28,
       fontWeight: 'bold',
       color: colors.text,
-      marginTop: 8,
+      marginTop: 16,
       marginBottom: 20,
     },
     creatorRow: {
