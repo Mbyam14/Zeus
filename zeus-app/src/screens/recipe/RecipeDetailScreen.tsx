@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,9 +7,16 @@ import {
   Image,
   TouchableOpacity,
   SafeAreaView,
+  Modal,
+  Dimensions,
+  Animated,
+  PanResponder,
 } from 'react-native';
 import { Recipe } from '../../types/recipe';
 import { useThemeStore } from '../../store/themeStore';
+
+const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+const SWIPE_THRESHOLD = 50;
 
 interface RecipeDetailScreenProps {
   route: {
@@ -27,6 +34,61 @@ export const RecipeDetailScreen: React.FC<RecipeDetailScreenProps> = ({
   const { colors } = useThemeStore();
   const styles = createStyles(colors);
   const { recipe } = route.params;
+
+  // Cooking mode state
+  const [cookingMode, setCookingMode] = useState(false);
+  const [currentStep, setCurrentStep] = useState(0);
+  const [showIngredients, setShowIngredients] = useState(false);
+
+  // Swipe animation
+  const pan = useRef(new Animated.ValueXY()).current;
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        return Math.abs(gestureState.dx) > 10;
+      },
+      onPanResponderMove: (_, gestureState) => {
+        pan.x.setValue(gestureState.dx);
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dx > SWIPE_THRESHOLD && currentStep > 0) {
+          // Swipe right - go to previous step
+          goToPreviousStep();
+        } else if (gestureState.dx < -SWIPE_THRESHOLD && recipe.instructions && currentStep < recipe.instructions.length - 1) {
+          // Swipe left - go to next step
+          goToNextStep();
+        }
+        Animated.spring(pan, {
+          toValue: { x: 0, y: 0 },
+          useNativeDriver: false,
+        }).start();
+      },
+    })
+  ).current;
+
+  const startCookingMode = () => {
+    setCurrentStep(0);
+    setShowIngredients(false);
+    setCookingMode(true);
+  };
+
+  const exitCookingMode = () => {
+    setCookingMode(false);
+    setShowIngredients(false);
+  };
+
+  const goToNextStep = () => {
+    if (recipe.instructions && currentStep < recipe.instructions.length - 1) {
+      setCurrentStep(currentStep + 1);
+    }
+  };
+
+  const goToPreviousStep = () => {
+    if (currentStep > 0) {
+      setCurrentStep(currentStep - 1);
+    }
+  };
 
   const getDifficultyColor = (difficulty: string) => {
     switch (difficulty) {
@@ -206,7 +268,18 @@ export const RecipeDetailScreen: React.FC<RecipeDetailScreenProps> = ({
 
           {/* Instructions */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Instructions</Text>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionTitle}>Instructions</Text>
+              {recipe.instructions && recipe.instructions.length > 0 && (
+                <TouchableOpacity
+                  style={styles.startCookingButton}
+                  onPress={startCookingMode}
+                >
+                  <Text style={styles.startCookingIcon}>👨‍🍳</Text>
+                  <Text style={styles.startCookingText}>Start Cooking</Text>
+                </TouchableOpacity>
+              )}
+            </View>
             {recipe.instructions && recipe.instructions.length > 0 ? (
               recipe.instructions.map((instruction, index) => (
                 <View key={index} style={styles.instructionItem}>
@@ -240,6 +313,139 @@ export const RecipeDetailScreen: React.FC<RecipeDetailScreenProps> = ({
           </View>
         </View>
       </ScrollView>
+
+      {/* Step-by-Step Cooking Mode Modal */}
+      <Modal
+        visible={cookingMode}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={exitCookingMode}
+      >
+        <View style={styles.cookingModeContainer}>
+          {/* Header */}
+          <View style={styles.cookingModeHeader}>
+            <TouchableOpacity
+              style={styles.cookingModeExitButton}
+              onPress={exitCookingMode}
+            >
+              <Text style={styles.cookingModeExitText}>✕</Text>
+            </TouchableOpacity>
+            <Text style={styles.cookingModeTitle}>{recipe.title}</Text>
+            <TouchableOpacity
+              style={[
+                styles.ingredientsToggleButton,
+                showIngredients && styles.ingredientsToggleButtonActive
+              ]}
+              onPress={() => setShowIngredients(!showIngredients)}
+            >
+              <Text style={styles.ingredientsToggleText}>📋</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Step Counter */}
+          <View style={styles.stepCounterContainer}>
+            <Text style={styles.stepCounterText}>
+              Step {currentStep + 1} of {recipe.instructions?.length || 0}
+            </Text>
+            <View style={styles.stepProgressBar}>
+              <View
+                style={[
+                  styles.stepProgressFill,
+                  {
+                    width: `${((currentStep + 1) / (recipe.instructions?.length || 1)) * 100}%`,
+                  },
+                ]}
+              />
+            </View>
+          </View>
+
+          {/* Main Content Area */}
+          <Animated.View
+            style={[
+              styles.cookingStepContainer,
+              { transform: [{ translateX: pan.x }] },
+            ]}
+            {...panResponder.panHandlers}
+          >
+            <View style={styles.cookingStepContent}>
+              <View style={styles.cookingStepNumberBadge}>
+                <Text style={styles.cookingStepNumberText}>{currentStep + 1}</Text>
+              </View>
+              <ScrollView
+                style={styles.cookingInstructionScroll}
+                contentContainerStyle={styles.cookingInstructionScrollContent}
+              >
+                <Text style={styles.cookingInstructionText}>
+                  {recipe.instructions?.[currentStep]?.instruction || ''}
+                </Text>
+              </ScrollView>
+            </View>
+
+            {/* Swipe Hint */}
+            <Text style={styles.swipeHint}>Swipe left or right to navigate</Text>
+          </Animated.View>
+
+          {/* Navigation Buttons */}
+          <View style={styles.cookingNavigation}>
+            <TouchableOpacity
+              style={[
+                styles.cookingNavButton,
+                currentStep === 0 && styles.cookingNavButtonDisabled,
+              ]}
+              onPress={goToPreviousStep}
+              disabled={currentStep === 0}
+            >
+              <Text style={styles.cookingNavButtonIcon}>←</Text>
+              <Text style={styles.cookingNavButtonText}>Previous</Text>
+            </TouchableOpacity>
+
+            {currentStep === (recipe.instructions?.length || 0) - 1 ? (
+              <TouchableOpacity
+                style={[styles.cookingNavButton, styles.cookingNavButtonDone]}
+                onPress={exitCookingMode}
+              >
+                <Text style={styles.cookingNavButtonIcon}>✓</Text>
+                <Text style={styles.cookingNavButtonTextDone}>Done!</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={[styles.cookingNavButton, styles.cookingNavButtonNext]}
+                onPress={goToNextStep}
+              >
+                <Text style={styles.cookingNavButtonTextNext}>Next</Text>
+                <Text style={styles.cookingNavButtonIcon}>→</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Ingredients Overlay */}
+          {showIngredients && (
+            <View style={styles.ingredientsOverlay}>
+              <View style={styles.ingredientsOverlayContent}>
+                <View style={styles.ingredientsOverlayHeader}>
+                  <Text style={styles.ingredientsOverlayTitle}>Ingredients</Text>
+                  <TouchableOpacity
+                    onPress={() => setShowIngredients(false)}
+                    style={styles.ingredientsOverlayClose}
+                  >
+                    <Text style={styles.ingredientsOverlayCloseText}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+                <ScrollView style={styles.ingredientsOverlayScroll}>
+                  {recipe.ingredients?.map((ingredient, index) => (
+                    <View key={index} style={styles.ingredientsOverlayItem}>
+                      <View style={styles.ingredientsOverlayBullet} />
+                      <Text style={styles.ingredientsOverlayText}>
+                        {ingredient.quantity} {ingredient.unit} {ingredient.name}
+                      </Text>
+                    </View>
+                  ))}
+                </ScrollView>
+              </View>
+            </View>
+          )}
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -373,11 +579,33 @@ const createStyles = (colors: any) =>
     section: {
       marginBottom: 24,
     },
+    sectionHeaderRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 16,
+    },
     sectionTitle: {
       fontSize: 20,
       fontWeight: 'bold',
       color: colors.text,
-      marginBottom: 16,
+    },
+    startCookingButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.primary,
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderRadius: 20,
+      gap: 6,
+    },
+    startCookingIcon: {
+      fontSize: 16,
+    },
+    startCookingText: {
+      color: '#FFFFFF',
+      fontSize: 14,
+      fontWeight: '600',
     },
     description: {
       fontSize: 16,
@@ -547,5 +775,246 @@ const createStyles = (colors: any) =>
       color: colors.textMuted,
       textAlign: 'center',
       lineHeight: 20,
+    },
+    // Cooking Mode Styles
+    cookingModeContainer: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    cookingModeHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingTop: 60,
+      paddingBottom: 16,
+      backgroundColor: colors.backgroundSecondary,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    cookingModeExitButton: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: colors.background,
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    cookingModeExitText: {
+      fontSize: 20,
+      color: colors.text,
+      fontWeight: 'bold',
+    },
+    cookingModeTitle: {
+      flex: 1,
+      fontSize: 16,
+      fontWeight: '600',
+      color: colors.text,
+      textAlign: 'center',
+      marginHorizontal: 12,
+    },
+    ingredientsToggleButton: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: colors.background,
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    ingredientsToggleButtonActive: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    ingredientsToggleText: {
+      fontSize: 20,
+    },
+    stepCounterContainer: {
+      paddingHorizontal: 24,
+      paddingVertical: 16,
+      backgroundColor: colors.backgroundSecondary,
+    },
+    stepCounterText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.textMuted,
+      textAlign: 'center',
+      marginBottom: 8,
+    },
+    stepProgressBar: {
+      height: 6,
+      backgroundColor: colors.border,
+      borderRadius: 3,
+      overflow: 'hidden',
+    },
+    stepProgressFill: {
+      height: '100%',
+      backgroundColor: colors.primary,
+      borderRadius: 3,
+    },
+    cookingStepContainer: {
+      flex: 1,
+      padding: 24,
+    },
+    cookingStepContent: {
+      flex: 1,
+      backgroundColor: colors.backgroundSecondary,
+      borderRadius: 20,
+      padding: 24,
+      alignItems: 'center',
+    },
+    cookingStepNumberBadge: {
+      width: 60,
+      height: 60,
+      borderRadius: 30,
+      backgroundColor: colors.primary,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginBottom: 24,
+    },
+    cookingStepNumberText: {
+      fontSize: 28,
+      fontWeight: 'bold',
+      color: '#FFFFFF',
+    },
+    cookingInstructionScroll: {
+      flex: 1,
+      width: '100%',
+    },
+    cookingInstructionScrollContent: {
+      flexGrow: 1,
+      justifyContent: 'center',
+    },
+    cookingInstructionText: {
+      fontSize: 24,
+      lineHeight: 36,
+      color: colors.text,
+      textAlign: 'center',
+      fontWeight: '500',
+    },
+    swipeHint: {
+      fontSize: 12,
+      color: colors.textMuted,
+      textAlign: 'center',
+      marginTop: 16,
+    },
+    cookingNavigation: {
+      flexDirection: 'row',
+      paddingHorizontal: 24,
+      paddingVertical: 20,
+      gap: 16,
+      backgroundColor: colors.backgroundSecondary,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+    },
+    cookingNavButton: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 16,
+      borderRadius: 12,
+      backgroundColor: colors.background,
+      borderWidth: 1,
+      borderColor: colors.border,
+      gap: 8,
+    },
+    cookingNavButtonDisabled: {
+      opacity: 0.4,
+    },
+    cookingNavButtonNext: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    cookingNavButtonDone: {
+      backgroundColor: '#2ECC71',
+      borderColor: '#2ECC71',
+    },
+    cookingNavButtonIcon: {
+      fontSize: 20,
+      color: colors.text,
+    },
+    cookingNavButtonText: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: colors.text,
+    },
+    cookingNavButtonTextNext: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: '#FFFFFF',
+    },
+    cookingNavButtonTextDone: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: '#FFFFFF',
+    },
+    // Ingredients Overlay
+    ingredientsOverlay: {
+      position: 'absolute',
+      bottom: 0,
+      left: 0,
+      right: 0,
+      top: '40%',
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    },
+    ingredientsOverlayContent: {
+      flex: 1,
+      backgroundColor: colors.backgroundSecondary,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+      marginTop: 20,
+    },
+    ingredientsOverlayHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      padding: 20,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    ingredientsOverlayTitle: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      color: colors.text,
+    },
+    ingredientsOverlayClose: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: colors.background,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    ingredientsOverlayCloseText: {
+      fontSize: 18,
+      color: colors.text,
+      fontWeight: 'bold',
+    },
+    ingredientsOverlayScroll: {
+      flex: 1,
+      padding: 20,
+    },
+    ingredientsOverlayItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 10,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    ingredientsOverlayBullet: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      backgroundColor: colors.primary,
+      marginRight: 12,
+    },
+    ingredientsOverlayText: {
+      fontSize: 16,
+      color: colors.text,
+      flex: 1,
     },
   });
