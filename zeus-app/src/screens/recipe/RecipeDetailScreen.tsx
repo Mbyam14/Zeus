@@ -140,13 +140,31 @@ export const RecipeDetailScreen: React.FC<RecipeDetailScreenProps> = ({
 
   const handleShare = async () => {
     setShowOptionsMenu(false);
+
+    // Build share message with recipe details
+    const ingredients = recipe.ingredients?.map(i => `• ${i.quantity} ${i.unit} ${i.name}`).join('\n') || '';
+    const shareMessage = `🍳 ${recipe.title}
+
+${recipe.description || ''}
+
+⏱️ Prep: ${recipe.prep_time || 0}min | Cook: ${recipe.cook_time || 0}min
+👥 Servings: ${recipe.servings}
+
+${ingredients ? `📝 Ingredients:\n${ingredients}` : ''}
+
+Shared from Zeus - Your AI Meal Planner`;
+
     try {
-      await Share.share({
-        message: `Check out this recipe: ${recipe.title}\n\n${recipe.description || ''}`,
+      const result = await Share.share({
+        message: shareMessage,
         title: recipe.title,
       });
-    } catch (error) {
-      console.error('Share error:', error);
+
+      if (result.action === Share.sharedAction) {
+        Alert.alert('Shared!', 'Recipe shared successfully.');
+      }
+    } catch (error: any) {
+      Alert.alert('Share Failed', error.message || 'Could not share recipe.');
     }
   };
 
