@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import { PantryItem, PantryCategory, PantryItemCreate, IngredientLibraryItem, DetectedPantryItem } from '../../types/pantry';
@@ -67,6 +68,13 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
   useEffect(() => {
     loadPantryItems();
   }, [selectedCategory, searchQuery]);
+
+  // Reload pantry when screen comes into focus (e.g., returning from ImageReviewScreen)
+  useFocusEffect(
+    useCallback(() => {
+      loadPantryItems();
+    }, [selectedCategory, searchQuery])
+  );
 
   const loadPantryItems = async () => {
     try {
