@@ -238,13 +238,13 @@ Shared from Zeus - Your AI Meal Planner`;
           </View>
         </View>
 
-        {/* Recipe Image */}
-        <Image
-          source={{
-            uri: recipe.image_url || 'https://via.placeholder.com/400x300/FF6B35/FFFFFF?text=Recipe',
-          }}
-          style={styles.image}
-        />
+        {/* Recipe Image - only show if image exists */}
+        {recipe.image_url && (
+          <Image
+            source={{ uri: recipe.image_url }}
+            style={styles.image}
+          />
+        )}
 
         {/* Recipe Header */}
         <View style={styles.content}>
