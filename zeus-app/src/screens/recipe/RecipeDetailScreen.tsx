@@ -414,17 +414,6 @@ Shared from Zeus - Your AI Meal Planner`;
             )}
           </View>
 
-          {/* Action Buttons */}
-          <View style={styles.actionButtons}>
-            <TouchableOpacity style={[styles.actionButton, styles.addToPlanButton]}>
-              <Text style={styles.actionButtonIcon}>📅</Text>
-              <Text style={styles.actionButtonText}>Add to Meal Plan</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.actionButton, styles.shareButton]}>
-              <Text style={styles.actionButtonIcon}>🔗</Text>
-              <Text style={styles.actionButtonText}>Share</Text>
-            </TouchableOpacity>
-          </View>
         </View>
       </ScrollView>
 
@@ -915,35 +904,6 @@ const createStyles = (colors: any) =>
       color: colors.text,
       lineHeight: 24,
       paddingTop: 4,
-    },
-    actionButtons: {
-      flexDirection: 'row',
-      gap: 12,
-      marginTop: 8,
-      marginBottom: 24,
-    },
-    actionButton: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingVertical: 14,
-      borderRadius: 12,
-      gap: 8,
-    },
-    addToPlanButton: {
-      backgroundColor: colors.primary,
-    },
-    shareButton: {
-      backgroundColor: colors.secondary,
-    },
-    actionButtonIcon: {
-      fontSize: 18,
-    },
-    actionButtonText: {
-      color: '#FFFFFF',
-      fontSize: 16,
-      fontWeight: '600',
     },
     macrosSection: {
       backgroundColor: colors.background,
