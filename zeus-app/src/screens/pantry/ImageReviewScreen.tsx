@@ -8,8 +8,12 @@ import {
   Alert,
   ActivityIndicator,
   Image,
+  Modal,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+
+const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 import { DetectedPantryItem, PantryItemCreate, PantryCategory } from '../../types/pantry';
 import { pantryService } from '../../services/pantryService';
 import { useThemeStore } from '../../store/themeStore';
@@ -52,6 +56,7 @@ export const ImageReviewScreen: React.FC<ImageReviewScreenProps> = ({
   });
 
   const [adding, setAdding] = useState(false);
+  const [showFullImage, setShowFullImage] = useState(false);
 
   const toggleItem = (index: number) => {
     const newSelected = new Set(selectedItems);
@@ -145,9 +150,43 @@ export const ImageReviewScreen: React.FC<ImageReviewScreenProps> = ({
       </View>
 
       {/* Image Preview */}
-      <View style={styles.imagePreviewContainer}>
+      <TouchableOpacity
+        style={styles.imagePreviewContainer}
+        onPress={() => setShowFullImage(true)}
+        activeOpacity={0.9}
+      >
         <Image source={{ uri: imageUri }} style={styles.imagePreview} resizeMode="cover" />
-      </View>
+        <View style={styles.expandButton}>
+          <Text style={styles.expandButtonText}>⤢</Text>
+        </View>
+      </TouchableOpacity>
+
+      {/* Full Image Modal */}
+      <Modal
+        visible={showFullImage}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowFullImage(false)}
+      >
+        <View style={styles.fullImageOverlay}>
+          <TouchableOpacity
+            style={styles.fullImageCloseButton}
+            onPress={() => setShowFullImage(false)}
+          >
+            <Text style={styles.fullImageCloseText}>✕</Text>
+          </TouchableOpacity>
+          <Image
+            source={{ uri: imageUri }}
+            style={styles.fullImage}
+            resizeMode="contain"
+          />
+          <TouchableOpacity
+            style={styles.fullImageTapArea}
+            onPress={() => setShowFullImage(false)}
+            activeOpacity={1}
+          />
+        </View>
+      </Modal>
 
       {/* Summary */}
       <View style={styles.summaryContainer}>
@@ -295,10 +334,61 @@ const createStyles = (colors: any) => StyleSheet.create({
   imagePreviewContainer: {
     height: 120,
     backgroundColor: colors.backgroundSecondary,
+    position: 'relative',
   },
   imagePreview: {
     width: '100%',
     height: '100%',
+  },
+  expandButton: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  expandButtonText: {
+    fontSize: 20,
+    color: '#FFFFFF',
+  },
+  fullImageOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullImageCloseButton: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  fullImageCloseText: {
+    fontSize: 24,
+    color: '#FFFFFF',
+    fontWeight: 'bold',
+  },
+  fullImage: {
+    width: screenWidth,
+    height: screenHeight * 0.8,
+  },
+  fullImageTapArea: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: -1,
   },
   summaryContainer: {
     flexDirection: 'row',
