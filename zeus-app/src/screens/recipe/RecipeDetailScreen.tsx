@@ -138,7 +138,7 @@ export const RecipeDetailScreen: React.FC<RecipeDetailScreenProps> = ({
     // TODO: Call API to save/unsave recipe
   };
 
-  const handleShare = async () => {
+  const handleShare = () => {
     setShowOptionsMenu(false);
 
     // Build share message with recipe details
@@ -154,14 +154,17 @@ ${ingredients ? `📝 Ingredients:\n${ingredients}` : ''}
 
 Shared from Zeus - Your AI Meal Planner`;
 
-    try {
-      await Share.share({
-        message: shareMessage,
-        title: recipe.title,
-      });
-    } catch (error: any) {
-      Alert.alert('Share Failed', error.message || 'Could not share recipe.');
-    }
+    // Delay to let the options menu close before opening share sheet
+    setTimeout(async () => {
+      try {
+        await Share.share({
+          message: shareMessage,
+          title: recipe.title,
+        });
+      } catch (error: any) {
+        Alert.alert('Share Failed', error.message || 'Could not share recipe.');
+      }
+    }, 300);
   };
 
   const handleAddToMealPlan = () => {
