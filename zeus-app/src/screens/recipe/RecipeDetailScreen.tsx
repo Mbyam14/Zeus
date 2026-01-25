@@ -13,6 +13,7 @@ import {
   PanResponder,
   Share,
   Alert,
+  Clipboard,
 } from 'react-native';
 import { Recipe } from '../../types/recipe';
 import { useThemeStore } from '../../store/themeStore';
@@ -138,7 +139,7 @@ export const RecipeDetailScreen: React.FC<RecipeDetailScreenProps> = ({
     // TODO: Call API to save/unsave recipe
   };
 
-  const handleShare = async () => {
+  const handleShare = () => {
     setShowOptionsMenu(false);
 
     // Build share message with recipe details
@@ -154,18 +155,33 @@ ${ingredients ? `📝 Ingredients:\n${ingredients}` : ''}
 
 Shared from Zeus - Your AI Meal Planner`;
 
-    try {
-      const result = await Share.share({
-        message: shareMessage,
-        title: recipe.title,
-      });
-
-      if (result.action === Share.sharedAction) {
-        Alert.alert('Shared!', 'Recipe shared successfully.');
-      }
-    } catch (error: any) {
-      Alert.alert('Share Failed', error.message || 'Could not share recipe.');
-    }
+    Alert.alert(
+      'Share Recipe',
+      'How would you like to share this recipe?',
+      [
+        {
+          text: 'Copy to Clipboard',
+          onPress: () => {
+            Clipboard.setString(shareMessage);
+            Alert.alert('Copied!', 'Recipe copied to clipboard.');
+          },
+        },
+        {
+          text: 'Share...',
+          onPress: async () => {
+            try {
+              await Share.share({
+                message: shareMessage,
+                title: recipe.title,
+              });
+            } catch (error: any) {
+              Alert.alert('Share Failed', error.message || 'Could not share recipe.');
+            }
+          },
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
   };
 
   const handleAddToMealPlan = () => {
