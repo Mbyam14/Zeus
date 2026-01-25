@@ -11,6 +11,8 @@ import {
   Dimensions,
   Animated,
   PanResponder,
+  Share,
+  Alert,
 } from 'react-native';
 import { Recipe } from '../../types/recipe';
 import { useThemeStore } from '../../store/themeStore';
@@ -34,6 +36,10 @@ export const RecipeDetailScreen: React.FC<RecipeDetailScreenProps> = ({
   const { colors } = useThemeStore();
   const styles = createStyles(colors);
   const { recipe } = route.params;
+
+  // Recipe action state
+  const [isSaved, setIsSaved] = useState(recipe.is_saved || false);
+  const [showOptionsMenu, setShowOptionsMenu] = useState(false);
 
   // Cooking mode state
   const [cookingMode, setCookingMode] = useState(false);
@@ -127,6 +133,34 @@ export const RecipeDetailScreen: React.FC<RecipeDetailScreenProps> = ({
     animateToStep('prev');
   };
 
+  const handleSaveToggle = () => {
+    setIsSaved(!isSaved);
+    // TODO: Call API to save/unsave recipe
+  };
+
+  const handleShare = async () => {
+    setShowOptionsMenu(false);
+    try {
+      await Share.share({
+        message: `Check out this recipe: ${recipe.title}\n\n${recipe.description || ''}`,
+        title: recipe.title,
+      });
+    } catch (error) {
+      console.error('Share error:', error);
+    }
+  };
+
+  const handleAddToMealPlan = () => {
+    setShowOptionsMenu(false);
+    Alert.alert('Add to Meal Plan', 'This feature is coming soon!');
+    // TODO: Navigate to meal plan selector
+  };
+
+  const handlePrint = () => {
+    setShowOptionsMenu(false);
+    Alert.alert('Print Recipe', 'This feature is coming soon!');
+  };
+
   const getDifficultyColor = (difficulty: string) => {
     switch (difficulty) {
       case 'Easy':
@@ -152,11 +186,17 @@ export const RecipeDetailScreen: React.FC<RecipeDetailScreenProps> = ({
             <Text style={styles.backButtonText}>←</Text>
           </TouchableOpacity>
           <View style={styles.headerActions}>
-            <TouchableOpacity style={styles.headerActionButton}>
-              <Text style={styles.headerActionText}>🔖</Text>
+            <TouchableOpacity
+              style={[styles.headerActionButton, isSaved && styles.headerActionButtonActive]}
+              onPress={handleSaveToggle}
+            >
+              <Text style={styles.headerActionText}>{isSaved ? '🔖' : '📑'}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.headerActionButton}>
-              <Text style={styles.headerActionText}>⋯</Text>
+            <TouchableOpacity
+              style={styles.headerActionButton}
+              onPress={() => setShowOptionsMenu(true)}
+            >
+              <Text style={styles.headerActionText}>•••</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -351,6 +391,64 @@ export const RecipeDetailScreen: React.FC<RecipeDetailScreenProps> = ({
         </View>
       </ScrollView>
 
+      {/* Options Menu Modal */}
+      <Modal
+        visible={showOptionsMenu}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowOptionsMenu(false)}
+      >
+        <TouchableOpacity
+          style={styles.optionsOverlay}
+          activeOpacity={1}
+          onPress={() => setShowOptionsMenu(false)}
+        >
+          <View style={styles.optionsMenu}>
+            <Text style={styles.optionsMenuTitle}>{recipe.title}</Text>
+
+            <TouchableOpacity style={styles.optionsMenuItem} onPress={handleSaveToggle}>
+              <Text style={styles.optionsMenuIcon}>{isSaved ? '🔖' : '📑'}</Text>
+              <Text style={styles.optionsMenuText}>{isSaved ? 'Remove from Saved' : 'Save Recipe'}</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.optionsMenuItem} onPress={handleShare}>
+              <Text style={styles.optionsMenuIcon}>📤</Text>
+              <Text style={styles.optionsMenuText}>Share Recipe</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.optionsMenuItem} onPress={handleAddToMealPlan}>
+              <Text style={styles.optionsMenuIcon}>📅</Text>
+              <Text style={styles.optionsMenuText}>Add to Meal Plan</Text>
+            </TouchableOpacity>
+
+            {recipe.instructions && recipe.instructions.length > 0 && (
+              <TouchableOpacity
+                style={styles.optionsMenuItem}
+                onPress={() => {
+                  setShowOptionsMenu(false);
+                  startCookingMode();
+                }}
+              >
+                <Text style={styles.optionsMenuIcon}>👨‍🍳</Text>
+                <Text style={styles.optionsMenuText}>Start Cooking Mode</Text>
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity style={styles.optionsMenuItem} onPress={handlePrint}>
+              <Text style={styles.optionsMenuIcon}>🖨️</Text>
+              <Text style={styles.optionsMenuText}>Print Recipe</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.optionsMenuItem, styles.optionsMenuCancel]}
+              onPress={() => setShowOptionsMenu(false)}
+            >
+              <Text style={styles.optionsMenuCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       {/* Step-by-Step Cooking Mode Modal */}
       <Modal
         visible={cookingMode}
@@ -531,8 +629,67 @@ const createStyles = (colors: any) =>
       justifyContent: 'center',
       alignItems: 'center',
     },
+    headerActionButtonActive: {
+      backgroundColor: colors.primary,
+    },
     headerActionText: {
-      fontSize: 20,
+      fontSize: 18,
+      fontWeight: '600',
+    },
+    // Options Menu Styles
+    optionsOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0, 0, 0, 0.6)',
+      justifyContent: 'flex-end',
+    },
+    optionsMenu: {
+      backgroundColor: colors.backgroundSecondary,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+      paddingTop: 20,
+      paddingBottom: 40,
+      paddingHorizontal: 20,
+    },
+    optionsMenuTitle: {
+      fontSize: 18,
+      fontWeight: 'bold',
+      color: colors.text,
+      textAlign: 'center',
+      marginBottom: 20,
+      paddingBottom: 16,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    optionsMenuItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 16,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    optionsMenuIcon: {
+      fontSize: 22,
+      marginRight: 16,
+      width: 30,
+      textAlign: 'center',
+    },
+    optionsMenuText: {
+      fontSize: 17,
+      color: colors.text,
+      fontWeight: '500',
+    },
+    optionsMenuCancel: {
+      justifyContent: 'center',
+      borderBottomWidth: 0,
+      marginTop: 8,
+      backgroundColor: colors.background,
+      borderRadius: 12,
+    },
+    optionsMenuCancelText: {
+      fontSize: 17,
+      color: colors.error,
+      fontWeight: '600',
+      textAlign: 'center',
     },
     image: {
       width: '100%',
