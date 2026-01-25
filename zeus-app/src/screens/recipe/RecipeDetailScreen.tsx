@@ -164,7 +164,7 @@ Shared from Zeus - Your AI Meal Planner`;
       } catch (error: any) {
         Alert.alert('Share Failed', error.message || 'Could not share recipe.');
       }
-    }, 300);
+    }, 500);
   };
 
   const handleAddToMealPlan = () => {
