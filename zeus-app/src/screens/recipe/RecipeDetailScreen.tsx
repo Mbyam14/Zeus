@@ -16,7 +16,7 @@ import { Recipe } from '../../types/recipe';
 import { useThemeStore } from '../../store/themeStore';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
-const SWIPE_THRESHOLD = 50;
+const SWIPE_THRESHOLD = 30;
 
 interface RecipeDetailScreenProps {
   route: {
@@ -45,23 +45,39 @@ export const RecipeDetailScreen: React.FC<RecipeDetailScreenProps> = ({
 
   const panResponder = useRef(
     PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: (_, gestureState) => {
-        return Math.abs(gestureState.dx) > 10;
+        // More sensitive - trigger on smaller horizontal movements
+        return Math.abs(gestureState.dx) > 5 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
       },
-      onPanResponderMove: (_, gestureState) => {
-        pan.x.setValue(gestureState.dx);
+      onPanResponderGrant: () => {
+        // Reset pan position when gesture starts
+        pan.setOffset({ x: 0, y: 0 });
+        pan.setValue({ x: 0, y: 0 });
       },
+      onPanResponderMove: Animated.event(
+        [null, { dx: pan.x }],
+        { useNativeDriver: false }
+      ),
       onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dx > SWIPE_THRESHOLD && currentStep > 0) {
+        pan.flattenOffset();
+
+        // Check velocity for quick swipes, or distance for slower swipes
+        const isQuickSwipe = Math.abs(gestureState.vx) > 0.3;
+        const threshold = isQuickSwipe ? 15 : SWIPE_THRESHOLD;
+
+        if ((gestureState.dx > threshold || (isQuickSwipe && gestureState.vx > 0.3)) && currentStep > 0) {
           // Swipe right - go to previous step
           goToPreviousStep();
-        } else if (gestureState.dx < -SWIPE_THRESHOLD && recipe.instructions && currentStep < recipe.instructions.length - 1) {
+        } else if ((gestureState.dx < -threshold || (isQuickSwipe && gestureState.vx < -0.3)) && recipe.instructions && currentStep < recipe.instructions.length - 1) {
           // Swipe left - go to next step
           goToNextStep();
         }
+
         Animated.spring(pan, {
           toValue: { x: 0, y: 0 },
           useNativeDriver: false,
+          friction: 5,
         }).start();
       },
     })
