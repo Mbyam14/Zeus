@@ -40,18 +40,31 @@ export const RecipeDetailScreen: React.FC<RecipeDetailScreenProps> = ({
   const [currentStep, setCurrentStep] = useState(0);
   const [showIngredients, setShowIngredients] = useState(false);
 
+  // Use ref to track current step for panResponder (avoids stale closure)
+  const currentStepRef = useRef(currentStep);
+  currentStepRef.current = currentStep;
+
   // Swipe animation
   const pan = useRef(new Animated.ValueXY()).current;
+
+  const handleSwipe = (direction: 'next' | 'prev') => {
+    const step = currentStepRef.current;
+    const totalSteps = recipe.instructions?.length || 0;
+
+    if (direction === 'prev' && step > 0) {
+      setCurrentStep(step - 1);
+    } else if (direction === 'next' && step < totalSteps - 1) {
+      setCurrentStep(step + 1);
+    }
+  };
 
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: (_, gestureState) => {
-        // More sensitive - trigger on smaller horizontal movements
         return Math.abs(gestureState.dx) > 5 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
       },
       onPanResponderGrant: () => {
-        // Reset pan position when gesture starts
         pan.setOffset({ x: 0, y: 0 });
         pan.setValue({ x: 0, y: 0 });
       },
@@ -62,16 +75,13 @@ export const RecipeDetailScreen: React.FC<RecipeDetailScreenProps> = ({
       onPanResponderRelease: (_, gestureState) => {
         pan.flattenOffset();
 
-        // Check velocity for quick swipes, or distance for slower swipes
         const isQuickSwipe = Math.abs(gestureState.vx) > 0.3;
         const threshold = isQuickSwipe ? 15 : SWIPE_THRESHOLD;
 
-        if ((gestureState.dx > threshold || (isQuickSwipe && gestureState.vx > 0.3)) && currentStep > 0) {
-          // Swipe right - go to previous step
-          goToPreviousStep();
-        } else if ((gestureState.dx < -threshold || (isQuickSwipe && gestureState.vx < -0.3)) && recipe.instructions && currentStep < recipe.instructions.length - 1) {
-          // Swipe left - go to next step
-          goToNextStep();
+        if (gestureState.dx > threshold || (isQuickSwipe && gestureState.vx > 0.3)) {
+          handleSwipe('prev');
+        } else if (gestureState.dx < -threshold || (isQuickSwipe && gestureState.vx < -0.3)) {
+          handleSwipe('next');
         }
 
         Animated.spring(pan, {
