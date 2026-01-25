@@ -215,7 +215,7 @@ Shared from Zeus - Your AI Meal Planner`;
     <SafeAreaView style={styles.container}>
       <ScrollView>
         {/* Header with Back Button */}
-        <View style={styles.headerBar}>
+        <View style={[styles.headerBar, !recipe.image_url && styles.headerBarNoImage]}>
           <TouchableOpacity
             style={styles.backButton}
             onPress={() => navigation.goBack()}
@@ -247,7 +247,7 @@ Shared from Zeus - Your AI Meal Planner`;
         )}
 
         {/* Recipe Header */}
-        <View style={styles.content}>
+        <View style={[styles.content, !recipe.image_url && styles.contentNoImage]}>
           <Text style={styles.title}>{recipe.title}</Text>
 
           {/* Creator Info */}
@@ -642,6 +642,11 @@ const createStyles = (colors: any) =>
       zIndex: 10,
       backgroundColor: 'rgba(0,0,0,0.3)',
     },
+    headerBarNoImage: {
+      backgroundColor: colors.backgroundSecondary,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
     backButton: {
       width: 40,
       height: 40,
@@ -736,6 +741,9 @@ const createStyles = (colors: any) =>
     content: {
       padding: 24,
       backgroundColor: colors.backgroundSecondary,
+    },
+    contentNoImage: {
+      paddingTop: 100, // Extra padding when no image to account for header
     },
     title: {
       fontSize: 28,
