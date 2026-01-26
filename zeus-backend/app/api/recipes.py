@@ -87,6 +87,8 @@ async def get_my_liked_recipes(
 
 @router.get("/my-recipes", response_model=List[RecipeResponse])
 async def get_my_recipes(
+    search: Optional[str] = Query(None, description="Search by recipe title"),
+    meal_type: Optional[str] = Query(None, description="Filter by meal type (breakfast, lunch, dinner)"),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     current_user: UserResponse = Depends(get_current_active_user)
@@ -94,9 +96,16 @@ async def get_my_recipes(
     """
     Get recipes created by the current user.
 
+    Supports search by title and filtering by meal type.
     Requires authentication.
     """
-    return await recipe_service.get_user_recipes(current_user.id, limit, offset)
+    return await recipe_service.get_user_recipes(
+        current_user.id,
+        limit,
+        offset,
+        search=search,
+        meal_type=meal_type
+    )
 
 
 @router.get("/{recipe_id}", response_model=RecipeResponse)

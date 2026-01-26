@@ -162,6 +162,7 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
   const [showQuickAddModal, setShowQuickAddModal] = useState(false);
   const [selectedQuickItems, setSelectedQuickItems] = useState<Set<string>>(new Set());
   const [addingQuickItems, setAddingQuickItems] = useState(false);
+  const [showAddDropdown, setShowAddDropdown] = useState(false);
 
   useEffect(() => {
     loadPantryItems();
@@ -586,30 +587,74 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
         <Text style={styles.headerTitle}>Pantry</Text>
         <View style={styles.headerButtons}>
           <TouchableOpacity
-            style={styles.quickAddButton}
-            onPress={() => setShowQuickAddModal(true)}
-          >
-            <Text style={styles.quickAddButtonText}>⚡</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.photoButton, analyzingImage && styles.photoButtonDisabled]}
-            onPress={handlePhotoUpload}
-            disabled={analyzingImage}
-          >
-            {analyzingImage ? (
-              <ActivityIndicator size="small" color={colors.primary} />
-            ) : (
-              <Text style={styles.photoButtonText}>📷</Text>
-            )}
-          </TouchableOpacity>
-          <TouchableOpacity
             style={styles.addButton}
-            onPress={() => { resetForm(); setShowAddModal(true); }}
+            onPress={() => setShowAddDropdown(!showAddDropdown)}
           >
-            <Text style={styles.addButtonText}>+</Text>
+            <Text style={styles.addButtonText}>{showAddDropdown ? '×' : '+'}</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Add Dropdown Menu */}
+        {showAddDropdown && (
+          <View style={styles.dropdownMenu}>
+            <TouchableOpacity
+              style={styles.dropdownMenuItem}
+              onPress={() => {
+                setShowAddDropdown(false);
+                setShowQuickAddModal(true);
+              }}
+            >
+              <View style={styles.dropdownMenuIcon}>
+                <Text style={styles.dropdownMenuIconText}>⚡</Text>
+              </View>
+              <Text style={styles.dropdownMenuText}>Quick Add</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.dropdownMenuItem, analyzingImage && styles.dropdownMenuItemDisabled]}
+              onPress={() => {
+                if (!analyzingImage) {
+                  setShowAddDropdown(false);
+                  handlePhotoUpload();
+                }
+              }}
+              disabled={analyzingImage}
+            >
+              <View style={styles.dropdownMenuIcon}>
+                {analyzingImage ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Text style={styles.dropdownMenuIconText}>📷</Text>
+                )}
+              </View>
+              <Text style={styles.dropdownMenuText}>Scan Items</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.dropdownMenuItem}
+              onPress={() => {
+                setShowAddDropdown(false);
+                resetForm();
+                setShowAddModal(true);
+              }}
+            >
+              <View style={styles.dropdownMenuIcon}>
+                <Text style={styles.dropdownMenuIconText}>✏️</Text>
+              </View>
+              <Text style={styles.dropdownMenuText}>Add Manually</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
+
+      {/* Dropdown Backdrop */}
+      {showAddDropdown && (
+        <TouchableOpacity
+          style={styles.dropdownBackdrop}
+          activeOpacity={1}
+          onPress={() => setShowAddDropdown(false)}
+        />
+      )}
 
       <View style={styles.searchContainer}>
         <TextInput
@@ -1016,16 +1061,18 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
 
 const createStyles = (colors: any) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, paddingVertical: 16, backgroundColor: colors.backgroundSecondary, borderBottomWidth: 1, borderBottomColor: colors.border },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, paddingVertical: 16, backgroundColor: colors.backgroundSecondary, borderBottomWidth: 1, borderBottomColor: colors.border, zIndex: 100 },
   headerTitle: { fontSize: 28, fontWeight: 'bold', color: colors.primary },
   headerButtons: { flexDirection: 'row', gap: 12 },
-  photoButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: colors.border },
-  photoButtonDisabled: { opacity: 0.5 },
-  photoButtonText: { fontSize: 20 },
   addButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center' },
   addButtonText: { fontSize: 28, fontWeight: 'bold', color: colors.backgroundSecondary },
-  quickAddButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFF3E0', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#FFB74D' },
-  quickAddButtonText: { fontSize: 20 },
+  dropdownMenu: { position: 'absolute', top: 70, right: 24, backgroundColor: colors.card, borderRadius: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 8, overflow: 'hidden', minWidth: 160, zIndex: 101 },
+  dropdownMenuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: colors.border },
+  dropdownMenuItemDisabled: { opacity: 0.5 },
+  dropdownMenuIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  dropdownMenuIconText: { fontSize: 18 },
+  dropdownMenuText: { fontSize: 16, fontWeight: '500', color: colors.text },
+  dropdownBackdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 },
   quickAddModalContent: { backgroundColor: colors.background, borderTopLeftRadius: 20, borderTopRightRadius: 20, height: '85%', marginTop: 'auto' },
   quickAddSubtitle: { fontSize: 14, color: colors.textMuted, textAlign: 'center', paddingHorizontal: 20, marginBottom: 16 },
   quickAddScroll: { flex: 1, paddingHorizontal: 20 },

@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -11,7 +12,17 @@ import {
   Modal,
 } from 'react-native';
 import { mealPlanService } from '../../services/mealPlanService';
-import { MealPlan, Recipe, DayOfWeek, MealType, MacroSummaryResponse } from '../../types/mealplan';
+import {
+  MealPlan,
+  Recipe,
+  DayOfWeek,
+  MealType,
+  MacroSummaryResponse,
+  MealSlot,
+  getRecipeIdFromSlot,
+  isRepeatMeal,
+  getOriginalDay
+} from '../../types/mealplan';
 import { useThemeStore } from '../../store/themeStore';
 
 interface MealPlanScreenProps {
@@ -28,6 +39,7 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
   const [macroSummary, setMacroSummary] = useState<MacroSummaryResponse | null>(null);
   const [showMacroSummary, setShowMacroSummary] = useState(false);
   const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set());
+  const [weekOffset, setWeekOffset] = useState(0); // 0 = current week, 1 = next week, -1 = last week
 
   const { colors } = useThemeStore();
   const styles = createStyles(colors);
@@ -44,15 +56,26 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
     return () => {
       isMountedRef.current = false;
     };
-  }, []);
+  }, [weekOffset]);
+
+  // Reload when returning from edit screen
+  useFocusEffect(
+    useCallback(() => {
+      if (mealPlan) {
+        loadMealPlan();
+      }
+    }, [mealPlan?.id, weekOffset])
+  );
 
   const loadMealPlan = async () => {
     try {
       if (isMountedRef.current) {
         setLoading(true);
       }
-      console.log('📱 Loading current meal plan...');
-      const plan = await mealPlanService.getCurrentWeekMealPlan();
+      console.log(`📱 Loading meal plan for week offset ${weekOffset}...`);
+      const plan = weekOffset === 0
+        ? await mealPlanService.getCurrentWeekMealPlan()
+        : await mealPlanService.getMealPlanByWeekOffset(weekOffset);
 
       if (plan) {
         console.log('✅ Meal plan loaded:', plan.plan_name);
@@ -84,10 +107,21 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
           }
         }
       } else {
-        console.log('ℹ️ No meal plan found');
+        console.log('ℹ️ No meal plan found for this week');
+        // Clear the meal plan state when no plan exists for this week
+        if (isMountedRef.current) {
+          setMealPlan(null);
+          setRecipes({});
+          setMacroSummary(null);
+        }
       }
     } catch (error) {
       console.error('❌ Failed to load meal plan:', error);
+      // Also clear state on error
+      if (isMountedRef.current) {
+        setMealPlan(null);
+        setRecipes({});
+      }
     } finally {
       if (isMountedRef.current) {
         setLoading(false);
@@ -126,7 +160,7 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
 
   /**
    * Safely extract recipe IDs from meal plan with type validation
-   * Handles edge cases: null values, non-string values, empty strings
+   * Handles both old format (string) and new format (object with recipe_id)
    */
   const extractRecipeIds = (plan: MealPlan): string[] => {
     const recipeIds: string[] = [];
@@ -144,14 +178,13 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
       }
 
       Object.entries(dayMeals).forEach(([mealType, value]) => {
-        // Validate value is a non-empty string (recipe ID)
-        if (typeof value === 'string' && value.trim().length > 0) {
-          const trimmedId = value.trim();
+        // Use helper function to extract recipe ID from either format
+        const recipeId = getRecipeIdFromSlot(value as MealSlot);
+        if (recipeId && recipeId.trim().length > 0) {
+          const trimmedId = recipeId.trim();
           if (!recipeIds.includes(trimmedId)) {
             recipeIds.push(trimmedId);
           }
-        } else if (value !== null && value !== undefined) {
-          console.warn(`⚠️ Invalid recipe ID for ${day}.${mealType}:`, typeof value, value);
         }
       });
     });
@@ -267,9 +300,10 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
   };
 
   const handleGenerateMealPlan = async () => {
+    const weekLabel = weekOffset === 0 ? 'this week' : weekOffset === 1 ? 'next week' : `week ${weekOffset > 0 ? '+' : ''}${weekOffset}`;
     Alert.alert(
       'Generate Meal Plan',
-      'This will create a full week of meals based on your pantry and preferences. This may take a minute.',
+      `This will create a full week of meals for ${weekLabel} based on your pantry and preferences. This may take a minute.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -277,12 +311,9 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
           onPress: async () => {
             try {
               setGenerating(true);
-              const today = new Date();
-              const monday = new Date(today);
-              monday.setDate(today.getDate() - today.getDay() + 1);
-              const startDate = monday.toISOString().split('T')[0];
 
-              const generateResponse = await mealPlanService.generateMealPlan(startDate);
+              // Use the week offset endpoint for generation
+              const generateResponse = await mealPlanService.generateMealPlanForWeek(weekOffset);
               console.log('🆕 Generation response:', generateResponse);
               console.log('🆕 New meal plan ID from generation:', generateResponse.meal_plan_id);
 
@@ -364,6 +395,9 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
         };
       });
 
+      // Reload macro summary to reflect the new meal
+      loadMacroSummary(mealPlan.id);
+
       Alert.alert('Success', `${mealType} has been regenerated!`);
     } catch (error) {
       console.error('Failed to regenerate meal:', error);
@@ -386,33 +420,104 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
     }
   };
 
-  const getDaysOfWeek = (): Array<{ day: DayOfWeek; label: string; date: string }> => {
-    const days: DayOfWeek[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+  const handleClearMealPlan = async () => {
+    if (!mealPlan) return;
+
+    Alert.alert(
+      'Clear Meal Plan',
+      `Are you sure you want to delete the meal plan for ${getWeekLabel().toLowerCase()}? This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await mealPlanService.deleteMealPlan(mealPlan.id);
+              if (isMountedRef.current) {
+                setMealPlan(null);
+                setRecipes({});
+                setMacroSummary(null);
+                Alert.alert('Success', 'Meal plan has been deleted.');
+              }
+            } catch (error) {
+              console.error('Failed to delete meal plan:', error);
+              Alert.alert('Error', 'Failed to delete meal plan. Please try again.');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const getDaysOfWeek = (): Array<{ day: DayOfWeek; label: string; date: string; fullDate: Date }> => {
+    const allDays: DayOfWeek[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+
+    // Use selected_days from meal plan if available, otherwise show all 7 days
+    const days: DayOfWeek[] = mealPlan?.selected_days || allDays;
+
     const today = new Date();
     const monday = new Date(today);
-    monday.setDate(today.getDate() - today.getDay() + 1);
+    // Get Monday of current week (weekday 0 = Sunday, 1 = Monday, etc)
+    const dayOfWeek = today.getDay();
+    const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek; // Adjust for Sunday
+    monday.setDate(today.getDate() + diff);
+    // Apply week offset
+    monday.setDate(monday.getDate() + (weekOffset * 7));
 
-    return days.map((day, index) => {
+    return days.map((day) => {
+      // Calculate the date for this specific day
+      const dayIndex = allDays.indexOf(day);
       const date = new Date(monday);
-      date.setDate(monday.getDate() + index);
+      date.setDate(monday.getDate() + dayIndex);
       return {
         day,
         label: day.slice(0, 3).toUpperCase(),
-        date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        fullDate: date
       };
     });
   };
 
+  const getWeekLabel = (): string => {
+    if (weekOffset === 0) return 'This Week';
+    if (weekOffset === 1) return 'Next Week';
+    if (weekOffset === -1) return 'Last Week';
+    return `${weekOffset > 0 ? '+' : ''}${weekOffset} Weeks`;
+  };
+
+  const getWeekDateRange = (): string => {
+    const days = getDaysOfWeek();
+    if (days.length === 0) return '';
+    const start = days[0].fullDate;
+    const end = days[days.length - 1].fullDate;
+    return `${start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${end.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+  };
+
   const renderMealCard = (mealType: MealType) => {
     const dayMeals = mealPlan?.meals[selectedDay];
-    const recipeId = dayMeals?.[mealType];
+    const mealSlot = dayMeals?.[mealType] as MealSlot | undefined;
+    const recipeId = getRecipeIdFromSlot(mealSlot);
     const recipe = recipeId ? recipes[recipeId] : null;
     const isRegenerating = regeneratingMeal === `${selectedDay}-${mealType}`;
+
+    // Check if this is a repeat/leftover meal
+    const isRepeat = isRepeatMeal(mealSlot);
+    const originalDay = getOriginalDay(mealSlot);
 
     return (
       <View key={mealType} style={styles.mealCard}>
         <View style={styles.mealHeader}>
-          <Text style={styles.mealType}>{mealType.charAt(0).toUpperCase() + mealType.slice(1)}</Text>
+          <View style={styles.mealTypeContainer}>
+            <Text style={styles.mealType}>{mealType.charAt(0).toUpperCase() + mealType.slice(1)}</Text>
+            {isRepeat && (
+              <View style={[styles.repeatBadge, originalDay ? styles.leftoverBadge : null]}>
+                <Text style={styles.repeatBadgeText}>
+                  {originalDay ? `Leftover` : 'Repeat'}
+                </Text>
+              </View>
+            )}
+          </View>
           {recipe && (
             <TouchableOpacity
               onPress={() => handleRegenerateMeal(selectedDay, mealType)}
@@ -438,6 +543,11 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
             </View>
             <View style={styles.mealInfo}>
               <Text style={styles.mealTitle}>{recipe.title}</Text>
+              {originalDay && (
+                <Text style={styles.leftoverHint}>
+                  From {originalDay.charAt(0).toUpperCase() + originalDay.slice(1)}'s dinner
+                </Text>
+              )}
               {recipe.calories && (
                 <View style={styles.macroPreview}>
                   <Text style={styles.macroText}>🔥 {recipe.calories} cal</Text>
@@ -450,9 +560,23 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
             </View>
           </TouchableOpacity>
         ) : (
-          <View style={styles.emptyMeal}>
-            <Text style={styles.emptyMealText}>No meal planned</Text>
-          </View>
+          <TouchableOpacity
+            style={styles.emptyMeal}
+            onPress={() => handleRegenerateMeal(selectedDay, mealType)}
+            disabled={isRegenerating}
+          >
+            {isRegenerating ? (
+              <>
+                <ActivityIndicator size="small" color={colors.primary} style={{ marginBottom: 8 }} />
+                <Text style={styles.emptyMealText}>Generating...</Text>
+              </>
+            ) : (
+              <>
+                <Text style={styles.generateMealIcon}>+</Text>
+                <Text style={styles.emptyMealText}>Generate Meal</Text>
+              </>
+            )}
+          </TouchableOpacity>
         )}
       </View>
     );
@@ -472,21 +596,42 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
   if (!mealPlan) {
     return (
       <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Meal Plan</Text>
+        </View>
+        {/* Week Navigation for empty state too */}
+        <View style={styles.weekNavContainer}>
+          <TouchableOpacity
+            style={styles.weekNavButton}
+            onPress={() => setWeekOffset(w => w - 1)}
+          >
+            <Text style={styles.weekNavArrow}>‹</Text>
+          </TouchableOpacity>
+          <View style={styles.weekNavInfo}>
+            <Text style={styles.weekNavLabel}>{getWeekLabel()}</Text>
+            <Text style={styles.weekNavDateRange}>{getWeekDateRange()}</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.weekNavButton}
+            onPress={() => setWeekOffset(w => w + 1)}
+          >
+            <Text style={styles.weekNavArrow}>›</Text>
+          </TouchableOpacity>
+        </View>
         <View style={styles.emptyContainer}>
-          <Text style={styles.emptyTitle}>No Meal Plan Yet</Text>
+          <Text style={styles.emptyIcon}>📅</Text>
+          <Text style={styles.emptyTitle}>No Meal Plan</Text>
           <Text style={styles.emptyDescription}>
-            Generate your first AI-powered meal plan based on your pantry and preferences!
+            {weekOffset === 0
+              ? 'Create a personalized meal plan - let AI generate it or build it yourself!'
+              : `No meal plan for ${getWeekLabel().toLowerCase()}. Create one now!`}
           </Text>
           <TouchableOpacity
             style={styles.generateButton}
-            onPress={handleGenerateMealPlan}
-            disabled={generating}
+            onPress={() => navigation.navigate('DaySelection')}
           >
-            {generating ? (
-              <ActivityIndicator color={colors.buttonText} />
-            ) : (
-              <Text style={styles.generateButtonText}>Generate Meal Plan</Text>
-            )}
+            <Text style={styles.generateButtonText}>Create a Meal Plan</Text>
+            <Text style={styles.generateButtonArrow}>→</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -520,16 +665,54 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
       {renderLoadingOverlay()}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Meal Plan</Text>
-        <TouchableOpacity
-          style={styles.regenerateAllButton}
-          onPress={handleGenerateMealPlan}
-          disabled={generating}
-        >
-          {generating ? (
-            <ActivityIndicator size="small" color={colors.buttonText} />
-          ) : (
-            <Text style={styles.regenerateAllButtonText}>New Week</Text>
+        <View style={styles.headerButtons}>
+          {mealPlan && (
+            <TouchableOpacity
+              style={styles.editButton}
+              onPress={() => navigation.navigate('MealPlanEdit', { mealPlan, recipes })}
+              disabled={generating}
+            >
+              <Text style={styles.editButtonText}>Edit</Text>
+            </TouchableOpacity>
           )}
+          <TouchableOpacity
+            style={styles.clearButton}
+            onPress={handleClearMealPlan}
+            disabled={generating || !mealPlan}
+          >
+            <Text style={styles.clearButtonText}>Clear</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.regenerateAllButton}
+            onPress={handleGenerateMealPlan}
+            disabled={generating}
+          >
+            {generating ? (
+              <ActivityIndicator size="small" color={colors.buttonText} />
+            ) : (
+              <Text style={styles.regenerateAllButtonText}>Generate</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Week Navigation */}
+      <View style={styles.weekNavContainer}>
+        <TouchableOpacity
+          style={styles.weekNavButton}
+          onPress={() => setWeekOffset(w => w - 1)}
+        >
+          <Text style={styles.weekNavArrow}>‹</Text>
+        </TouchableOpacity>
+        <View style={styles.weekNavInfo}>
+          <Text style={styles.weekNavLabel}>{getWeekLabel()}</Text>
+          <Text style={styles.weekNavDateRange}>{getWeekDateRange()}</Text>
+        </View>
+        <TouchableOpacity
+          style={styles.weekNavButton}
+          onPress={() => setWeekOffset(w => w + 1)}
+        >
+          <Text style={styles.weekNavArrow}>›</Text>
         </TouchableOpacity>
       </View>
 
@@ -542,8 +725,9 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.dayScrollContent}
           >
-            {daysOfWeek.map(({ day, label, date }) => {
-              const isToday = day === getCurrentDayOfWeek();
+            {daysOfWeek.map(({ day, label, date, fullDate }) => {
+              const today = new Date();
+              const isToday = weekOffset === 0 && day === getCurrentDayOfWeek();
               return (
                 <TouchableOpacity
                   key={day}
@@ -600,7 +784,11 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
           <View style={styles.macroToggleContent}>
             <Text style={styles.macroToggleEmoji}>📊</Text>
             <View style={styles.macroToggleTextContainer}>
-              <Text style={styles.macroToggleTitle}>Weekly Nutrition Summary</Text>
+              <Text style={styles.macroToggleTitle}>
+                {macroSummary?.num_days && macroSummary.num_days !== 7
+                  ? `${macroSummary.num_days}-Day Nutrition Summary`
+                  : 'Weekly Nutrition Summary'}
+              </Text>
               {macroSummary && !showMacroSummary && (
                 <Text style={styles.macroTogglePreview}>
                   Avg: {Math.round(macroSummary.weekly_summary.daily_averages.calories)} cal/day
@@ -671,9 +859,13 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
               </View>
             )}
 
-            {/* Weekly Overview */}
+            {/* Period Overview */}
             <View style={styles.macroCard}>
-              <Text style={styles.macroCardTitle}>Weekly Totals</Text>
+              <Text style={styles.macroCardTitle}>
+                {macroSummary.num_days && macroSummary.num_days !== 7
+                  ? `${macroSummary.num_days}-Day Totals`
+                  : 'Weekly Totals'}
+              </Text>
               <View style={styles.macroGrid}>
                 <View style={styles.macroItem}>
                   <Text style={styles.macroValue}>{macroSummary.weekly_summary.weekly_totals.calories.toLocaleString()}</Text>
@@ -811,84 +1003,189 @@ const createStyles = (colors: any) => StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 40,
+    paddingHorizontal: 32,
+  },
+  emptyIcon: {
+    fontSize: 56,
+    marginBottom: 16,
   },
   emptyTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
+    fontSize: 28,
+    fontWeight: '800',
     color: colors.text,
     marginBottom: 12,
+    letterSpacing: -0.5,
   },
   emptyDescription: {
     fontSize: 16,
     color: colors.textMuted,
     textAlign: 'center',
-    marginBottom: 32,
+    marginBottom: 36,
     lineHeight: 24,
+    fontWeight: '400',
   },
   generateButton: {
     backgroundColor: colors.primary,
-    paddingVertical: 16,
-    paddingHorizontal: 32,
-    borderRadius: 12,
-    minWidth: 200,
+    paddingVertical: 18,
+    paddingHorizontal: 40,
+    borderRadius: 16,
+    minWidth: 220,
     alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 6,
   },
   generateButtonText: {
     color: colors.buttonText,
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 17,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  generateButtonArrow: {
+    color: colors.buttonText,
+    fontSize: 18,
+    fontWeight: '700',
+    marginLeft: 8,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
     backgroundColor: colors.card,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
   },
   headerTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
+    fontSize: 26,
+    fontWeight: '800',
     color: colors.text,
+    letterSpacing: -0.5,
+  },
+  headerButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  editButton: {
+    backgroundColor: colors.primary + '15',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 12,
+  },
+  editButtonText: {
+    color: colors.primary,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  clearButton: {
+    backgroundColor: colors.background,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 12,
+  },
+  clearButtonText: {
+    color: colors.textMuted,
+    fontSize: 14,
+    fontWeight: '600',
   },
   regenerateAllButton: {
     backgroundColor: colors.primary,
     paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
+    paddingVertical: 9,
+    borderRadius: 12,
     flexDirection: 'row',
     alignItems: 'center',
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 3,
   },
   regenerateAllButtonText: {
     color: colors.buttonText,
     fontSize: 14,
+    fontWeight: '700',
+  },
+  // Week Navigation Styles
+  weekNavContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    backgroundColor: colors.card,
+    marginHorizontal: 16,
+    marginTop: 12,
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  weekNavButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: colors.background,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  weekNavArrow: {
+    fontSize: 24,
+    color: colors.primary,
     fontWeight: '600',
   },
+  weekNavInfo: {
+    flex: 1,
+    alignItems: 'center',
+    paddingHorizontal: 12,
+  },
+  weekNavLabel: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: colors.text,
+    letterSpacing: -0.3,
+  },
+  weekNavDateRange: {
+    fontSize: 13,
+    color: colors.textMuted,
+    marginTop: 3,
+    fontWeight: '500',
+  },
   calendarContainer: {
-    backgroundColor: colors.card,
+    backgroundColor: 'transparent',
     paddingVertical: 16,
-    marginBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    marginBottom: 8,
   },
   dayScrollContent: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
   },
   dayCard: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginHorizontal: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    backgroundColor: colors.background,
-    minWidth: 70,
+    marginHorizontal: 6,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    backgroundColor: colors.card,
+    minWidth: 64,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
   },
   dayCardSelected: {
     backgroundColor: colors.primary,
+    shadowColor: colors.primary,
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   dayCardToday: {
     borderWidth: 2,
@@ -930,29 +1227,56 @@ const createStyles = (colors: any) => StyleSheet.create({
   },
   mealsContainer: {
     paddingHorizontal: 16,
-    marginBottom: 16,
+    paddingBottom: 24,
   },
   mealCard: {
     backgroundColor: colors.card,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    borderRadius: 20,
+    padding: 18,
+    marginBottom: 14,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 4,
   },
   mealHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 14,
+  },
+  mealTypeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
   mealType: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.text,
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  repeatBadge: {
+    backgroundColor: colors.success + '20',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  leftoverBadge: {
+    backgroundColor: '#FFF3E0',
+  },
+  repeatBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.success,
+  },
+  leftoverHint: {
+    fontSize: 12,
+    color: colors.textMuted,
+    fontStyle: 'italic',
+    marginBottom: 4,
   },
   regenerateButton: {
     padding: 4,
@@ -965,52 +1289,63 @@ const createStyles = (colors: any) => StyleSheet.create({
     alignItems: 'center',
   },
   mealImagePlaceholder: {
-    width: 60,
-    height: 60,
-    borderRadius: 8,
+    width: 64,
+    height: 64,
+    borderRadius: 14,
     backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: 14,
   },
   mealEmoji: {
-    fontSize: 28,
+    fontSize: 30,
   },
   mealInfo: {
     flex: 1,
   },
   mealTitle: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 17,
+    fontWeight: '700',
     color: colors.text,
-    marginBottom: 4,
+    marginBottom: 6,
+    letterSpacing: -0.2,
   },
   macroPreview: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 16,
     marginBottom: 4,
   },
   macroText: {
-    fontSize: 12,
+    fontSize: 13,
     color: colors.textMuted,
+    fontWeight: '500',
   },
   mealSubtext: {
     fontSize: 14,
     color: colors.primary,
-    fontWeight: '500',
+    fontWeight: '600',
   },
   emptyMeal: {
-    paddingVertical: 16,
+    paddingVertical: 24,
     alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 2,
-    borderColor: colors.border,
+    borderColor: colors.primary + '40',
     borderStyle: 'dashed',
-    borderRadius: 8,
+    borderRadius: 12,
+    backgroundColor: colors.primary + '08',
+    minHeight: 80,
   },
   emptyMealText: {
     fontSize: 14,
-    color: colors.textMuted,
-    fontWeight: '500',
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  generateMealIcon: {
+    fontSize: 28,
+    color: colors.primary,
+    fontWeight: '300',
+    marginBottom: 4,
   },
   loadingOverlay: {
     flex: 1,

@@ -65,9 +65,20 @@ class RecipeService {
     await api.delete(`/api/recipes/${id}/save`);
   }
 
-  // Get user's created recipes
-  async getMyRecipes(limit = 20, offset = 0): Promise<Recipe[]> {
-    const response = await api.get<Recipe[]>(`/api/recipes/my-recipes?limit=${limit}&offset=${offset}`);
+  // Get user's created recipes with optional search and filter
+  async getMyRecipes(
+    limit = 20,
+    offset = 0,
+    search?: string,
+    mealType?: string
+  ): Promise<Recipe[]> {
+    const params = new URLSearchParams();
+    params.append('limit', limit.toString());
+    params.append('offset', offset.toString());
+    if (search) params.append('search', search);
+    if (mealType) params.append('meal_type', mealType);
+
+    const response = await api.get<Recipe[]>(`/api/recipes/my-recipes?${params.toString()}`);
     return response.data;
   }
 

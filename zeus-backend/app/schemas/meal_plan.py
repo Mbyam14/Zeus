@@ -84,9 +84,24 @@ class GroceryListResponse(BaseModel):
 class AIMealPlanRequest(BaseModel):
     meals_per_day: List[MealSlot] = Field(..., min_items=1)
     week_start_date: date
+    selected_days: Optional[List[str]] = Field(
+        default=None,
+        description="Days to include in meal plan (e.g., ['monday', 'tuesday', 'wednesday']). If None, defaults to all 7 days."
+    )
     goals: Optional[List[str]] = Field(default=[], description="budget-friendly, quick-meals, use-pantry-items")
     dietary_preferences: Optional[List[str]] = Field(default=[])
     cuisine_preferences: Optional[List[str]] = Field(default=[])
     cooking_skill: Optional[str] = Field(None, pattern="^(beginner|intermediate|advanced)$")
     pantry_items: Optional[List[str]] = Field(default=[])
     servings_per_meal: int = Field(4, ge=1, le=12)
+
+    @validator('selected_days')
+    def validate_selected_days(cls, v):
+        if v is not None:
+            valid_days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+            for day in v:
+                if day.lower() not in valid_days:
+                    raise ValueError(f"Invalid day: {day}. Must be one of {valid_days}")
+            # Normalize to lowercase
+            return [d.lower() for d in v]
+        return v

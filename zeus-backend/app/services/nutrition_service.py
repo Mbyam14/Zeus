@@ -214,15 +214,16 @@ class NutritionService:
         return result
 
     @staticmethod
-    def calculate_weekly_summary(recipes: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def calculate_weekly_summary(recipes: List[Dict[str, Any]], num_days: int = 7) -> Dict[str, Any]:
         """
-        Calculate weekly nutrition totals and daily averages.
+        Calculate nutrition totals and daily averages for a meal plan.
 
         Args:
             recipes: List of recipe dicts with nutrition fields
+            num_days: Number of days in the meal plan (default: 7)
 
         Returns:
-            Summary dict with weekly totals, daily averages, and macro percentages
+            Summary dict with period totals, daily averages, and macro percentages
         """
         total_calories = 0
         total_protein = 0.0
@@ -240,11 +241,12 @@ class NutritionService:
             total_carbs += recipe.get("carbs_grams") or 0
             total_fat += recipe.get("fat_grams") or 0
 
-        # Calculate daily averages (7 days)
-        daily_calories = total_calories / 7 if total_calories > 0 else 0
-        daily_protein = total_protein / 7 if total_protein > 0 else 0
-        daily_carbs = total_carbs / 7 if total_carbs > 0 else 0
-        daily_fat = total_fat / 7 if total_fat > 0 else 0
+        # Calculate daily averages based on the number of days in the plan
+        days = max(1, num_days)  # Prevent division by zero
+        daily_calories = total_calories / days if total_calories > 0 else 0
+        daily_protein = total_protein / days if total_protein > 0 else 0
+        daily_carbs = total_carbs / days if total_carbs > 0 else 0
+        daily_fat = total_fat / days if total_fat > 0 else 0
 
         # Calculate macro percentages
         protein_cals = total_protein * 4

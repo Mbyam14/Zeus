@@ -4,6 +4,10 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { FeedScreen } from '../screens/home/FeedScreen';
 import { ProfileNavigator } from './ProfileNavigator';
 import { MealPlanScreen } from '../screens/mealplan/MealPlanScreen';
+import { MealPlanEditScreen } from '../screens/mealplan/MealPlanEditScreen';
+import { DaySelectionScreen } from '../screens/mealplan/DaySelectionScreen';
+import { CreateMealPlanScreen } from '../screens/mealplan/CreateMealPlanScreen';
+import { ManualMealPlanBuilder } from '../screens/mealplan/ManualMealPlanBuilder';
 import { CreateScreen } from '../screens/create/CreateScreen';
 import { AIScreen } from '../screens/create/AIScreen';
 import { PantryScreen } from '../screens/pantry/PantryScreen';
@@ -23,6 +27,10 @@ export type CreateStackParamList = {
 export type MealPlanStackParamList = {
   MealPlanMain: undefined;
   RecipeDetail: { recipe: any };
+  MealPlanEdit: { mealPlan: any; recipes: Record<string, any> };
+  DaySelection: undefined;
+  CreateMealPlan: { selectedDays: string[] };
+  ManualMealPlanBuilder: { selectedDays: string[] };
 };
 
 export type PantryStackParamList = {
@@ -71,6 +79,10 @@ const MealPlanStackNavigator = () => {
     <MealPlanStack.Navigator screenOptions={{ headerShown: false }}>
       <MealPlanStack.Screen name="MealPlanMain" component={MealPlanScreen} />
       <MealPlanStack.Screen name="RecipeDetail" component={RecipeDetailScreen} />
+      <MealPlanStack.Screen name="MealPlanEdit" component={MealPlanEditScreen} />
+      <MealPlanStack.Screen name="DaySelection" component={DaySelectionScreen} />
+      <MealPlanStack.Screen name="CreateMealPlan" component={CreateMealPlanScreen} />
+      <MealPlanStack.Screen name="ManualMealPlanBuilder" component={ManualMealPlanBuilder} />
     </MealPlanStack.Navigator>
   );
 };

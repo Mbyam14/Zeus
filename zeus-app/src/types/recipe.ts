@@ -33,6 +33,12 @@ export interface Recipe {
   creator_username?: string;
   is_liked?: boolean;
   is_saved?: boolean;
+  // Nutrition fields
+  calories?: number;
+  protein_grams?: number;
+  carbs_grams?: number;
+  fat_grams?: number;
+  serving_size?: string;
 }
 
 export interface RecipeCreate {

@@ -149,16 +149,16 @@ class AIService:
                 detail="Failed to generate recipe. Please try again."
             )
     
-    async def generate_meal_plan(self, request: AIMealPlanRequest, user_id: str) -> Dict[str, Any]:
-        """Generate a weekly meal plan using Claude AI"""
+    async def generate_meal_plan(self, request: AIMealPlanRequest, user_id: str, user_preferences: dict = None) -> Dict[str, Any]:
+        """Generate a weekly meal plan using Claude AI with macro-aware targets"""
         if not self.client:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="AI meal plan generation service not configured"
             )
 
-        # Build the prompt
-        prompt = self._build_meal_plan_prompt(request)
+        # Build the prompt with user's nutrition targets
+        prompt = self._build_meal_plan_prompt(request, user_preferences)
 
         # Add variety note to encourage different results each time
         import random
@@ -254,89 +254,162 @@ class AIService:
 
         return prompt
     
-    def _build_meal_plan_prompt(self, request: AIMealPlanRequest) -> str:
-        """Build a detailed prompt for meal plan generation"""
+    def _build_meal_plan_prompt(self, request: AIMealPlanRequest, user_preferences: dict = None) -> str:
+        """Build a detailed prompt for meal plan generation with macro targets and batch cooking support"""
         meals_per_day = ', '.join([meal.value for meal in request.meals_per_day])
 
+        # Get user's macro targets with sensible defaults
+        if user_preferences is None:
+            user_preferences = {}
+
+        calorie_target = user_preferences.get("calorie_target", 2000)
+        protein_target = user_preferences.get("protein_target_grams", 150)
+
+        # Get batch cooking preferences
+        cooking_sessions = user_preferences.get("cooking_sessions_per_week", 6)
+        leftover_tolerance = user_preferences.get("leftover_tolerance", "moderate")
+        budget_friendly = user_preferences.get("budget_friendly", False)
+
+        # Handle dynamic day selection
+        all_days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+        selected_days = request.selected_days if request.selected_days else all_days
+        num_days = len(selected_days)
+
+        # Build days string for prompt
+        days_str = ', '.join([d.capitalize() for d in selected_days])
+
+        # Calculate unique recipe counts based on cooking sessions and number of days
+        # Scale the recipe counts based on the number of days
+        day_ratio = num_days / 7.0
+        scaled_cooking_sessions = max(2, int(cooking_sessions * day_ratio))
+
+        # Breakfasts: 2-3 unique (people often repeat breakfasts)
+        # Dinners: cooking_sessions - breakfast count (these become lunch leftovers)
+        # Lunches: 0-1 unique (rest are dinner leftovers)
+        unique_breakfasts = min(3, max(1, int(scaled_cooking_sessions / 3)))
+        unique_dinners = max(2, scaled_cooking_sessions - unique_breakfasts)
+        unique_lunches = 1 if num_days > 2 else 0  # One unique lunch if more than 2 days
+        total_unique = unique_breakfasts + unique_dinners + unique_lunches
+
+        # Get user's custom distribution OR use defaults
+        distribution = user_preferences.get("meal_calorie_distribution", {
+            "breakfast": 25, "lunch": 35, "dinner": 40
+        })
+
+        # Calculate per-meal targets based on user's distribution
+        breakfast_cals = int(calorie_target * distribution.get("breakfast", 25) / 100)
+        lunch_cals = int(calorie_target * distribution.get("lunch", 35) / 100)
+        dinner_cals = int(calorie_target * distribution.get("dinner", 40) / 100)
+
+        # Calculate per-meal protein targets (same distribution)
+        breakfast_protein = int(protein_target * distribution.get("breakfast", 25) / 100)
+        lunch_protein = int(protein_target * distribution.get("lunch", 35) / 100)
+        dinner_protein = int(protein_target * distribution.get("dinner", 40) / 100)
+
+        # Calculate estimated weekly calories (based on selected days)
+        weekly_calories = calorie_target * num_days
+        total_meals = num_days * 3  # 3 meals per day
+
         prompt = f"""
-        Please generate a complete weekly meal plan with FULL recipe details for each meal.
+        Generate a BATCH COOKING meal plan where recipes repeat throughout the selected days.
 
-        Meals per day: {meals_per_day}
-        Week starting: {request.week_start_date}
-        Goals: {', '.join(request.goals) if request.goals else 'None'}
-        Dietary preferences: {', '.join(request.dietary_preferences) if request.dietary_preferences else 'None'}
-        Cuisine preferences: {', '.join(request.cuisine_preferences) if request.cuisine_preferences else 'Any'}
-        Cooking skill: {request.cooking_skill or 'intermediate'}
-        Available pantry items: {', '.join(request.pantry_items) if request.pantry_items else 'None'}
-        Servings per meal: {request.servings_per_meal}
+        ========== SELECTED DAYS ==========
+        Generate meals for these {num_days} days ONLY: {days_str}
+        DO NOT include any days outside this list.
+        ===================================
 
-        IMPORTANT:
-        1. For each meal, provide ONLY basic information (title, description, macros, times).
-        2. DO NOT include full ingredients lists or step-by-step instructions - we'll generate those separately.
-        3. You MUST respond with ONLY valid JSON - no markdown, no explanations before or after.
-        4. Ensure all JSON is properly formatted with correct commas, brackets, and quotes.
-        5. Complete all 7 days with all 3 meals each.
-        6. DO NOT use emojis or special unicode characters in any text fields - use plain ASCII text only.
+        ========== BATCH COOKING REQUIREMENTS ==========
+        The user wants to cook only {scaled_cooking_sessions} times for this {num_days}-day plan.
+        This means you must CREATE FEWER UNIQUE RECIPES and REPEAT them across meals.
 
-        Please respond with a JSON object in this EXACT format:
+        EXACT RECIPE COUNTS TO CREATE:
+        - Create exactly {unique_breakfasts} BREAKFAST recipes (these will repeat across {num_days} days)
+        - Create exactly {unique_dinners} DINNER recipes (each dinner becomes the next day's lunch)
+        - Create exactly {unique_lunches} standalone LUNCH recipe (for days without dinner leftovers)
+
+        TOTAL UNIQUE RECIPES TO CREATE: {total_unique}
+        DO NOT create {total_meals} different recipes. Create exactly {total_unique} recipes and repeat them.
+
+        REPEAT PATTERN EXAMPLE (adapt to your selected days):
+        - Breakfast A appears on multiple days
+        - One day's dinner becomes the next day's lunch (same recipe, same title)
+        =================================================
+
+        ========== NUTRITION TARGETS (NON-NEGOTIABLE) ==========
+        DAILY CALORIE TARGET: {calorie_target} calories
+        DAILY PROTEIN TARGET: {protein_target}g protein
+
+        PER-MEAL CALORIE TARGETS (User-configured distribution):
+        - Breakfast: {breakfast_cals} calories ({distribution.get("breakfast", 25)}% of daily)
+        - Lunch: {lunch_cals} calories ({distribution.get("lunch", 35)}% of daily)
+        - Dinner: {dinner_cals} calories ({distribution.get("dinner", 40)}% of daily)
+
+        PER-MEAL PROTEIN TARGETS:
+        - Breakfast: ~{breakfast_protein}g protein
+        - Lunch: ~{lunch_protein}g protein
+        - Dinner: ~{dinner_protein}g protein
+
+        CRITICAL: Each meal MUST hit these calorie targets within 10%.
+        ==========================================================
+
+        User Context:
+        - Week starting: {request.week_start_date}
+        - Dietary preferences: {', '.join(request.dietary_preferences) if request.dietary_preferences else 'None'}
+        - Cuisine preferences: {', '.join(request.cuisine_preferences) if request.cuisine_preferences else 'Any'}
+        - Cooking skill: {request.cooking_skill or 'intermediate'}
+        - Pantry items available: {', '.join(request.pantry_items) if request.pantry_items else 'None'}
+        - Servings per meal: {request.servings_per_meal}
+        - Budget mode: {'ENABLED - prioritize cheap ingredients!' if budget_friendly else 'Standard'}
+
+        {"=" * 50 if budget_friendly else ""}
+        {"BUDGET-FRIENDLY MODE ACTIVE" if budget_friendly else ""}
+        {"=" * 50 if budget_friendly else ""}
+        {'''
+        IMPORTANT COST-SAVING REQUIREMENTS:
+        1. MAXIMIZE pantry item usage - use as many items from the pantry list above as possible
+        2. Use CHEAP protein sources: eggs, canned beans, lentils, chicken thighs, ground turkey, tofu, canned tuna
+        3. Use CHEAP staples: rice, pasta, potatoes, oats, bread, frozen vegetables
+        4. AVOID expensive ingredients: salmon, steak, shrimp, fresh berries out of season, specialty cheeses
+        5. Prefer BULK-FRIENDLY recipes: soups, stews, casseroles, rice bowls, pasta dishes
+        6. Recipes should use overlapping ingredients to minimize grocery shopping
+        7. Choose ingredients that are typically on sale or budget-friendly
+        ''' if budget_friendly else ''}
+
+        RESPONSE FORMAT:
+        1. Respond with ONLY valid JSON - no markdown, no explanations.
+        2. DO NOT include ingredients lists or step-by-step instructions.
+        3. DO NOT use emojis or special unicode characters.
+        4. REUSE recipes as specified above - do NOT generate 21 unique meals!
+
+        JSON STRUCTURE:
         {{
             "week_summary": {{
-                "total_unique_recipes": 21,
-                "estimated_weekly_calories": 14000,
-                "variety_score": "high"
+                "total_unique_recipes": {total_unique},
+                "estimated_total_calories": {weekly_calories},
+                "daily_calorie_target": {calorie_target},
+                "cooking_sessions": {scaled_cooking_sessions},
+                "num_days": {num_days}
             }},
             "meals": {{
-                "monday": {{
-                    "breakfast": {{
-                        "title": "Scrambled Eggs with Toast",
-                        "description": "Fluffy scrambled eggs with whole grain toast",
-                        "prep_time": 5,
-                        "cook_time": 10,
-                        "servings": {request.servings_per_meal},
-                        "calories": 350,
-                        "protein_grams": 20.0,
-                        "carbs_grams": 45.0,
-                        "fat_grams": 12.0,
-                        "cuisine_type": "American",
-                        "difficulty": "Easy"  // Must be EXACTLY one of: "Easy", "Medium", or "Hard" - no other values allowed
-                    }},
-                    "lunch": {{
-                        "title": "Chicken Caesar Salad",
-                        "description": "Fresh romaine with grilled chicken",
-                        "prep_time": 10,
-                        "cook_time": 15,
-                        "servings": {request.servings_per_meal},
-                        "calories": 420,
-                        "protein_grams": 35.0,
-                        "carbs_grams": 20.0,
-                        "fat_grams": 18.0,
-                        "cuisine_type": "American",
-                        "difficulty": "Medium"
-                    }},
-                    "dinner": {{ /* same simplified structure */ }}
+                "{selected_days[0]}": {{
+                    "breakfast": {{ "title": "Protein Oatmeal Bowl", "description": "...", "prep_time": 5, "cook_time": 10, "servings": {request.servings_per_meal}, "calories": {breakfast_cals}, "protein_grams": {breakfast_protein}, "carbs_grams": 45, "fat_grams": 12, "cuisine_type": "American", "difficulty": "Easy", "meal_type": ["Breakfast"] }},
+                    "lunch": {{ "title": "Chicken Caesar Salad", "description": "...", "prep_time": 10, "cook_time": 0, "servings": {request.servings_per_meal}, "calories": {lunch_cals}, "protein_grams": {lunch_protein}, "carbs_grams": 20, "fat_grams": 25, "cuisine_type": "American", "difficulty": "Easy", "meal_type": ["Lunch"] }},
+                    "dinner": {{ "title": "Beef Stir Fry with Rice", "description": "Makes enough for tomorrow's lunch too", "prep_time": 15, "cook_time": 20, "servings": {request.servings_per_meal}, "calories": {dinner_cals}, "protein_grams": {dinner_protein}, "carbs_grams": 50, "fat_grams": 20, "cuisine_type": "Asian", "difficulty": "Medium", "meal_type": ["Dinner", "Lunch"] }}
                 }},
-                "tuesday": {{ /* same structure for all meals */ }},
-                ... (continue for all 7 days: monday through sunday)
+                ... include ONLY the selected days: {days_str}
             }},
-            "grocery_list": [
-                {{"ingredient": "tomatoes", "quantity": "6", "unit": "pieces", "already_have": false}}
-            ]
+            "grocery_list": []
         }}
 
-        Guidelines:
-        1. Generate 21 SIMPLIFIED meal entries (breakfast, lunch, dinner for 7 days)
-        2. REQUIRED: Follow dietary restrictions completely - this is non-negotiable
-        3. DO NOT include ingredients or instructions in this response
-        4. Create varied, balanced meals across the week
-        5. Maximize use of pantry items to reduce grocery needs
-        6. Respect dietary preferences completely
-        7. Match cooking skill level
-        8. Estimate realistic macros (calories, protein, carbs, fat) per serving
-        9. CRITICAL: Ensure MAXIMUM variety - use diverse cuisines (Italian, Mexican, Asian, Mediterranean, Indian, Thai, etc.)
-        10. CRITICAL: Never repeat the same recipe name or concept - make each meal unique and creative
-        11. Mix up cooking methods (grilled, roasted, stir-fried, baked, etc.) for variety
-        12. Keep the response concise to ensure valid JSON
-        13. CRITICAL: difficulty must be EXACTLY "Easy", "Medium", or "Hard" - no other values like "Intermediate" are allowed
+        CRITICAL RULES FOR RECIPE REUSE:
+        1. Create exactly {unique_breakfasts} breakfast recipes - REPEAT them to fill all {num_days} days
+        2. Create exactly {unique_dinners} dinner recipes - each dinner REPEATS as the next day's lunch
+        3. For lunch: use the EXACT SAME title as the previous day's dinner (it's a leftover)
+        4. When repeating a recipe, use IDENTICAL title, calories, protein values
+        5. Each meal MUST hit calorie targets within 10%
+        6. difficulty must be EXACTLY "Easy", "Medium", or "Hard"
+        7. Dinners should be "leftover-friendly" foods (stews, stir-fries, casseroles, grain bowls)
+        8. ONLY include meals for the selected days: {days_str}
         """
 
         return prompt

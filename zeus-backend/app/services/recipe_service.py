@@ -233,21 +233,47 @@ class RecipeService:
         result = self.db.table("recipe_saves").delete().eq("user_id", user_id).eq("recipe_id", recipe_id).execute()
         return True
     
-    async def get_user_recipes(self, user_id: str, limit: int = 20, offset: int = 0) -> List[RecipeResponse]:
-        """Get recipes created by a user"""
+    async def get_user_recipes(
+        self,
+        user_id: str,
+        limit: int = 20,
+        offset: int = 0,
+        search: Optional[str] = None,
+        meal_type: Optional[str] = None
+    ) -> List[RecipeResponse]:
+        """
+        Get recipes created by a user with optional search and filtering.
+
+        Args:
+            user_id: The user ID to get recipes for
+            limit: Maximum number of recipes to return
+            offset: Number of recipes to skip
+            search: Search term to filter by title (case-insensitive)
+            meal_type: Filter by meal type (breakfast, lunch, dinner)
+        """
         query = self.db.table("recipes").select("""
             *,
             users!recipes_user_id_fkey(username)
-        """).eq("user_id", user_id).order("created_at", desc=True)
-        
+        """).eq("user_id", user_id)
+
+        # Apply search filter (case-insensitive title search)
+        if search:
+            query = query.ilike("title", f"%{search}%")
+
+        # Apply meal type filter
+        if meal_type:
+            # meal_type is stored as an array, use contains to check if the array contains the value
+            query = query.contains("meal_type", [meal_type.capitalize()])
+
+        query = query.order("created_at", desc=True)
         query = query.range(offset, offset + limit - 1)
         result = query.execute()
-        
+
         recipes = []
         for recipe_data in result.data:
             recipe_response = await self._format_recipe_response(recipe_data)
             recipes.append(recipe_response)
-        
+
         return recipes
     
     async def get_saved_recipes(self, user_id: str, limit: int = 20, offset: int = 0) -> List[RecipeResponse]:

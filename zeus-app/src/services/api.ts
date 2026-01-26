@@ -10,6 +10,23 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  // Custom params serializer to handle arrays in FastAPI-compatible format
+  // Converts selected_days: ['monday', 'tuesday'] to selected_days=monday&selected_days=tuesday
+  paramsSerializer: {
+    serialize: (params) => {
+      const parts: string[] = [];
+      Object.entries(params).forEach(([key, value]) => {
+        if (Array.isArray(value)) {
+          value.forEach((v) => {
+            parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(v)}`);
+          });
+        } else if (value !== null && value !== undefined) {
+          parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
+        }
+      });
+      return parts.join('&');
+    },
+  },
 });
 
 // Request interceptor to add auth token

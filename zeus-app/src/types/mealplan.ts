@@ -49,10 +49,22 @@ export interface Recipe {
   is_saved?: boolean;
 }
 
+// New meal slot format with repeat/leftover tracking
+export interface MealSlotData {
+  recipe_id: string;
+  is_repeat?: boolean;
+  original_day?: string; // For leftovers, which day was it originally cooked
+  order?: number;
+}
+
+// Meal slot can be either old format (string recipe_id) or new format (MealSlotData object)
+export type MealSlot = string | MealSlotData;
+
 export interface DayMeals {
-  breakfast?: string; // recipe_id
-  lunch?: string;
-  dinner?: string;
+  breakfast?: MealSlot;
+  lunch?: MealSlot;
+  dinner?: MealSlot;
+  snack?: MealSlot; // Support for snacks
 }
 
 export interface MealPlan {
@@ -60,6 +72,7 @@ export interface MealPlan {
   user_id: string;
   plan_name: string;
   week_start_date: string;
+  selected_days?: DayOfWeek[]; // Dynamic day selection (if not present, assume all 7 days)
   meals: {
     monday?: DayMeals;
     tuesday?: DayMeals;
@@ -81,6 +94,7 @@ export interface GroceryItem {
 
 export interface MealPlanGenerateResponse {
   meal_plan_id: string;
+  selected_days?: DayOfWeek[]; // The days included in this plan
   meals: {
     [day: string]: {
       [mealType: string]: string; // recipe_id
@@ -89,6 +103,9 @@ export interface MealPlanGenerateResponse {
   summary: {
     total_unique_recipes?: number;
     estimated_weekly_calories?: number;
+    estimated_total_calories?: number;
+    daily_calorie_target?: number;
+    num_days?: number;
     variety_score?: string;
   };
   grocery_list: GroceryItem[];
@@ -106,7 +123,28 @@ export interface UserPreferences {
 }
 
 export type DayOfWeek = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
-export type MealType = 'breakfast' | 'lunch' | 'dinner';
+export type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack';
+
+// Helper function to extract recipe_id from either old (string) or new (object) format
+export const getRecipeIdFromSlot = (slot: MealSlot | undefined): string | undefined => {
+  if (!slot) return undefined;
+  if (typeof slot === 'string') return slot;
+  return slot.recipe_id;
+};
+
+// Helper function to check if a meal slot is a repeat/leftover
+export const isRepeatMeal = (slot: MealSlot | undefined): boolean => {
+  if (!slot) return false;
+  if (typeof slot === 'string') return false;
+  return slot.is_repeat === true;
+};
+
+// Helper function to get the original day for leftover meals
+export const getOriginalDay = (slot: MealSlot | undefined): string | undefined => {
+  if (!slot) return undefined;
+  if (typeof slot === 'string') return undefined;
+  return slot.original_day;
+};
 
 // Macro Summary Types
 export interface MacroTotals {
@@ -148,6 +186,8 @@ export interface TargetComparison {
 
 export interface MacroSummaryResponse {
   meal_plan_id: string;
+  selected_days?: DayOfWeek[]; // Days included in this plan
+  num_days?: number; // Number of days in the plan
   weekly_summary: WeeklySummary;
   daily_breakdown: {
     [day: string]: DailySummary;
