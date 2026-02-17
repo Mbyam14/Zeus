@@ -13,15 +13,20 @@ class Settings(BaseSettings):
     supabase_anon_key: str
     supabase_service_key: str
     
-    # AWS
-    aws_access_key_id: str
-    aws_secret_access_key: str
+    # AWS (optional - for image uploads)
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
     aws_region: str = "us-east-1"
-    s3_bucket_name: str
+    s3_bucket_name: str = ""
     
     # AI
     anthropic_api_key: str
-    
+
+    # Instacart
+    instacart_api_key: str = ""
+    instacart_api_url: str = "https://connect.instacart.com/idp/v1"
+    instacart_webhook_secret: str = ""
+
     # CORS
     allowed_origins: str = "http://localhost:19006"
     
