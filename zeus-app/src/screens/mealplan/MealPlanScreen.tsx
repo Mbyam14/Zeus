@@ -10,6 +10,8 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  Animated,
+  Easing,
 } from 'react-native';
 import { mealPlanService } from '../../services/mealPlanService';
 import {
@@ -34,6 +36,7 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
   const [generating, setGenerating] = useState(false);
   const [mealPlan, setMealPlan] = useState<MealPlan | null>(null);
   const [recipes, setRecipes] = useState<{ [key: string]: Recipe }>({});
+  const [recipeLoadError, setRecipeLoadError] = useState<string | null>(null);
   const [selectedDay, setSelectedDay] = useState<DayOfWeek>('monday');
   const [regeneratingMeal, setRegeneratingMeal] = useState<string | null>(null);
   const [macroSummary, setMacroSummary] = useState<MacroSummaryResponse | null>(null);
@@ -48,6 +51,15 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
   const isMountedRef = useRef(true);
   const regeneratingMealsRef = useRef(new Set<string>());
   const dayScrollRef = useRef<ScrollView>(null);
+  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Animated values for loading overlay (must be at top level with other hooks)
+  const floatAnim1 = useRef(new Animated.Value(0)).current;
+  const floatAnim2 = useRef(new Animated.Value(0)).current;
+  const floatAnim3 = useRef(new Animated.Value(0)).current;
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const rotateAnim = useRef(new Animated.Value(0)).current;
+  const [loadingStep, setLoadingStep] = useState(0);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -55,6 +67,10 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
 
     return () => {
       isMountedRef.current = false;
+      // Clean up scroll timeout on unmount
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
     };
   }, [weekOffset]);
 
@@ -66,6 +82,87 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
       }
     }, [mealPlan?.id, weekOffset])
   );
+
+  // Animation effect for loading overlay (must be before any early returns)
+  useEffect(() => {
+    if (generating) {
+      setLoadingStep(0);
+
+      const createFloatAnimation = (anim: Animated.Value, delay: number) => {
+        return Animated.loop(
+          Animated.sequence([
+            Animated.timing(anim, {
+              toValue: 1,
+              duration: 2000,
+              delay,
+              easing: Easing.inOut(Easing.sin),
+              useNativeDriver: true,
+            }),
+            Animated.timing(anim, {
+              toValue: 0,
+              duration: 2000,
+              easing: Easing.inOut(Easing.sin),
+              useNativeDriver: true,
+            }),
+          ])
+        );
+      };
+
+      const pulseAnimation = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1.02,
+            duration: 1500,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 1500,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+        ])
+      );
+
+      const rotateAnimation = Animated.loop(
+        Animated.timing(rotateAnim, {
+          toValue: 1,
+          duration: 8000,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        })
+      );
+
+      const float1 = createFloatAnimation(floatAnim1, 0);
+      const float2 = createFloatAnimation(floatAnim2, 500);
+      const float3 = createFloatAnimation(floatAnim3, 1000);
+
+      float1.start();
+      float2.start();
+      float3.start();
+      pulseAnimation.start();
+      rotateAnimation.start();
+
+      const stepInterval = setInterval(() => {
+        setLoadingStep(prev => (prev + 1) % 6);
+      }, 4000);
+
+      return () => {
+        float1.stop();
+        float2.stop();
+        float3.stop();
+        pulseAnimation.stop();
+        rotateAnimation.stop();
+        clearInterval(stepInterval);
+        floatAnim1.setValue(0);
+        floatAnim2.setValue(0);
+        floatAnim3.setValue(0);
+        pulseAnim.setValue(1);
+        rotateAnim.setValue(0);
+      };
+    }
+  }, [generating]);
 
   const loadMealPlan = async () => {
     try {
@@ -198,6 +295,11 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
 
     const recipeMap: { [key: string]: Recipe } = {};
 
+    // Clear any previous error
+    if (isMountedRef.current) {
+      setRecipeLoadError(null);
+    }
+
     // Safely extract recipe IDs with type validation
     const recipeIds = extractRecipeIds(plan);
 
@@ -229,6 +331,9 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
       const missingIds = recipeIds.filter(id => !loadedIds.includes(id));
       if (missingIds.length > 0) {
         console.warn(`⚠️ Failed to load ${missingIds.length} recipe(s):`, missingIds);
+        if (isMountedRef.current) {
+          setRecipeLoadError(`${missingIds.length} recipe(s) failed to load. Tap to retry.`);
+        }
       }
 
       if (isMountedRef.current) {
@@ -240,6 +345,7 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
       console.error('❌ Failed to load recipes:', error);
       if (isMountedRef.current) {
         setRecipes(recipeMap); // Set partial results even on error
+        setRecipeLoadError('Failed to load recipes. Tap to retry.');
         // Still try to load macro summary
         loadMacroSummary(plan.id);
       }
@@ -294,8 +400,15 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
     // Approximate screen width calculation, scroll to position
     const scrollPosition = Math.max(0, (dayIndex * cardWidth) - 100);
 
-    setTimeout(() => {
-      dayScrollRef.current?.scrollTo({ x: scrollPosition, animated: true });
+    // Clear any existing scroll timeout
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current);
+    }
+
+    scrollTimeoutRef.current = setTimeout(() => {
+      if (isMountedRef.current) {
+        dayScrollRef.current?.scrollTo({ x: scrollPosition, animated: true });
+      }
     }, 100);
   };
 
@@ -640,25 +753,124 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
 
   const daysOfWeek = getDaysOfWeek();
 
-  // Loading overlay component
-  const renderLoadingOverlay = () => (
-    <Modal
-      visible={generating}
-      transparent={true}
-      animationType="fade"
-    >
-      <View style={styles.loadingOverlay}>
-        <View style={styles.loadingCard}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={styles.loadingTitle}>Generating Your Meal Plan</Text>
-          <Text style={styles.loadingSubtext}>
-            Creating 21 delicious recipes with ingredients, instructions, and nutrition info...
-          </Text>
-          <Text style={styles.loadingHint}>This may take up to a minute</Text>
+  const loadingSteps = [
+    'Analyzing your preferences...',
+    'Selecting recipes...',
+    'Calculating nutrition...',
+    'Building your meal plan...',
+    'Adding ingredients & instructions...',
+    'Almost there...',
+  ];
+
+  // Loading overlay component with animations
+  const renderLoadingOverlay = () => {
+    const float1Y = floatAnim1.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0, -20],
+    });
+    const float2Y = floatAnim2.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0, -25],
+    });
+    const float3Y = floatAnim3.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0, -15],
+    });
+    const rotate = rotateAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: ['0deg', '360deg'],
+    });
+
+    return (
+      <Modal
+        visible={generating}
+        transparent={true}
+        animationType="fade"
+      >
+        <View style={styles.loadingOverlay}>
+          {/* Floating food emojis */}
+          <Animated.Text style={[
+            styles.floatingEmoji,
+            styles.floatingEmoji1,
+            { transform: [{ translateY: float1Y }] }
+          ]}>
+            🥗
+          </Animated.Text>
+          <Animated.Text style={[
+            styles.floatingEmoji,
+            styles.floatingEmoji2,
+            { transform: [{ translateY: float2Y }] }
+          ]}>
+            🍳
+          </Animated.Text>
+          <Animated.Text style={[
+            styles.floatingEmoji,
+            styles.floatingEmoji3,
+            { transform: [{ translateY: float3Y }] }
+          ]}>
+            🥘
+          </Animated.Text>
+          <Animated.Text style={[
+            styles.floatingEmoji,
+            styles.floatingEmoji4,
+            { transform: [{ translateY: float1Y }] }
+          ]}>
+            🍝
+          </Animated.Text>
+          <Animated.Text style={[
+            styles.floatingEmoji,
+            styles.floatingEmoji5,
+            { transform: [{ translateY: float2Y }] }
+          ]}>
+            🥑
+          </Animated.Text>
+
+          <Animated.View style={[
+            styles.loadingCard,
+            { transform: [{ scale: pulseAnim }] }
+          ]}>
+            {/* Rotating ring behind spinner */}
+            <View style={styles.spinnerContainer}>
+              <Animated.View style={[
+                styles.rotatingRing,
+                { transform: [{ rotate }] }
+              ]}>
+                <View style={[styles.ringDot, { backgroundColor: colors.primary }]} />
+                <View style={[styles.ringDot, styles.ringDot2, { backgroundColor: colors.secondary }]} />
+                <View style={[styles.ringDot, styles.ringDot3, { backgroundColor: colors.primary, opacity: 0.5 }]} />
+              </Animated.View>
+              <ActivityIndicator size="large" color={colors.primary} />
+            </View>
+
+            <Text style={styles.loadingTitle}>Generating Your Meal Plan</Text>
+
+            {/* Animated step indicator */}
+            <View style={styles.loadingStepContainer}>
+              <Text style={styles.loadingStep}>{loadingSteps[loadingStep]}</Text>
+            </View>
+
+            {/* Progress dots */}
+            <View style={styles.progressDots}>
+              {loadingSteps.map((_, index) => (
+                <View
+                  key={index}
+                  style={[
+                    styles.progressDot,
+                    index === loadingStep && styles.progressDotActive,
+                    { backgroundColor: index === loadingStep ? colors.primary : colors.border }
+                  ]}
+                />
+              ))}
+            </View>
+
+            <Text style={styles.loadingSubtext}>
+              Creating personalized recipes with full ingredients, instructions, and nutrition info
+            </Text>
+          </Animated.View>
         </View>
-      </View>
-    </Modal>
-  );
+      </Modal>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -768,6 +980,21 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
             })}
           </ScrollView>
         </View>
+
+        {/* Recipe Load Error Banner */}
+        {recipeLoadError && (
+          <TouchableOpacity
+            style={styles.errorBanner}
+            onPress={() => {
+              setRecipeLoadError(null);
+              if (mealPlan) {
+                loadRecipes(mealPlan);
+              }
+            }}
+          >
+            <Text style={styles.errorBannerText}>{recipeLoadError}</Text>
+          </TouchableOpacity>
+        )}
 
         {/* Meals for Selected Day */}
         <View style={styles.mealsContainer}>
@@ -1229,6 +1456,20 @@ const createStyles = (colors: any) => StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 24,
   },
+  errorBanner: {
+    backgroundColor: '#FFF3E0',
+    marginHorizontal: 16,
+    marginBottom: 12,
+    padding: 12,
+    borderRadius: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#FF9800',
+  },
+  errorBannerText: {
+    color: '#E65100',
+    fontSize: 14,
+    fontWeight: '500',
+  },
   mealCard: {
     backgroundColor: colors.card,
     borderRadius: 20,
@@ -1349,43 +1590,121 @@ const createStyles = (colors: any) => StyleSheet.create({
   },
   loadingOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
   },
   loadingCard: {
     backgroundColor: colors.card,
-    borderRadius: 20,
+    borderRadius: 24,
     padding: 32,
     alignItems: 'center',
     maxWidth: 340,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
+    width: '90%',
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
+    shadowRadius: 16,
+    elevation: 12,
+  },
+  spinnerContainer: {
+    width: 80,
+    height: 80,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  rotatingRing: {
+    position: 'absolute',
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    borderWidth: 2,
+    borderColor: colors.primary + '20',
+  },
+  ringDot: {
+    position: 'absolute',
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    top: -5,
+    left: '50%',
+    marginLeft: -5,
+  },
+  ringDot2: {
+    top: '50%',
+    left: -5,
+    marginLeft: 0,
+    marginTop: -5,
+  },
+  ringDot3: {
+    top: '100%',
+    left: '50%',
+    marginTop: -5,
   },
   loadingTitle: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: 'bold',
     color: colors.text,
     marginTop: 20,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  loadingStepContainer: {
+    height: 24,
+    justifyContent: 'center',
     marginBottom: 12,
-    textAlign: 'center',
   },
-  loadingSubtext: {
+  loadingStep: {
     fontSize: 15,
-    color: colors.textMuted,
-    textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 16,
-  },
-  loadingHint: {
-    fontSize: 13,
     color: colors.primary,
     fontWeight: '600',
     textAlign: 'center',
+  },
+  progressDots: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+  },
+  progressDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  progressDotActive: {
+    width: 24,
+    borderRadius: 4,
+  },
+  loadingSubtext: {
+    fontSize: 14,
+    color: colors.textMuted,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  floatingEmoji: {
+    position: 'absolute',
+    fontSize: 36,
+    opacity: 0.6,
+  },
+  floatingEmoji1: {
+    top: '15%',
+    left: '10%',
+  },
+  floatingEmoji2: {
+    top: '20%',
+    right: '12%',
+  },
+  floatingEmoji3: {
+    bottom: '25%',
+    left: '15%',
+  },
+  floatingEmoji4: {
+    bottom: '20%',
+    right: '10%',
+  },
+  floatingEmoji5: {
+    top: '45%',
+    left: '5%',
   },
   // Macro Summary Styles - Prominent Button
   macroToggleButton: {
@@ -1525,13 +1844,13 @@ const createStyles = (colors: any) => StyleSheet.create({
     height: '100%',
   },
   proteinBar: {
-    backgroundColor: '#4ECDC4',
+    backgroundColor: colors.proteinColor,
   },
   carbsBar: {
-    backgroundColor: '#FFE66D',
+    backgroundColor: colors.carbsColor,
   },
   fatBar: {
-    backgroundColor: '#FF6B6B',
+    backgroundColor: colors.fatColor,
   },
   macroLegend: {
     flexDirection: 'row',
@@ -1569,7 +1888,7 @@ const createStyles = (colors: any) => StyleSheet.create({
     fontWeight: '600',
   },
   targetOnTrack: {
-    color: '#4ECDC4',
+    color: colors.proteinColor,
   },
   targetOff: {
     color: colors.textMuted,
@@ -1579,7 +1898,7 @@ const createStyles = (colors: any) => StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     borderLeftWidth: 4,
-    borderLeftColor: '#FFE66D',
+    borderLeftColor: colors.carbsColor,
   },
   warningsTitle: {
     fontSize: 14,

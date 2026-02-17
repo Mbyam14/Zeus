@@ -67,13 +67,3 @@ export interface RecipeFeedFilter {
   offset?: number;
 }
 
-export interface AIRecipeRequest {
-  pantry_items?: string[];
-  cuisine_preference?: string;
-  dietary_restrictions?: string[];
-  cooking_skill?: 'beginner' | 'intermediate' | 'advanced';
-  max_prep_time?: number;
-  servings: number;
-  meal_type?: MealType;
-  additional_preferences?: string;
-}

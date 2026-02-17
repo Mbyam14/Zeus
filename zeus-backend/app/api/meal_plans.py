@@ -82,13 +82,6 @@ async def generate_meal_plan(
         logger.info(f"Generating meal plan for user {current_user.id} starting {start_date}")
         logger.info(f"User calorie target: {preferences.get('calorie_target', 'not set')}, protein target: {preferences.get('protein_target_grams', 'not set')}")
 
-        # Debug: Write preferences to file
-        with open("debug_preferences.txt", "w") as f:
-            f.write(f"Full preferences dict: {json.dumps(preferences, indent=2)}\n")
-            f.write(f"calorie_target: {preferences.get('calorie_target')}\n")
-            f.write(f"protein_target_grams: {preferences.get('protein_target_grams')}\n")
-            f.write(f"meal_calorie_distribution: {preferences.get('meal_calorie_distribution')}\n")
-
         # Get batch cooking preferences
         cooking_sessions = preferences.get("cooking_sessions_per_week", 6)
         leftover_tolerance = preferences.get("leftover_tolerance", "moderate")
@@ -100,13 +93,6 @@ async def generate_meal_plan(
         # Extract meals from response
         meal_plan_response = meal_plan_data.get("meal_plan", {})
         meals_dict = meal_plan_response.get("meals", {})
-
-        # Write debug info to file
-        with open("debug_meal_plan.txt", "w") as f:
-            f.write(f"meal_plan_response keys: {list(meal_plan_response.keys())}\n")
-            f.write(f"meals_dict keys: {list(meals_dict.keys())}\n")
-            f.write(f"Batch cooking: {cooking_sessions} sessions, {leftover_tolerance} tolerance\n")
-            f.write(f"Selected days: {normalized_days}\n")
 
         # Collect all recipes and DEDUPLICATE by title before saving
         # Use selected days instead of hardcoded 7 days
@@ -197,11 +183,6 @@ async def generate_meal_plan(
         for day in days:
             if day in assignments:
                 saved_recipes[day] = assignments[day]
-
-        # Write saved recipes to file
-        with open("debug_meal_plan.txt", "a") as f:
-            f.write(f"Assigned {len(saved_recipes)} days using MealAssignmentService\n")
-            f.write(f"saved_recipes structure:\n{json.dumps(saved_recipes, indent=2, default=str)}\n")
 
         # Save meal plan with selected_days metadata
         meal_plan_record = {
@@ -330,9 +311,9 @@ async def get_current_week_meal_plan(
 
         # Get selected_days with fallback to all 7 days for backwards compatibility
         all_days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-        selected_days = meal_plan.get("selected_days", all_days)
+        selected_days = meal_plan.get("selected_days") or all_days
 
-        response_data = {
+        return {
             "id": meal_plan["id"],
             "user_id": meal_plan["user_id"],
             "plan_name": meal_plan["plan_name"],
@@ -341,14 +322,6 @@ async def get_current_week_meal_plan(
             "meals": meal_plan["meals"],
             "created_at": meal_plan["created_at"]
         }
-
-        # Debug: Write response to file
-        with open("debug_current_meal_plan.txt", "w") as f:
-            f.write(f"Returning meal plan: {meal_plan['id']}\n")
-            f.write(f"Number of days in meals: {len(meal_plan['meals'])}\n")
-            f.write(f"Meals structure:\n{json.dumps(meal_plan['meals'], indent=2)}\n")
-
-        return response_data
 
     except Exception as e:
         logger.error(f"Failed to get current meal plan: {e}")
@@ -623,7 +596,7 @@ async def generate_meal_plan_for_week(
         )
 
 
-@router.get("/{meal_plan_id}/")
+@router.get("/{meal_plan_id}")
 async def get_meal_plan(
     meal_plan_id: str,
     current_user: UserResponse = Depends(get_current_active_user)
@@ -674,7 +647,7 @@ async def get_meal_plan(
         )
 
 
-@router.delete("/{meal_plan_id}/")
+@router.delete("/{meal_plan_id}")
 async def delete_meal_plan(
     meal_plan_id: str,
     current_user: UserResponse = Depends(get_current_active_user)
@@ -782,7 +755,7 @@ async def update_meal_plan_meals(
         )
 
 
-@router.post("/{meal_plan_id}/regenerate-meal/")
+@router.post("/{meal_plan_id}/regenerate-meal")
 async def regenerate_single_meal(
     meal_plan_id: str,
     day: str,
@@ -954,7 +927,7 @@ async def fill_remaining_with_ai(
 
         # Get selected_days from meal plan (or default to all 7 days)
         all_days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-        selected_days = meal_plan.get("selected_days", all_days)
+        selected_days = meal_plan.get("selected_days") or all_days
 
         # Find empty slots
         empty_slots = []
@@ -1143,7 +1116,7 @@ async def get_meal_plan_macro_summary(
 
         # Get selected_days from meal plan (fallback to all 7 days for backwards compatibility)
         all_days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-        selected_days = meal_plan.get("selected_days", all_days)
+        selected_days = meal_plan.get("selected_days") or all_days
         num_days = len(selected_days)
 
         # Calculate weekly summary using actual meal count (not just unique recipes)

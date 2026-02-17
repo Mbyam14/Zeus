@@ -1,5 +1,5 @@
 import api from './api';
-import { Recipe, RecipeCreate, RecipeFeedFilter, AIRecipeRequest } from '../types/recipe';
+import { Recipe, RecipeCreate, RecipeFeedFilter } from '../types/recipe';
 
 class RecipeService {
   // Get recipe feed with filters
@@ -30,7 +30,7 @@ class RecipeService {
 
   // Create a new recipe
   async createRecipe(recipe: RecipeCreate): Promise<Recipe> {
-    const response = await api.post<Recipe>('/api/recipes', recipe);
+    const response = await api.post<Recipe>('/api/recipes/', recipe);
     return response.data;
   }
 
@@ -91,12 +91,6 @@ class RecipeService {
   // Get user's liked recipes
   async getLikedRecipes(limit = 20, offset = 0): Promise<Recipe[]> {
     const response = await api.get<Recipe[]>(`/api/recipes/liked?limit=${limit}&offset=${offset}`);
-    return response.data;
-  }
-
-  // Generate AI recipe
-  async generateAIRecipe(request: AIRecipeRequest): Promise<Recipe> {
-    const response = await api.post<Recipe>('/api/ai/generate-recipe', request);
     return response.data;
   }
 

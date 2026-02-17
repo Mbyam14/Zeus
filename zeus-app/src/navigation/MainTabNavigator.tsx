@@ -9,7 +9,6 @@ import { DaySelectionScreen } from '../screens/mealplan/DaySelectionScreen';
 import { CreateMealPlanScreen } from '../screens/mealplan/CreateMealPlanScreen';
 import { ManualMealPlanBuilder } from '../screens/mealplan/ManualMealPlanBuilder';
 import { CreateScreen } from '../screens/create/CreateScreen';
-import { AIScreen } from '../screens/create/AIScreen';
 import { PantryScreen } from '../screens/pantry/PantryScreen';
 import { ImageReviewScreen } from '../screens/pantry/ImageReviewScreen';
 import { RecipeDetailScreen } from '../screens/recipe/RecipeDetailScreen';
@@ -17,10 +16,10 @@ import { GroceryListScreen } from '../screens/grocerylist/GroceryListScreen';
 import { View, Text, StyleSheet, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DetectedPantryItem } from '../types/pantry';
+import { useThemeStore } from '../store/themeStore';
 
 export type CreateStackParamList = {
   CreateMain: undefined;
-  AIRecipe: undefined;
   RecipeDetail: { recipe: any };
 };
 
@@ -68,7 +67,6 @@ const CreateStackNavigator = () => {
   return (
     <CreateStack.Navigator screenOptions={{ headerShown: false }}>
       <CreateStack.Screen name="CreateMain" component={CreateScreen} />
-      <CreateStack.Screen name="AIRecipe" component={AIScreen} />
       <CreateStack.Screen name="RecipeDetail" component={RecipeDetailScreen} />
     </CreateStack.Navigator>
   );
@@ -89,6 +87,7 @@ const MealPlanStackNavigator = () => {
 
 export const MainTabNavigator: React.FC = () => {
   const insets = useSafeAreaInsets();
+  const { colors } = useThemeStore();
 
   return (
     <Tab.Navigator
@@ -96,20 +95,20 @@ export const MainTabNavigator: React.FC = () => {
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: '#FFFFFF',
-          borderTopWidth: 1,
-          borderTopColor: '#E1E8ED',
-          paddingTop: 12,
-          paddingBottom: Math.max(insets.bottom, 12),
-          height: 70 + Math.max(insets.bottom, 0),
-          paddingHorizontal: 8,
+          backgroundColor: colors.tabBarBackground,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: colors.border,
+          paddingTop: 8,
+          paddingBottom: Math.max(insets.bottom, 8),
+          height: 64 + Math.max(insets.bottom, 0),
+          paddingHorizontal: 4,
         },
-        tabBarActiveTintColor: '#FF6B35',
-        tabBarInactiveTintColor: '#7F8C8D',
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.tabBarInactive,
         tabBarLabelStyle: {
-          fontSize: 11,
+          fontSize: 10,
           fontWeight: '600',
-          marginBottom: 4,
+          marginTop: 2,
         },
       }}
     >
@@ -137,9 +136,9 @@ export const MainTabNavigator: React.FC = () => {
         component={CreateStackNavigator}
         options={{
           tabBarLabel: () => null,
-          tabBarIcon: ({ color }) => (
-            <View style={[styles.createButton, { borderColor: color }]}>
-              <Text style={[styles.createIcon, { color }]}>+</Text>
+          tabBarIcon: ({ focused }) => (
+            <View style={[styles.createButton, { backgroundColor: focused ? colors.primary : colors.primary + 'DD' }]}>
+              <Text style={styles.createIcon}>+</Text>
             </View>
           ),
         }}
@@ -173,18 +172,17 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   createButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 2,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    marginTop: 2,
+    marginTop: -8,
   },
   createIcon: {
-    fontSize: 24,
-    fontWeight: 'bold',
+    fontSize: 28,
+    fontWeight: '400',
+    color: '#FFFFFF',
   },
   placeholder: {
     flex: 1,

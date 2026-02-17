@@ -21,6 +21,28 @@ IMAGE_ANALYSIS_TIMEOUT = 45
 
 
 class PantryService:
+    # Class-level constant for ingredient variations (avoids recreation on every call)
+    INGREDIENT_VARIATIONS = {
+        "egg": {"eggs", "egg"},
+        "milk": {"milk", "whole milk", "2% milk", "skim milk"},
+        "butter": {"butter", "unsalted butter", "salted butter"},
+        "cheese": {"cheese", "cheddar cheese", "mozzarella cheese", "parmesan"},
+        "chicken": {"chicken", "chicken breast", "chicken thigh"},
+        "tomato": {"tomato", "tomatoes"},
+        "onion": {"onion", "onions"},
+        "potato": {"potato", "potatoes"},
+        "apple": {"apple", "apples"},
+        "orange": {"orange", "oranges"},
+        "carrot": {"carrot", "carrots"},
+        "lettuce": {"lettuce", "romaine lettuce", "iceberg lettuce"},
+    }
+
+    # Pre-compute reverse lookup: ingredient name -> base ingredient
+    INGREDIENT_TO_BASE = {}
+    for base, variants in INGREDIENT_VARIATIONS.items():
+        for variant in variants:
+            INGREDIENT_TO_BASE[variant] = base
+
     def __init__(self):
         self.db = get_database()
         self.executor = ThreadPoolExecutor(max_workers=2)
@@ -114,6 +136,8 @@ class PantryService:
             update_data["category"] = item_data.category.value
         if item_data.expires_at is not None:
             update_data["expires_at"] = item_data.expires_at.isoformat()
+        elif item_data.clear_expires_at:
+            update_data["expires_at"] = None
 
         if not update_data:
             raise HTTPException(
@@ -143,6 +167,16 @@ class PantryService:
 
         self.db.table("pantry_items").delete().eq("id", item_id).execute()
         return True
+
+    async def bulk_delete_pantry_items(self, item_ids: List[str], user_id: str) -> int:
+        """Delete multiple pantry items by ID (only by owner)"""
+        result = self.db.table("pantry_items").delete().in_("id", item_ids).eq("user_id", user_id).execute()
+        return len(result.data) if result.data else 0
+
+    async def clear_all_pantry_items(self, user_id: str) -> int:
+        """Delete all pantry items for a user"""
+        result = self.db.table("pantry_items").delete().eq("user_id", user_id).execute()
+        return len(result.data) if result.data else 0
 
     async def bulk_add_pantry_items(self, bulk_data: BulkPantryAdd, user_id: str) -> List[PantryItemResponse]:
         """Add multiple pantry items at once"""
@@ -210,6 +244,16 @@ class PantryService:
         existing_names = {item.item_name.lower().strip() for item in existing_items}
         existing_items_map = {item.item_name.lower().strip(): item for item in existing_items}
 
+        # Pre-compute base ingredients for existing items for faster lookup
+        existing_base_ingredients = set()
+        for name in existing_names:
+            if name in self.INGREDIENT_TO_BASE:
+                existing_base_ingredients.add(self.INGREDIENT_TO_BASE[name])
+            # Also add any base ingredients that appear in the name
+            for base in self.INGREDIENT_VARIATIONS:
+                if base in name:
+                    existing_base_ingredients.add(base)
+
         # Build prompt for Claude Vision
         prompt = self._build_image_analysis_prompt(list(existing_names))
 
@@ -240,16 +284,22 @@ class PantryService:
                 item_name_lower = item.item_name.lower().strip()
 
                 # Check for duplicates (exact match or similar)
-                is_duplicate = self._check_item_duplicate(item_name_lower, existing_names)
+                is_duplicate = self._check_item_duplicate_optimized(
+                    item_name_lower, existing_names, existing_base_ingredients
+                )
 
                 if is_duplicate:
                     item.already_in_pantry = True
                     existing_items_count += 1
-                    # Find and set the existing pantry item ID
-                    for existing_name, existing_item in existing_items_map.items():
-                        if self._items_are_similar(item_name_lower, existing_name):
-                            item.existing_pantry_id = existing_item.id
-                            break
+                    # Find matching existing item ID (optimized: check exact match first)
+                    if item_name_lower in existing_items_map:
+                        item.existing_pantry_id = existing_items_map[item_name_lower].id
+                    else:
+                        # Fall back to similarity check
+                        for existing_name, existing_item in existing_items_map.items():
+                            if self._items_are_similar(item_name_lower, existing_name):
+                                item.existing_pantry_id = existing_item.id
+                                break
                 else:
                     new_items_count += 1
 
@@ -405,6 +455,34 @@ If no food items are visible, return an empty array: []"""
 
         return False
 
+    def _check_item_duplicate_optimized(
+        self, item_name: str, existing_names: set, existing_base_ingredients: set
+    ) -> bool:
+        """
+        Optimized duplicate check using pre-computed base ingredients.
+        Reduces O(n) iteration to O(1) lookups for most cases.
+        """
+        # Direct match (O(1))
+        if item_name in existing_names:
+            return True
+
+        # Check if item maps to a base ingredient that exists (O(1))
+        item_base = self.INGREDIENT_TO_BASE.get(item_name)
+        if item_base and item_base in existing_base_ingredients:
+            return True
+
+        # Check if item name contains a base ingredient that exists (O(k) where k is small)
+        for base in self.INGREDIENT_VARIATIONS:
+            if base in item_name and base in existing_base_ingredients:
+                return True
+
+        # Check for containment (one in the other) - still O(n) but only if above checks fail
+        for existing_name in existing_names:
+            if item_name in existing_name or existing_name in item_name:
+                return True
+
+        return False
+
     def _items_are_similar(self, name1: str, name2: str) -> bool:
         """Check if two item names are similar (accounting for variations)"""
         name1 = name1.lower().strip()
@@ -418,26 +496,14 @@ If no food items are visible, return an empty array: []"""
         if name1 in name2 or name2 in name1:
             return True
 
-        # Common variations
-        variations = {
-            "egg": ["eggs", "egg"],
-            "milk": ["milk", "whole milk", "2% milk", "skim milk"],
-            "butter": ["butter", "unsalted butter", "salted butter"],
-            "cheese": ["cheese", "cheddar cheese", "mozzarella cheese", "parmesan"],
-            "chicken": ["chicken", "chicken breast", "chicken thigh"],
-            "tomato": ["tomato", "tomatoes"],
-            "onion": ["onion", "onions"],
-            "potato": ["potato", "potatoes"],
-            "apple": ["apple", "apples"],
-            "orange": ["orange", "oranges"],
-            "carrot": ["carrot", "carrots"],
-            "lettuce": ["lettuce", "romaine lettuce", "iceberg lettuce"],
-        }
+        # Check if both map to the same base ingredient (O(1) lookup)
+        base1 = self.INGREDIENT_TO_BASE.get(name1)
+        base2 = self.INGREDIENT_TO_BASE.get(name2)
+        if base1 and base2 and base1 == base2:
+            return True
 
-        for base, variants in variations.items():
-            if name1 in variants and name2 in variants:
-                return True
-            # Check if both names contain the base ingredient
+        # Check if both names contain the same base ingredient
+        for base in self.INGREDIENT_VARIATIONS:
             if base in name1 and base in name2:
                 return True
 

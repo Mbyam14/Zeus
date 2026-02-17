@@ -204,9 +204,9 @@ export const CreateScreen: React.FC<CreateScreenProps> = ({ navigation }) => {
         ingredients: recipe.ingredients
           .filter(ing => ing.name.trim())
           .map(ing => ({
-            item: ing.name,
-            quantity: ing.quantity || '',
-            unit: ing.unit || ''
+            name: ing.name,
+            quantity: ing.quantity || 'to taste',
+            unit: ing.unit || 'pieces'
           })),
         instructions: recipe.instructions
           .filter(inst => inst.instruction.trim())
@@ -276,13 +276,6 @@ export const CreateScreen: React.FC<CreateScreenProps> = ({ navigation }) => {
             <Text style={styles.headerSubtitle}>Share Your Creation</Text>
             <Text style={styles.headerTitle}>Create Recipe</Text>
           </View>
-          <TouchableOpacity
-            style={styles.aiButton}
-            onPress={() => navigation?.navigate('AIRecipe')}
-          >
-            <Text style={styles.aiButtonIcon}>✨</Text>
-            <Text style={styles.aiButtonText}>AI</Text>
-          </TouchableOpacity>
         </View>
       </LinearGradient>
 
@@ -640,25 +633,6 @@ const createStyles = (colors: any) => StyleSheet.create({
   headerTitle: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-  aiButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.25)',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  aiButtonIcon: {
-    fontSize: 16,
-  },
-  aiButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
     color: '#FFFFFF',
   },
   scrollView: {
