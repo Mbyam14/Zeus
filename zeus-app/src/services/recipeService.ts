@@ -65,6 +65,23 @@ class RecipeService {
     await api.delete(`/api/recipes/${id}/save`);
   }
 
+  // Get all available recipes (feed + user's own) with optional search and filter
+  async getAllRecipes(
+    limit = 50,
+    offset = 0,
+    search?: string,
+    mealType?: string
+  ): Promise<Recipe[]> {
+    const params = new URLSearchParams();
+    params.append('limit', limit.toString());
+    params.append('offset', offset.toString());
+    if (search) params.append('search', search);
+    if (mealType) params.append('meal_type', mealType);
+
+    const response = await api.get<Recipe[]>(`/api/recipes/feed?${params.toString()}`);
+    return response.data;
+  }
+
   // Get user's created recipes with optional search and filter
   async getMyRecipes(
     limit = 20,

@@ -34,7 +34,7 @@ export const RecipeBrowser: React.FC<RecipeBrowserProps> = ({
   const loadRecipes = useCallback(async () => {
     try {
       setLoading(true);
-      const result = await recipeService.getMyRecipes(
+      const result = await recipeService.getAllRecipes(
         50,
         0,
         searchQuery || undefined,
@@ -93,7 +93,7 @@ export const RecipeBrowser: React.FC<RecipeBrowserProps> = ({
           <Text style={styles.recipeTitle} numberOfLines={2}>{item.title}</Text>
           <View style={styles.recipeMetaRow}>
             {item.calories && (
-              <Text style={styles.recipeMeta}>{item.calories} cal</Text>
+              <Text style={styles.recipeMeta}>{item.calories} cal/serving</Text>
             )}
             {item.protein_grams && (
               <Text style={styles.recipeMeta}>{item.protein_grams}g protein</Text>

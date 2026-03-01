@@ -24,7 +24,9 @@ class GroceryListService {
    */
   async generateGroceryList(mealPlanId: string): Promise<GroceryList> {
     const response = await api.post<GroceryList>(
-      `/api/grocery-lists/${mealPlanId}/generate`
+      `/api/grocery-lists/${mealPlanId}/generate`,
+      null,
+      { timeout: 30000 }
     );
     return response.data;
   }

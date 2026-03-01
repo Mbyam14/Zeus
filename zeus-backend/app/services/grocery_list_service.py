@@ -384,6 +384,8 @@ class GroceryListService:
         """
         Extract all unique recipe IDs from meal plan's meals structure.
 
+        Handles both old format (string recipe_id) and new format (object with recipe_id property).
+
         Args:
             meal_plan: Meal plan dict with 'meals' JSONB field
 
@@ -395,9 +397,15 @@ class GroceryListService:
 
         for day_name, day_meals in meals.items():
             if isinstance(day_meals, dict):
-                for meal_type, recipe_id in day_meals.items():
-                    if recipe_id:
-                        recipe_ids.add(recipe_id)
+                for meal_type, meal_data in day_meals.items():
+                    if meal_data:
+                        # Handle both old (string) and new (object) formats
+                        if isinstance(meal_data, str):
+                            # Old format: meal_data is the recipe_id directly
+                            recipe_ids.add(meal_data)
+                        elif isinstance(meal_data, dict) and 'recipe_id' in meal_data:
+                            # New format: meal_data is an object with recipe_id property
+                            recipe_ids.add(meal_data['recipe_id'])
 
         return list(recipe_ids)
 

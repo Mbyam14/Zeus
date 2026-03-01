@@ -327,7 +327,7 @@ class PantryService:
     def _call_claude_vision_sync(self, image_base64: str, image_type: str, prompt: str) -> str:
         """Synchronous Claude Vision API call for use in executor"""
         response = self.claude_client.messages.create(
-            model="claude-3-7-sonnet-20250219",
+            model="claude-sonnet-4-5-20250929",
             max_tokens=2000,
             messages=[
                 {

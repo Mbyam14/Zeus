@@ -13,7 +13,11 @@ class PantryCategory(str, Enum):
     CONDIMENTS = "Condiments"
     BEVERAGES = "Beverages"
     FROZEN = "Frozen"
-    PANTRY = "Pantry"
+    CANNED_JARRED = "Canned & Jarred"
+    BAKING = "Baking"
+    OILS_VINEGARS = "Oils & Vinegars"
+    SNACKS = "Snacks"
+    PANTRY = "Pantry"  # Keep for backwards compatibility with existing data
     OTHER = "Other"
 
 
@@ -31,6 +35,7 @@ class PantryItemUpdate(BaseModel):
     unit: Optional[str] = Field(None, max_length=20)
     category: Optional[PantryCategory] = None
     expires_at: Optional[date] = None
+    clear_expires_at: Optional[bool] = False
 
 
 class PantryItemResponse(BaseModel):
@@ -60,6 +65,10 @@ class PantryFilter(BaseModel):
 
 class BulkPantryAdd(BaseModel):
     items: List[PantryItemCreate] = Field(..., min_items=1, max_items=50)
+
+
+class BulkPantryDelete(BaseModel):
+    item_ids: List[str] = Field(..., min_items=1, max_items=100)
 
 
 class IngredientLibraryItem(BaseModel):

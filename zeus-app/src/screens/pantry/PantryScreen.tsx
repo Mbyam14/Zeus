@@ -12,6 +12,7 @@ import {
   Modal,
   KeyboardAvoidingView,
   Platform,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -22,7 +23,7 @@ import { pantryService } from '../../services/pantryService';
 import { useThemeStore } from '../../store/themeStore';
 
 const CATEGORIES: PantryCategory[] = [
-  'Produce', 'Dairy', 'Protein', 'Grains', 'Spices', 'Condiments', 'Beverages', 'Frozen', 'Pantry', 'Other'
+  'Produce', 'Dairy', 'Protein', 'Grains', 'Spices', 'Condiments', 'Beverages', 'Frozen', 'Canned & Jarred', 'Baking', 'Oils & Vinegars', 'Snacks', 'Other'
 ];
 
 const UNITS = ['cups', 'tbsp', 'tsp', 'fl oz', 'pieces', 'items', 'cans', 'boxes', 'cloves', 'heads', 'lbs', 'oz', 'Custom'];
@@ -30,7 +31,7 @@ const UNITS = ['cups', 'tbsp', 'tsp', 'fl oz', 'pieces', 'items', 'cans', 'boxes
 const CATEGORY_EMOJIS: Record<PantryCategory, string> = {
   Produce: '🥬', Dairy: '🥛', Protein: '🍗', Grains: '🌾',
   Spices: '🌶️', Condiments: '🧂', Beverages: '☕', Frozen: '🧊',
-  Pantry: '🥫', Other: '📦'
+  'Canned & Jarred': '🥫', Baking: '🧁', 'Oils & Vinegars': '🫒', Snacks: '🍿', Other: '📦'
 };
 
 // Common pantry staples for quick-add
@@ -163,6 +164,10 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
   const [selectedQuickItems, setSelectedQuickItems] = useState<Set<string>>(new Set());
   const [addingQuickItems, setAddingQuickItems] = useState(false);
   const [showAddDropdown, setShowAddDropdown] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [expiringItems, setExpiringItems] = useState<PantryItem[]>([]);
+  const [showExpiringBanner, setShowExpiringBanner] = useState(false);
 
   useEffect(() => {
     loadPantryItems();
@@ -172,8 +177,19 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
   useFocusEffect(
     useCallback(() => {
       loadPantryItems();
+      loadExpiringItems();
     }, [selectedCategory, searchQuery])
   );
+
+  const loadExpiringItems = async () => {
+    try {
+      const items = await pantryService.getExpiringItems(3);
+      setExpiringItems(items);
+      setShowExpiringBanner(items.length > 0);
+    } catch {
+      // silently fail
+    }
+  };
 
   const loadPantryItems = async () => {
     try {
@@ -279,8 +295,12 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
       if (editingItem) {
         console.log('📝 Updating pantry item:', editingItem.id, 'expires_at:', newItem.expires_at);
 
-        // Update on backend
-        const updatedItem = await pantryService.updatePantryItem(editingItem.id, newItem);
+        // Update on backend - if expiration was cleared, tell backend explicitly
+        const updatePayload = {
+          ...newItem,
+          clear_expires_at: !newItem.expires_at && !!editingItem.expires_at,
+        };
+        const updatedItem = await pantryService.updatePantryItem(editingItem.id, updatePayload);
         console.log('✅ Backend returned:', JSON.stringify(updatedItem, null, 2));
 
         // Optimistically update local state immediately with the backend response
@@ -517,43 +537,112 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
     })).filter(section => section.data.length > 0);
   };
 
+  const toggleItemSelection = (itemId: string) => {
+    setSelectedItems(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(itemId)) {
+        newSet.delete(itemId);
+      } else {
+        newSet.add(itemId);
+      }
+      return newSet;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedItems.size === pantryItems.length) {
+      setSelectedItems(new Set());
+    } else {
+      setSelectedItems(new Set(pantryItems.map(item => item.id)));
+    }
+  };
+
+  const exitSelectionMode = () => {
+    setSelectionMode(false);
+    setSelectedItems(new Set());
+  };
+
+  const handleDeleteSelected = () => {
+    if (selectedItems.size === 0) return;
+    Alert.alert(
+      'Delete Selected',
+      `Remove ${selectedItems.size} item${selectedItems.size > 1 ? 's' : ''} from your pantry?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await pantryService.bulkDeletePantryItems(Array.from(selectedItems));
+              exitSelectionMode();
+              loadPantryItems();
+            } catch (error) {
+              Alert.alert('Error', 'Failed to delete selected items');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const renderPantryItem = ({ item }: { item: PantryItem }) => {
     const expirationColor = item.is_expired ? colors.error : item.is_expiring_soon ? '#F39C12' : colors.text;
+    const isSelected = selectedItems.has(item.id);
 
     return (
       <TouchableOpacity
         style={styles.itemCard}
-        onPress={() => handleEditItem(item)}
+        onPress={() => selectionMode ? toggleItemSelection(item.id) : handleEditItem(item)}
+        onLongPress={() => {
+          if (!selectionMode) {
+            setSelectionMode(true);
+            setSelectedItems(new Set([item.id]));
+          }
+        }}
       >
-        <View style={styles.itemHeader}>
-          <Text style={styles.itemName}>{item.item_name}</Text>
-          {(item.is_expiring_soon || item.is_expired) && (
-            <View style={[styles.expirationBadge, { backgroundColor: expirationColor }]}>
-              <Text style={styles.expirationText}>
-                {item.is_expired ? 'Expired' : 'Soon'}
-              </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          {selectionMode && (
+            <View style={{
+              width: 24, height: 24, borderRadius: 12, borderWidth: 2,
+              borderColor: isSelected ? colors.primary : colors.border,
+              backgroundColor: isSelected ? colors.primary : 'transparent',
+              justifyContent: 'center', alignItems: 'center', marginRight: 12,
+            }}>
+              {isSelected && <Text style={{ color: '#fff', fontSize: 14, fontWeight: 'bold' }}>✓</Text>}
             </View>
           )}
-        </View>
+          <View style={{ flex: 1 }}>
+            <View style={styles.itemHeader}>
+              <Text style={styles.itemName}>{item.item_name}</Text>
+              {(item.is_expiring_soon || item.is_expired) && (
+                <View style={[styles.expirationBadge, { backgroundColor: expirationColor }]}>
+                  <Text style={styles.expirationText}>
+                    {item.is_expired ? 'Expired' : 'Soon'}
+                  </Text>
+                </View>
+              )}
+            </View>
 
-        <View style={styles.itemDetails}>
-          {item.quantity && (
-            <Text style={styles.itemQuantity}>
-              {item.quantity} {item.unit || 'items'}
-            </Text>
-          )}
-          {item.expires_at && (
-            <Text style={[styles.itemExpiry, { color: expirationColor }]}>
-              Exp: {(() => {
-                // Format YYYY-MM-DD to MM/DD/YYYY without timezone conversion
-                const parts = item.expires_at.split('-');
-                if (parts.length === 3) {
-                  return `${parts[1]}/${parts[2]}/${parts[0]}`;
-                }
-                return item.expires_at;
-              })()}
-            </Text>
-          )}
+            <View style={styles.itemDetails}>
+              {item.quantity && (
+                <Text style={styles.itemQuantity}>
+                  {item.quantity} {item.unit || 'items'}
+                </Text>
+              )}
+              {item.expires_at && (
+                <Text style={[styles.itemExpiry, { color: expirationColor }]}>
+                  Exp: {(() => {
+                    const parts = item.expires_at.split('-');
+                    if (parts.length === 3) {
+                      return `${parts[1]}/${parts[2]}/${parts[0]}`;
+                    }
+                    return item.expires_at;
+                  })()}
+                </Text>
+              )}
+            </View>
+          </View>
         </View>
       </TouchableOpacity>
     );
@@ -583,6 +672,21 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
 
   return (
     <SafeAreaView style={styles.container}>
+      {selectionMode ? (
+        <View style={styles.header}>
+          <TouchableOpacity onPress={exitSelectionMode}>
+            <Text style={{ fontSize: 16, color: colors.primary, fontWeight: '600' }}>Cancel</Text>
+          </TouchableOpacity>
+          <Text style={[styles.headerTitle, { fontSize: 18 }]}>
+            {selectedItems.size} Selected
+          </Text>
+          <TouchableOpacity onPress={toggleSelectAll}>
+            <Text style={{ fontSize: 16, color: colors.primary, fontWeight: '600' }}>
+              {selectedItems.size === pantryItems.length ? 'Deselect All' : 'Select All'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Pantry</Text>
         <View style={styles.headerButtons}>
@@ -643,9 +747,58 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
               </View>
               <Text style={styles.dropdownMenuText}>Add Manually</Text>
             </TouchableOpacity>
+
+            {pantryItems.length > 0 && (
+              <TouchableOpacity
+                style={styles.dropdownMenuItem}
+                onPress={() => {
+                  setShowAddDropdown(false);
+                  setSelectionMode(true);
+                }}
+              >
+                <View style={styles.dropdownMenuIcon}>
+                  <Text style={styles.dropdownMenuIconText}>☑️</Text>
+                </View>
+                <Text style={styles.dropdownMenuText}>Select</Text>
+              </TouchableOpacity>
+            )}
+
+            {pantryItems.length > 0 && (
+              <TouchableOpacity
+                style={styles.dropdownMenuItem}
+                onPress={() => {
+                  setShowAddDropdown(false);
+                  Alert.alert(
+                    'Clear All Items',
+                    `Remove all ${pantryItems.length} items from your pantry?`,
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Clear All',
+                        style: 'destructive',
+                        onPress: async () => {
+                          try {
+                            await pantryService.clearAllPantryItems();
+                            loadPantryItems();
+                          } catch (error) {
+                            Alert.alert('Error', 'Failed to clear pantry items');
+                          }
+                        },
+                      },
+                    ]
+                  );
+                }}
+              >
+                <View style={styles.dropdownMenuIcon}>
+                  <Text style={styles.dropdownMenuIconText}>🗑️</Text>
+                </View>
+                <Text style={[styles.dropdownMenuText, { color: '#E74C3C' }]}>Clear All</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
       </View>
+      )}
 
       {/* Dropdown Backdrop */}
       {showAddDropdown && (
@@ -691,6 +844,39 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
         </ScrollView>
       </View>
 
+      {/* Expiring Items Banner */}
+      {showExpiringBanner && expiringItems.length > 0 && (
+        <View style={styles.expiringBanner}>
+          <View style={styles.expiringBannerContent}>
+            <Text style={styles.expiringBannerIcon}>⚠️</Text>
+            <View style={styles.expiringBannerTextContainer}>
+              <Text style={styles.expiringBannerTitle}>
+                {expiringItems.length} item{expiringItems.length !== 1 ? 's' : ''} expiring soon
+              </Text>
+              <Text style={styles.expiringBannerSubtitle}>
+                {expiringItems.slice(0, 3).map(i => i.item_name).join(', ')}
+                {expiringItems.length > 3 ? ` +${expiringItems.length - 3} more` : ''}
+              </Text>
+            </View>
+          </View>
+          <TouchableOpacity
+            style={styles.expiringBannerButton}
+            onPress={() => {
+              // Navigate to Recipe Hub (Recipes tab)
+              (navigation as any).navigate('Recipes');
+            }}
+          >
+            <Text style={styles.expiringBannerButtonText}>Find Recipes</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.expiringBannerDismiss}
+            onPress={() => setShowExpiringBanner(false)}
+          >
+            <Text style={styles.expiringBannerDismissText}>✕</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {loading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#FF6B35" />
@@ -703,9 +889,31 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
           renderItem={renderPantryItem}
           renderSectionHeader={renderSectionHeader}
           keyExtractor={item => item.id}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[styles.listContent, selectionMode && { paddingBottom: 100 }]}
           stickySectionHeadersEnabled={false}
         />
+      )}
+
+      {/* Selection Mode Bottom Bar */}
+      {selectionMode && selectedItems.size > 0 && (
+        <View style={{
+          position: 'absolute', bottom: 0, left: 0, right: 0,
+          backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.border,
+          paddingHorizontal: 24, paddingVertical: 16, paddingBottom: 32,
+          shadowColor: '#000', shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 8,
+        }}>
+          <TouchableOpacity
+            onPress={handleDeleteSelected}
+            style={{
+              backgroundColor: '#E74C3C', borderRadius: 12, paddingVertical: 14,
+              justifyContent: 'center', alignItems: 'center',
+            }}
+          >
+            <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>
+              Delete {selectedItems.size} Item{selectedItems.size > 1 ? 's' : ''}
+            </Text>
+          </TouchableOpacity>
+        </View>
       )}
 
       {/* Analyzing Image Overlay */}
@@ -791,11 +999,16 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
 
       <Modal visible={showAddModal} animationType="slide" transparent={true} onRequestClose={() => { setShowAddModal(false); resetForm(); }}>
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          behavior="padding"
           style={{ flex: 1 }}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
         >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
+          <TouchableOpacity
+            style={styles.modalOverlay}
+            activeOpacity={1}
+            onPress={() => Keyboard.dismiss()}
+          >
+            <TouchableOpacity activeOpacity={1} style={styles.modalContent} onPress={() => {}}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>{editingItem ? 'Edit Item' : 'Add to Pantry'}</Text>
                 <TouchableOpacity onPress={() => { setShowAddModal(false); resetForm(); }}>
@@ -803,7 +1016,7 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
                 </TouchableOpacity>
               </View>
 
-              <ScrollView style={styles.modalScroll} keyboardShouldPersistTaps="always">
+              <ScrollView style={styles.modalScroll} keyboardShouldPersistTaps="always" contentContainerStyle={{ paddingBottom: 40 }}>
               <View style={styles.formSection}>
                 <Text style={styles.label}>Item Name *</Text>
                 <TextInput
@@ -941,7 +1154,8 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
                 </TouchableOpacity>
               )}
             </ScrollView>
-          </View>
+            </TouchableOpacity>
+          </TouchableOpacity>
 
           {/* Category Picker Modal */}
           <Modal visible={showCategoryPicker} animationType="fade" transparent={true} onRequestClose={() => setShowCategoryPicker(false)}>
@@ -1052,7 +1266,6 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
             </>
           )}
 
-        </View>
         </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
@@ -1120,7 +1333,7 @@ const createStyles = (colors: any) => StyleSheet.create({
   analyzingTitle: { fontSize: 20, fontWeight: 'bold', color: colors.text, marginTop: 16, marginBottom: 8 },
   analyzingText: { fontSize: 14, color: colors.textMuted, textAlign: 'center' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.5)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: colors.backgroundSecondary, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 20, maxHeight: '90%' },
+  modalContent: { backgroundColor: colors.backgroundSecondary, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 20, maxHeight: '85%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, marginBottom: 20 },
   modalTitle: { fontSize: 24, fontWeight: 'bold', color: colors.text },
   modalClose: { fontSize: 28, color: colors.textMuted },
@@ -1167,4 +1380,14 @@ const createStyles = (colors: any) => StyleSheet.create({
   iosDatePickerCancel: { fontSize: 16, color: colors.primary },
   iosDatePickerTitle: { fontSize: 18, fontWeight: '600', color: colors.text },
   iosDatePickerDone: { fontSize: 16, fontWeight: '600', color: colors.primary },
+  expiringBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF3E0', marginHorizontal: 16, marginBottom: 8, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#FFE0B2' },
+  expiringBannerContent: { flex: 1, flexDirection: 'row', alignItems: 'center' },
+  expiringBannerIcon: { fontSize: 18, marginRight: 8 },
+  expiringBannerTextContainer: { flex: 1 },
+  expiringBannerTitle: { fontSize: 13, fontWeight: '600', color: '#E65100' },
+  expiringBannerSubtitle: { fontSize: 11, color: '#BF360C', marginTop: 2 },
+  expiringBannerButton: { backgroundColor: colors.primary, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, marginLeft: 8 },
+  expiringBannerButtonText: { color: '#FFF', fontSize: 12, fontWeight: '600' },
+  expiringBannerDismiss: { padding: 4, marginLeft: 6 },
+  expiringBannerDismissText: { fontSize: 14, color: '#BF360C' },
 });

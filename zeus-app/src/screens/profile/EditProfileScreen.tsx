@@ -84,7 +84,7 @@ export const EditProfileScreen: React.FC = () => {
     >
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Text style={styles.backButtonText}>Cancel</Text>
+          <Text style={styles.backArrow}>←</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Edit Profile</Text>
         <TouchableOpacity
@@ -214,7 +214,6 @@ const createStyles = (colors: any) =>
     header: {
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
       paddingHorizontal: 16,
       paddingVertical: 16,
       backgroundColor: colors.backgroundSecondary,
@@ -222,17 +221,21 @@ const createStyles = (colors: any) =>
       borderBottomColor: colors.border,
     },
     backButton: {
-      paddingVertical: 4,
-      paddingHorizontal: 8,
+      width: 40,
+      height: 40,
+      justifyContent: 'center',
+      alignItems: 'center',
     },
-    backButtonText: {
-      fontSize: 16,
-      color: colors.primary,
+    backArrow: {
+      fontSize: 24,
+      color: colors.text,
     },
     headerTitle: {
-      fontSize: 18,
-      fontWeight: '600',
+      flex: 1,
+      fontSize: 20,
+      fontWeight: 'bold',
       color: colors.text,
+      textAlign: 'center',
     },
     saveButton: {
       paddingVertical: 4,
@@ -269,7 +272,7 @@ const createStyles = (colors: any) =>
     avatarText: {
       fontSize: 40,
       fontWeight: 'bold',
-      color: '#FFFFFF',
+      color: colors.buttonText,
     },
     changeAvatarButton: {
       paddingVertical: 8,

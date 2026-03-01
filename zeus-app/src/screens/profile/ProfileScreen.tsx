@@ -7,6 +7,7 @@ import {
   SafeAreaView,
   ScrollView,
   Alert,
+  Platform,
 } from 'react-native';
 import { useAuthStore } from '../../store/authStore';
 import { useThemeStore } from '../../store/themeStore';
@@ -38,45 +39,21 @@ export const ProfileScreen: React.FC = () => {
     );
   };
 
-  const handleMenuItemPress = (label: string) => {
-    switch (label) {
-      case 'Edit Profile':
-        navigation.navigate('EditProfile');
-        break;
-      case 'My Recipes':
-        navigation.navigate('MyRecipes');
-        break;
-      case 'Meal Preferences':
-        navigation.navigate('EditPreferences');
-        break;
-      case 'Settings':
-        navigation.navigate('Settings');
-        break;
-      default:
-        Alert.alert('Coming Soon', `${label} feature is coming soon!`);
-    }
-  };
-
   const menuItems = [
-    { icon: '✏️', label: 'Edit Profile', badge: null },
-    { icon: '📖', label: 'My Recipes', badge: null },
-    { icon: '🎯', label: 'Meal Preferences', badge: null },
-    { icon: '⚙️', label: 'Settings', badge: null },
+    { icon: '✏️', label: 'Edit Profile', subtitle: 'Update your info', screen: 'EditProfile' as const },
+    { icon: '📖', label: 'My Recipes', subtitle: 'View & manage recipes', screen: 'MyRecipes' as const },
+    { icon: '🎯', label: 'Meal Preferences', subtitle: 'Diet, goals & planning', screen: 'EditPreferences' as const },
+    { icon: '⚙️', label: 'Settings', subtitle: 'App configuration', screen: 'Settings' as const },
   ];
 
   const styles = createStyles(colors);
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView>
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Profile</Text>
-        </View>
-
-        {/* Profile Info */}
-        <View style={styles.profileSection}>
-          <View style={styles.avatarContainer}>
+      <ScrollView showsVerticalScrollIndicator={false}>
+        {/* Profile Card */}
+        <View style={styles.profileCard}>
+          <View style={styles.avatarRing}>
             <View style={styles.avatar}>
               <Text style={styles.avatarText}>
                 {user?.username?.charAt(0).toUpperCase() || 'U'}
@@ -84,43 +61,40 @@ export const ProfileScreen: React.FC = () => {
             </View>
           </View>
 
-          <Text style={styles.username}>@{user?.username}</Text>
+          <Text style={styles.username}>{user?.username}</Text>
           <Text style={styles.email}>{user?.email}</Text>
         </View>
 
         {/* Menu Items */}
-        <View style={styles.menuSection}>
+        <View style={styles.menuCard}>
           {menuItems.map((item, index) => (
             <TouchableOpacity
               key={index}
-              style={styles.menuItem}
-              onPress={() => handleMenuItemPress(item.label)}
+              style={[
+                styles.menuItem,
+                index === menuItems.length - 1 && styles.menuItemLast,
+              ]}
+              onPress={() => navigation.navigate(item.screen)}
+              activeOpacity={0.6}
             >
-              <View style={styles.menuItemLeft}>
+              <View style={styles.menuIconContainer}>
                 <Text style={styles.menuItemIcon}>{item.icon}</Text>
+              </View>
+              <View style={styles.menuItemContent}>
                 <Text style={styles.menuItemLabel}>{item.label}</Text>
+                <Text style={styles.menuItemSubtitle}>{item.subtitle}</Text>
               </View>
-              <View style={styles.menuItemRight}>
-                {item.badge && (
-                  <View style={styles.badge}>
-                    <Text style={styles.badgeText}>{item.badge}</Text>
-                  </View>
-                )}
-                <Text style={styles.menuItemArrow}>›</Text>
-              </View>
+              <Text style={styles.menuItemArrow}>›</Text>
             </TouchableOpacity>
           ))}
         </View>
 
-        {/* Logout Button */}
-        <View style={styles.logoutSection}>
-          <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-            <Text style={styles.logoutButtonText}>Logout</Text>
-          </TouchableOpacity>
-        </View>
+        {/* Logout */}
+        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout} activeOpacity={0.7}>
+          <Text style={styles.logoutButtonText}>Log Out</Text>
+        </TouchableOpacity>
 
-        {/* Version Info */}
-        <Text style={styles.versionText}>Zeus v1.0.0</Text>
+        <Text style={styles.versionText}>Zeus v1.3.1</Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -132,152 +106,123 @@ const createStyles = (colors: any) =>
       flex: 1,
       backgroundColor: colors.background,
     },
-    header: {
-      paddingHorizontal: 24,
-      paddingVertical: 16,
-      backgroundColor: colors.backgroundSecondary,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.border,
-    },
-    headerTitle: {
-      fontSize: 28,
-      fontWeight: 'bold',
-      color: colors.text,
-    },
-    profileSection: {
-      backgroundColor: colors.backgroundSecondary,
-      padding: 24,
+    profileCard: {
       alignItems: 'center',
-      marginBottom: 16,
+      paddingTop: 40,
+      paddingBottom: 32,
+      marginHorizontal: 16,
+      marginTop: 16,
+      backgroundColor: colors.backgroundSecondary,
+      borderRadius: 20,
+      ...Platform.select({
+        ios: {
+          shadowColor: colors.shadow,
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.08,
+          shadowRadius: 12,
+        },
+        android: { elevation: 3 },
+      }),
     },
-    avatarContainer: {
+    avatarRing: {
+      width: 108,
+      height: 108,
+      borderRadius: 54,
+      borderWidth: 3,
+      borderColor: colors.primary + '30',
+      justifyContent: 'center',
+      alignItems: 'center',
       marginBottom: 16,
     },
     avatar: {
-      width: 100,
-      height: 100,
-      borderRadius: 50,
+      width: 96,
+      height: 96,
+      borderRadius: 48,
       backgroundColor: colors.primary,
       justifyContent: 'center',
       alignItems: 'center',
-      borderWidth: 4,
-      borderColor: colors.backgroundSecondary,
-      shadowColor: colors.shadow,
-      shadowOffset: {
-        width: 0,
-        height: 4,
-      },
-      shadowOpacity: 0.1,
-      shadowRadius: 8,
-      elevation: 4,
     },
     avatarText: {
-      fontSize: 40,
-      fontWeight: 'bold',
-      color: '#FFFFFF',
+      fontSize: 38,
+      fontWeight: '700',
+      color: colors.buttonText,
     },
     username: {
-      fontSize: 24,
-      fontWeight: 'bold',
+      fontSize: 22,
+      fontWeight: '700',
       color: colors.text,
       marginBottom: 4,
+      letterSpacing: -0.3,
     },
     email: {
-      fontSize: 16,
-      color: colors.textMuted,
-      marginBottom: 24,
-    },
-    statsContainer: {
-      flexDirection: 'row',
-      width: '100%',
-      justifyContent: 'space-around',
-      marginBottom: 24,
-      paddingTop: 16,
-      borderTopWidth: 1,
-      borderTopColor: colors.border,
-    },
-    statItem: {
-      alignItems: 'center',
-    },
-    statValue: {
-      fontSize: 24,
-      fontWeight: 'bold',
-      color: colors.primary,
-      marginBottom: 4,
-    },
-    statLabel: {
-      fontSize: 14,
+      fontSize: 15,
       color: colors.textMuted,
     },
-    editButton: {
-      backgroundColor: colors.secondary,
-      paddingHorizontal: 32,
-      paddingVertical: 12,
-      borderRadius: 24,
-    },
-    editButtonText: {
-      color: '#FFFFFF',
-      fontSize: 16,
-      fontWeight: '600',
-    },
-    menuSection: {
+    menuCard: {
+      marginHorizontal: 16,
+      marginTop: 20,
       backgroundColor: colors.backgroundSecondary,
-      marginBottom: 16,
+      borderRadius: 16,
+      overflow: 'hidden',
+      ...Platform.select({
+        ios: {
+          shadowColor: colors.shadow,
+          shadowOffset: { width: 0, height: 1 },
+          shadowOpacity: 0.06,
+          shadowRadius: 8,
+        },
+        android: { elevation: 2 },
+      }),
     },
     menuItem: {
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
-      padding: 16,
-      paddingHorizontal: 24,
-      borderBottomWidth: 1,
+      paddingVertical: 16,
+      paddingHorizontal: 16,
+      borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.border,
     },
-    menuItemLeft: {
-      flexDirection: 'row',
+    menuItemLast: {
+      borderBottomWidth: 0,
+    },
+    menuIconContainer: {
+      width: 44,
+      height: 44,
+      borderRadius: 12,
+      backgroundColor: colors.background,
+      justifyContent: 'center',
       alignItems: 'center',
-      flex: 1,
+      marginRight: 14,
     },
     menuItemIcon: {
-      fontSize: 24,
-      marginRight: 16,
+      fontSize: 22,
+    },
+    menuItemContent: {
+      flex: 1,
     },
     menuItemLabel: {
       fontSize: 16,
-      color: colors.text,
-      fontWeight: '500',
-    },
-    menuItemRight: {
-      flexDirection: 'row',
-      alignItems: 'center',
-    },
-    badge: {
-      backgroundColor: colors.primary,
-      paddingHorizontal: 8,
-      paddingVertical: 2,
-      borderRadius: 10,
-      marginRight: 8,
-    },
-    badgeText: {
-      color: '#FFFFFF',
-      fontSize: 12,
       fontWeight: '600',
+      color: colors.text,
+      marginBottom: 2,
+    },
+    menuItemSubtitle: {
+      fontSize: 13,
+      color: colors.textMuted,
     },
     menuItemArrow: {
-      fontSize: 28,
+      fontSize: 22,
       color: colors.textMuted,
-      fontWeight: '300',
-    },
-    logoutSection: {
-      padding: 24,
+      fontWeight: '400',
     },
     logoutButton: {
-      backgroundColor: colors.backgroundSecondary,
-      borderWidth: 2,
-      borderColor: colors.error,
-      height: 48,
-      borderRadius: 8,
-      justifyContent: 'center',
+      marginHorizontal: 16,
+      marginTop: 24,
+      paddingVertical: 15,
+      borderRadius: 14,
+      backgroundColor: colors.error + '10',
+      borderWidth: 1,
+      borderColor: colors.error + '30',
       alignItems: 'center',
     },
     logoutButtonText: {
@@ -288,7 +233,9 @@ const createStyles = (colors: any) =>
     versionText: {
       textAlign: 'center',
       color: colors.textMuted,
-      fontSize: 14,
+      fontSize: 13,
+      marginTop: 20,
       marginBottom: 32,
+      opacity: 0.6,
     },
   });

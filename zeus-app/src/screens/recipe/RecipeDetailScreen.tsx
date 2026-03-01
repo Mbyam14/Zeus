@@ -16,6 +16,7 @@ import {
   Clipboard,
 } from 'react-native';
 import { Recipe } from '../../types/recipe';
+import { recipeService } from '../../services/recipeService';
 import { useThemeStore } from '../../store/themeStore';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -134,9 +135,20 @@ export const RecipeDetailScreen: React.FC<RecipeDetailScreenProps> = ({
     animateToStep('prev');
   };
 
-  const handleSaveToggle = () => {
-    setIsSaved(!isSaved);
-    // TODO: Call API to save/unsave recipe
+  const handleSaveToggle = async () => {
+    const newSavedState = !isSaved;
+    setIsSaved(newSavedState);
+    try {
+      if (newSavedState) {
+        await recipeService.saveRecipe(recipe.id);
+      } else {
+        await recipeService.unsaveRecipe(recipe.id);
+      }
+    } catch (error) {
+      // Rollback on failure
+      setIsSaved(!newSavedState);
+      Alert.alert('Error', `Failed to ${newSavedState ? 'save' : 'unsave'} recipe`);
+    }
   };
 
   const handleShare = () => {
@@ -191,11 +203,6 @@ Shared from Zeus - Your AI Meal Planner`;
     setShowOptionsMenu(false);
     Alert.alert('Add to Meal Plan', 'This feature is coming soon!');
     // TODO: Navigate to meal plan selector
-  };
-
-  const handlePrint = () => {
-    setShowOptionsMenu(false);
-    Alert.alert('Print Recipe', 'This feature is coming soon!');
   };
 
   const getDifficultyColor = (difficulty: string) => {
@@ -461,11 +468,6 @@ Shared from Zeus - Your AI Meal Planner`;
                 <Text style={styles.optionsMenuText}>Start Cooking Mode</Text>
               </TouchableOpacity>
             )}
-
-            <TouchableOpacity style={styles.optionsMenuItem} onPress={handlePrint}>
-              <Text style={styles.optionsMenuIcon}>🖨️</Text>
-              <Text style={styles.optionsMenuText}>Print Recipe</Text>
-            </TouchableOpacity>
 
             <TouchableOpacity
               style={[styles.optionsMenuItem, styles.optionsMenuCancel]}

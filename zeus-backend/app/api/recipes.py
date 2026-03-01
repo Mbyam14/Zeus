@@ -32,6 +32,7 @@ async def get_recipe_feed(
     max_prep_time: Optional[int] = Query(None, description="Maximum prep time in minutes"),
     meal_type: Optional[MealType] = Query(None, description="Filter by meal type"),
     dietary_tags: Optional[List[str]] = Query(None, description="Filter by dietary tags"),
+    search: Optional[str] = Query(None, description="Search by recipe title"),
     use_pantry_items: bool = Query(False, description="Prioritize recipes using pantry items"),
     limit: int = Query(20, ge=1, le=100, description="Number of recipes to return"),
     offset: int = Query(0, ge=0, description="Number of recipes to skip"),
@@ -39,7 +40,7 @@ async def get_recipe_feed(
 ):
     """
     Get paginated recipe feed with optional filters.
-    
+
     If authenticated, includes user-specific data like likes and saves.
     """
     filters = RecipeFeedFilter(
@@ -48,6 +49,7 @@ async def get_recipe_feed(
         max_prep_time=max_prep_time,
         meal_type=meal_type,
         dietary_tags=dietary_tags,
+        search=search,
         use_pantry_items=use_pantry_items,
         limit=limit,
         offset=offset
@@ -106,6 +108,29 @@ async def get_my_recipes(
         search=search,
         meal_type=meal_type
     )
+
+
+@router.post("/batch", response_model=List[RecipeResponse])
+async def get_recipes_batch(
+    recipe_ids: List[str],
+    current_user: Optional[UserResponse] = Depends(get_current_user_optional)
+):
+    """
+    Get multiple recipes by IDs in a single request.
+
+    This is much more efficient than fetching recipes one by one.
+    Returns recipes in the same order as requested IDs.
+    Missing recipes are silently skipped.
+    """
+    if not recipe_ids:
+        return []
+
+    # Limit to 50 recipes per request to prevent abuse
+    if len(recipe_ids) > 50:
+        recipe_ids = recipe_ids[:50]
+
+    user_id = current_user.id if current_user else None
+    return await recipe_service.get_recipes_batch(recipe_ids, user_id)
 
 
 @router.get("/{recipe_id}", response_model=RecipeResponse)

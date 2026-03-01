@@ -7,7 +7,10 @@ export type PantryCategory =
   | 'Condiments'
   | 'Beverages'
   | 'Frozen'
-  | 'Pantry'
+  | 'Canned & Jarred'
+  | 'Baking'
+  | 'Oils & Vinegars'
+  | 'Snacks'
   | 'Other';
 
 export type PantryUnit =
@@ -51,6 +54,7 @@ export interface PantryItemUpdate {
   unit?: string;
   category?: PantryCategory;
   expires_at?: string;
+  clear_expires_at?: boolean;
 }
 
 export interface PantryFilter {

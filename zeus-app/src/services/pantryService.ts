@@ -49,6 +49,18 @@ class PantryService {
     await api.delete(`/api/pantry/${id}`);
   }
 
+  // Bulk delete pantry items by ID
+  async bulkDeletePantryItems(itemIds: string[]): Promise<{ deleted_count: number }> {
+    const response = await api.post<{ message: string; deleted_count: number }>('/api/pantry/bulk-delete', { item_ids: itemIds });
+    return response.data;
+  }
+
+  // Clear all pantry items
+  async clearAllPantryItems(): Promise<{ deleted_count: number }> {
+    const response = await api.delete<{ message: string; deleted_count: number }>('/api/pantry/clear-all');
+    return response.data;
+  }
+
   // Bulk add pantry items
   async bulkAddPantryItems(items: PantryItemCreate[]): Promise<PantryItem[]> {
     const response = await api.post<PantryItem[]>('/api/pantry/bulk', { items });

@@ -12,10 +12,14 @@ import { PrivacyPolicyScreen } from '../screens/profile/PrivacyPolicyScreen';
 import { NotificationsScreen } from '../screens/profile/NotificationsScreen';
 import { PrivacySecurityScreen } from '../screens/profile/PrivacySecurityScreen';
 import { DataStorageScreen } from '../screens/profile/DataStorageScreen';
+import { RecipeDetailScreen } from '../screens/recipe/RecipeDetailScreen';
+import { EditRecipeScreen } from '../screens/profile/EditRecipeScreen';
 
 export type ProfileStackParamList = {
   ProfileMain: undefined;
   MyRecipes: undefined;
+  RecipeDetail: { recipe: any };
+  EditRecipe: { recipe: any };
   Settings: undefined;
   EditPreferences: undefined;
   Theme: undefined;
@@ -45,6 +49,8 @@ export const ProfileNavigator: React.FC = () => {
       <Stack.Screen name="Notifications" component={NotificationsScreen} />
       <Stack.Screen name="PrivacySecurity" component={PrivacySecurityScreen} />
       <Stack.Screen name="DataStorage" component={DataStorageScreen} />
+      <Stack.Screen name="RecipeDetail" component={RecipeDetailScreen} />
+      <Stack.Screen name="EditRecipe" component={EditRecipeScreen} />
     </Stack.Navigator>
   );
 };

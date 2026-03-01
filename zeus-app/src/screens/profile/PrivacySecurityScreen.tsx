@@ -55,10 +55,10 @@ export const PrivacySecurityScreen: React.FC = () => {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Text style={styles.backButtonText}>←</Text>
+          <Text style={styles.backArrow}>←</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Privacy & Security</Text>
-        <View style={styles.backButton} />
+        <View style={{ width: 40 }} />
       </View>
 
       <ScrollView style={styles.scrollView}>
@@ -76,7 +76,7 @@ export const PrivacySecurityScreen: React.FC = () => {
                 value={shareUsageData}
                 onValueChange={setShareUsageData}
                 trackColor={{ false: colors.border, true: colors.primary }}
-                thumbColor="#FFFFFF"
+                thumbColor={colors.buttonText}
               />
             </View>
             <View style={styles.settingItem}>
@@ -90,7 +90,7 @@ export const PrivacySecurityScreen: React.FC = () => {
                 value={personalizedAds}
                 onValueChange={setPersonalizedAds}
                 trackColor={{ false: colors.border, true: colors.primary }}
-                thumbColor="#FFFFFF"
+                thumbColor={colors.buttonText}
               />
             </View>
             <View style={[styles.settingItem, styles.lastSettingItem]}>
@@ -104,7 +104,7 @@ export const PrivacySecurityScreen: React.FC = () => {
                 value={saveRecipeHistory}
                 onValueChange={setSaveRecipeHistory}
                 trackColor={{ false: colors.border, true: colors.primary }}
-                thumbColor="#FFFFFF"
+                thumbColor={colors.buttonText}
               />
             </View>
           </View>
@@ -184,7 +184,6 @@ const createStyles = (colors: any) =>
     header: {
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
       paddingHorizontal: 16,
       paddingVertical: 16,
       backgroundColor: colors.backgroundSecondary,
@@ -197,14 +196,16 @@ const createStyles = (colors: any) =>
       justifyContent: 'center',
       alignItems: 'center',
     },
-    backButtonText: {
-      fontSize: 28,
+    backArrow: {
+      fontSize: 24,
       color: colors.text,
     },
     headerTitle: {
+      flex: 1,
       fontSize: 20,
       fontWeight: 'bold',
       color: colors.text,
+      textAlign: 'center',
     },
     scrollView: {
       flex: 1,

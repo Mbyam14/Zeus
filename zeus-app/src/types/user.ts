@@ -28,6 +28,12 @@ export interface UserProfile {
   profile_data?: Record<string, any>;
 }
 
+export interface MealCalorieDistribution {
+  breakfast: number;
+  lunch: number;
+  dinner: number;
+}
+
 export interface UserPreferences {
   dietary_restrictions: string[];
   cuisine_preferences: string[];
@@ -37,6 +43,12 @@ export interface UserPreferences {
   protein_target_grams?: number;
   allergies: string[];
   disliked_ingredients: string[];
+  // Meal planning preferences
+  meal_calorie_distribution?: MealCalorieDistribution;
+  cooking_sessions_per_week?: number;
+  recipe_source_preference?: 'vetted_only' | 'ai_only' | 'mixed';
+  leftover_tolerance?: 'low' | 'moderate' | 'high';
+  budget_friendly?: boolean;
 }
 
 export interface UserProfileUpdate {

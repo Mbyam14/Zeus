@@ -53,11 +53,14 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) =>
   };
 
   return (
-    <KeyboardAvoidingView 
+    <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior="padding"
     >
-      <ScrollView contentContainerStyle={styles.scrollContainer}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContainer}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.header}>
           <Text style={styles.title}>Join Zeus</Text>
           <Text style={styles.subtitle}>Start your culinary journey</Text>

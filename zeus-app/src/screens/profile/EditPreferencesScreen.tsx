@@ -10,7 +10,8 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Animated
+  Animated,
+  SafeAreaView,
 } from 'react-native';
 import { UserPreferences } from '../../types/user';
 import { userService } from '../../services/userService';
@@ -19,6 +20,16 @@ import { useThemeStore } from '../../store/themeStore';
 const DIETARY_OPTIONS = ['Vegetarian', 'Vegan', 'Gluten-Free', 'Dairy-Free', 'Keto', 'Paleo', 'Pescatarian'];
 const CUISINE_OPTIONS = ['Italian', 'Mexican', 'Asian', 'Mediterranean', 'American', 'Indian', 'French', 'Thai'];
 const SKILL_LEVELS: Array<'beginner' | 'intermediate' | 'advanced'> = ['beginner', 'intermediate', 'advanced'];
+const RECIPE_SOURCE_OPTIONS = [
+  { value: 'mixed', label: 'Mixed', description: 'Curated + AI recipes' },
+  { value: 'vetted_only', label: 'Curated Only', description: 'Only trusted recipes' },
+  { value: 'ai_only', label: 'AI Only', description: 'Fresh AI-generated' },
+];
+const LEFTOVER_TOLERANCE_OPTIONS = [
+  { value: 'low', label: 'Low', description: '2x max' },
+  { value: 'moderate', label: 'Moderate', description: '3x max' },
+  { value: 'high', label: 'High', description: '4x max' },
+];
 
 interface EditPreferencesScreenProps {
   navigation: any;
@@ -39,7 +50,12 @@ export const EditPreferencesScreen: React.FC<EditPreferencesScreenProps> = ({ na
     calorie_target: undefined,
     protein_target_grams: undefined,
     allergies: [],
-    disliked_ingredients: []
+    disliked_ingredients: [],
+    meal_calorie_distribution: { breakfast: 25, lunch: 35, dinner: 40 },
+    cooking_sessions_per_week: 6,
+    recipe_source_preference: 'mixed',
+    leftover_tolerance: 'moderate',
+    budget_friendly: false
   });
 
   useEffect(() => {
@@ -80,14 +96,12 @@ export const EditPreferencesScreen: React.FC<EditPreferencesScreenProps> = ({ na
   const handleSave = async () => {
     try {
       setLoading(true);
-      // Ensure household_size has a valid value (default to 1 if undefined)
       const prefsToSave = {
         ...preferences,
         household_size: preferences.household_size || 1
       };
       await userService.updatePreferences(prefsToSave);
 
-      // Show success animation and navigate back quickly
       setShowSuccess(true);
       Animated.parallel([
         Animated.timing(successOpacity, {
@@ -102,7 +116,6 @@ export const EditPreferencesScreen: React.FC<EditPreferencesScreenProps> = ({ na
         }),
       ]).start();
 
-      // Navigate back after a brief moment
       setTimeout(() => {
         navigation.goBack();
       }, 200);
@@ -119,171 +132,366 @@ export const EditPreferencesScreen: React.FC<EditPreferencesScreenProps> = ({ na
   if (initialLoading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#FF6B35" />
+        <ActivityIndicator size="large" color={colors.primary} />
         <Text style={styles.loadingText}>Loading preferences...</Text>
       </View>
     );
   }
 
+  const calTotal = (preferences.meal_calorie_distribution?.breakfast || 25) +
+    (preferences.meal_calorie_distribution?.lunch || 35) +
+    (preferences.meal_calorie_distribution?.dinner || 40);
+
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
-    >
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={styles.contentContainer}
-        keyboardShouldPersistTaps="handled"
+    <SafeAreaView style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <Text style={styles.backArrow}>←</Text>
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Preferences</Text>
+        <TouchableOpacity onPress={handleSave} disabled={loading} style={styles.saveHeaderButton}>
+          {loading ? (
+            <ActivityIndicator size="small" color={colors.primary} />
+          ) : (
+            <Text style={styles.saveHeaderButtonText}>Save</Text>
+          )}
+        </TouchableOpacity>
+      </View>
+
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <Text style={styles.backButtonText}>← Back</Text>
-          </TouchableOpacity>
-          <Text style={styles.title}>Edit Preferences</Text>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={styles.contentContainer}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+
+        {/* Dietary Section */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Dietary Restrictions</Text>
+          <View style={styles.chipContainer}>
+            {DIETARY_OPTIONS.map(option => (
+              <TouchableOpacity
+                key={option}
+                style={[
+                  styles.chip,
+                  preferences.dietary_restrictions.includes(option) && styles.chipSelected
+                ]}
+                onPress={() => toggleDietary(option)}
+                activeOpacity={0.7}
+              >
+                <Text style={[
+                  styles.chipText,
+                  preferences.dietary_restrictions.includes(option) && styles.chipTextSelected
+                ]}>
+                  {option}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
 
-      {/* Dietary Restrictions */}
-      <Text style={styles.sectionTitle}>Dietary Restrictions</Text>
-      <View style={styles.chipContainer}>
-        {DIETARY_OPTIONS.map(option => (
-          <TouchableOpacity
-            key={option}
-            style={[
-              styles.chip,
-              preferences.dietary_restrictions.includes(option) && styles.chipSelected
-            ]}
-            onPress={() => toggleDietary(option)}
-          >
-            <Text style={[
-              styles.chipText,
-              preferences.dietary_restrictions.includes(option) && styles.chipTextSelected
-            ]}>
-              {option}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+        {/* Cuisine Section */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Favorite Cuisines</Text>
+          <View style={styles.chipContainer}>
+            {CUISINE_OPTIONS.map(option => (
+              <TouchableOpacity
+                key={option}
+                style={[
+                  styles.chip,
+                  preferences.cuisine_preferences.includes(option) && styles.chipSelected
+                ]}
+                onPress={() => toggleCuisine(option)}
+                activeOpacity={0.7}
+              >
+                <Text style={[
+                  styles.chipText,
+                  preferences.cuisine_preferences.includes(option) && styles.chipTextSelected
+                ]}>
+                  {option}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
 
-      {/* Cuisine Preferences */}
-      <Text style={styles.sectionTitle}>Favorite Cuisines</Text>
-      <View style={styles.chipContainer}>
-        {CUISINE_OPTIONS.map(option => (
-          <TouchableOpacity
-            key={option}
-            style={[
-              styles.chip,
-              preferences.cuisine_preferences.includes(option) && styles.chipSelected
-            ]}
-            onPress={() => toggleCuisine(option)}
-          >
-            <Text style={[
-              styles.chipText,
-              preferences.cuisine_preferences.includes(option) && styles.chipTextSelected
-            ]}>
-              {option}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+        {/* Cooking Skill */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Cooking Skill</Text>
+          <View style={styles.segmentRow}>
+            {SKILL_LEVELS.map(skill => (
+              <TouchableOpacity
+                key={skill}
+                style={[
+                  styles.segmentButton,
+                  preferences.cooking_skill === skill && styles.segmentButtonSelected
+                ]}
+                onPress={() => setPreferences(prev => ({ ...prev, cooking_skill: skill }))}
+                activeOpacity={0.7}
+              >
+                <Text style={[
+                  styles.segmentText,
+                  preferences.cooking_skill === skill && styles.segmentTextSelected
+                ]}>
+                  {skill.charAt(0).toUpperCase() + skill.slice(1)}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
 
-      {/* Cooking Skill */}
-      <Text style={styles.sectionTitle}>Cooking Skill Level</Text>
-      <View style={styles.skillContainer}>
-        {SKILL_LEVELS.map(skill => (
-          <TouchableOpacity
-            key={skill}
-            style={[
-              styles.skillButton,
-              preferences.cooking_skill === skill && styles.skillButtonSelected
-            ]}
-            onPress={() => setPreferences(prev => ({ ...prev, cooking_skill: skill }))}
-          >
-            <Text style={[
-              styles.skillButtonText,
-              preferences.cooking_skill === skill && styles.skillButtonTextSelected
-            ]}>
-              {skill.charAt(0).toUpperCase() + skill.slice(1)}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+        {/* Household & Nutrition */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Household & Nutrition</Text>
 
-      {/* Household Size */}
-      <Text style={styles.sectionTitle}>Household Size</Text>
-      <Text style={styles.helperText}>How many people do you typically cook for?</Text>
-      <TextInput
-        style={styles.input}
-        keyboardType="numeric"
-        value={preferences.household_size?.toString() || ''}
-        onChangeText={text => {
-          const num = parseInt(text);
-          setPreferences(prev => ({
-            ...prev,
-            household_size: text === '' ? undefined : (isNaN(num) ? prev.household_size : Math.max(1, num))
-          }));
-        }}
-        placeholder="1"
-      />
-
-      {/* Daily Targets */}
-      <Text style={styles.sectionTitle}>Daily Nutrition Goals (Optional)</Text>
-      <Text style={styles.helperText}>Leave blank if you don't track macros</Text>
-
-      <View style={styles.row}>
-        <View style={styles.halfInput}>
-          <Text style={styles.inputLabel}>Calories</Text>
+          <Text style={styles.fieldLabel}>Household Size</Text>
           <TextInput
             style={styles.input}
             keyboardType="numeric"
-            value={preferences.calorie_target?.toString() || ''}
-            onChangeText={text => setPreferences(prev => ({
-              ...prev,
-              calorie_target: text ? parseInt(text) : undefined
-            }))}
-            placeholder="2000"
+            value={preferences.household_size ? preferences.household_size.toString() : ''}
+            onChangeText={text => {
+              const num = parseInt(text);
+              setPreferences(prev => ({
+                ...prev,
+                household_size: text === '' ? 0 : (isNaN(num) ? prev.household_size : Math.min(20, Math.max(1, num)))
+              }));
+            }}
+            placeholder="2"
+            placeholderTextColor={colors.textMuted}
           />
+
+          <View style={styles.fieldRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.fieldLabel}>Daily Calories</Text>
+              <TextInput
+                style={styles.input}
+                keyboardType="numeric"
+                value={preferences.calorie_target?.toString() || ''}
+                onChangeText={text => setPreferences(prev => ({
+                  ...prev,
+                  calorie_target: text ? parseInt(text) : undefined
+                }))}
+                placeholder="2000"
+                placeholderTextColor={colors.textMuted}
+              />
+            </View>
+            <View style={{ width: 12 }} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.fieldLabel}>Protein (g)</Text>
+              <TextInput
+                style={styles.input}
+                keyboardType="numeric"
+                value={preferences.protein_target_grams?.toString() || ''}
+                onChangeText={text => setPreferences(prev => ({
+                  ...prev,
+                  protein_target_grams: text ? parseInt(text) : undefined
+                }))}
+                placeholder="150"
+                placeholderTextColor={colors.textMuted}
+              />
+            </View>
+          </View>
         </View>
-        <View style={styles.halfInput}>
-          <Text style={styles.inputLabel}>Protein (g)</Text>
-          <TextInput
-            style={styles.input}
-            keyboardType="numeric"
-            value={preferences.protein_target_grams?.toString() || ''}
-            onChangeText={text => setPreferences(prev => ({
-              ...prev,
-              protein_target_grams: text ? parseInt(text) : undefined
-            }))}
-            placeholder="150"
-          />
+
+        {/* Calorie Distribution */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Calorie Distribution</Text>
+          <Text style={styles.cardSubtitle}>How to split daily calories across meals</Text>
+
+          <View style={styles.distributionContainer}>
+            {(['breakfast', 'lunch', 'dinner'] as const).map(meal => {
+              const value = preferences.meal_calorie_distribution?.[meal] || (meal === 'breakfast' ? 25 : meal === 'lunch' ? 35 : 40);
+              const min = meal === 'breakfast' ? 10 : meal === 'lunch' ? 15 : 20;
+              const max = meal === 'breakfast' ? 50 : meal === 'lunch' ? 50 : 60;
+              return (
+                <View key={meal} style={styles.distributionItem}>
+                  <Text style={styles.distributionLabel}>{meal.charAt(0).toUpperCase() + meal.slice(1)}</Text>
+                  <View style={styles.distributionControls}>
+                    <TouchableOpacity
+                      style={styles.stepButton}
+                      onPress={() => {
+                        if (value > min) {
+                          setPreferences(prev => ({
+                            ...prev,
+                            meal_calorie_distribution: {
+                              breakfast: prev.meal_calorie_distribution?.breakfast ?? 25,
+                              lunch: prev.meal_calorie_distribution?.lunch ?? 35,
+                              dinner: prev.meal_calorie_distribution?.dinner ?? 40,
+                              [meal]: value - 5
+                            }
+                          }));
+                        }
+                      }}
+                    >
+                      <Text style={styles.stepButtonText}>-</Text>
+                    </TouchableOpacity>
+                    <Text style={styles.distributionValue}>{value}%</Text>
+                    <TouchableOpacity
+                      style={styles.stepButton}
+                      onPress={() => {
+                        if (value < max) {
+                          setPreferences(prev => ({
+                            ...prev,
+                            meal_calorie_distribution: {
+                              breakfast: prev.meal_calorie_distribution?.breakfast ?? 25,
+                              lunch: prev.meal_calorie_distribution?.lunch ?? 35,
+                              dinner: prev.meal_calorie_distribution?.dinner ?? 40,
+                              [meal]: value + 5
+                            }
+                          }));
+                        }
+                      }}
+                    >
+                      <Text style={styles.stepButtonText}>+</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+          <Text style={[styles.totalText, calTotal !== 100 && { color: colors.error }]}>
+            Total: {calTotal}%{calTotal !== 100 ? ' (should be 100%)' : ''}
+          </Text>
         </View>
-      </View>
 
-      {/* Save Button */}
-      <TouchableOpacity
-        style={styles.saveButton}
-        onPress={handleSave}
-        disabled={loading}
-      >
-        {loading ? (
-          <ActivityIndicator color="#FFFFFF" />
-        ) : (
-          <Text style={styles.saveButtonText}>Save Changes</Text>
-        )}
-      </TouchableOpacity>
+        {/* Cooking Sessions */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Cooking Sessions</Text>
+          <Text style={styles.cardSubtitle}>How many times per week do you want to cook?</Text>
 
-        <View style={styles.bottomSpacer} />
-      </ScrollView>
+          <View style={styles.stepperRow}>
+            <TouchableOpacity
+              style={styles.stepButton}
+              onPress={() => {
+                const current = preferences.cooking_sessions_per_week || 6;
+                if (current > 3) setPreferences(prev => ({ ...prev, cooking_sessions_per_week: current - 1 }));
+              }}
+            >
+              <Text style={styles.stepButtonText}>-</Text>
+            </TouchableOpacity>
+            <View style={styles.stepperDisplay}>
+              <Text style={styles.stepperValue}>{preferences.cooking_sessions_per_week || 6}</Text>
+              <Text style={styles.stepperLabel}>sessions</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.stepButton}
+              onPress={() => {
+                const current = preferences.cooking_sessions_per_week || 6;
+                if (current < 14) setPreferences(prev => ({ ...prev, cooking_sessions_per_week: current + 1 }));
+              }}
+            >
+              <Text style={styles.stepButtonText}>+</Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.cardSubtitle}>
+            {21 - (preferences.cooking_sessions_per_week || 6)} leftover meals per week
+          </Text>
+        </View>
 
-      {/* Success Checkmark Overlay */}
+        {/* Recipe Source */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Recipe Source</Text>
+          <Text style={styles.cardSubtitle}>Where should meal plan recipes come from?</Text>
+          <View style={styles.segmentRow}>
+            {RECIPE_SOURCE_OPTIONS.map(option => (
+              <TouchableOpacity
+                key={option.value}
+                style={[
+                  styles.segmentButton,
+                  preferences.recipe_source_preference === option.value && styles.segmentButtonSelected
+                ]}
+                onPress={() => setPreferences(prev => ({ ...prev, recipe_source_preference: option.value }))}
+                activeOpacity={0.7}
+              >
+                <Text style={[
+                  styles.segmentText,
+                  preferences.recipe_source_preference === option.value && styles.segmentTextSelected
+                ]}>
+                  {option.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
+        {/* Leftover Tolerance */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Leftover Tolerance</Text>
+          <Text style={styles.cardSubtitle}>How often can the same meal repeat?</Text>
+          <View style={styles.segmentRow}>
+            {LEFTOVER_TOLERANCE_OPTIONS.map(option => (
+              <TouchableOpacity
+                key={option.value}
+                style={[
+                  styles.segmentButton,
+                  preferences.leftover_tolerance === option.value && styles.segmentButtonSelected
+                ]}
+                onPress={() => setPreferences(prev => ({ ...prev, leftover_tolerance: option.value }))}
+                activeOpacity={0.7}
+              >
+                <Text style={[
+                  styles.segmentText,
+                  preferences.leftover_tolerance === option.value && styles.segmentTextSelected
+                ]}>
+                  {option.label}
+                </Text>
+                <Text style={[
+                  styles.segmentSubtext,
+                  preferences.leftover_tolerance === option.value && { color: 'rgba(255,255,255,0.7)' }
+                ]}>
+                  {option.description}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
+        {/* Budget Mode */}
+        <TouchableOpacity
+          style={[styles.card, styles.toggleCard, preferences.budget_friendly && styles.toggleCardActive]}
+          onPress={() => setPreferences(prev => ({ ...prev, budget_friendly: !prev.budget_friendly }))}
+          activeOpacity={0.7}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.cardTitle, { marginBottom: 4 }]}>Budget-Friendly Mode</Text>
+            <Text style={styles.cardSubtitle}>Prioritize cheaper ingredients & maximize pantry usage</Text>
+          </View>
+          <View style={[styles.togglePill, preferences.budget_friendly && styles.togglePillActive]}>
+            <Text style={styles.togglePillText}>
+              {preferences.budget_friendly ? 'ON' : 'OFF'}
+            </Text>
+          </View>
+        </TouchableOpacity>
+
+        {/* Bottom Save Button */}
+        <TouchableOpacity
+          style={styles.saveButton}
+          onPress={handleSave}
+          disabled={loading}
+          activeOpacity={0.8}
+        >
+          {loading ? (
+            <ActivityIndicator color={colors.buttonText} />
+          ) : (
+            <Text style={styles.saveButtonText}>Save Changes</Text>
+          )}
+        </TouchableOpacity>
+
+        <View style={{ height: 40 }} />
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      {/* Success Overlay */}
       {showSuccess && (
         <Animated.View
           style={[
             styles.successOverlay,
-            {
-              opacity: successOpacity,
-              transform: [{ scale: successScale }],
-            },
+            { opacity: successOpacity, transform: [{ scale: successScale }] },
           ]}
         >
           <View style={styles.successCircle}>
@@ -292,7 +500,7 @@ export const EditPreferencesScreen: React.FC<EditPreferencesScreenProps> = ({ na
           <Text style={styles.successText}>Saved!</Text>
         </Animated.View>
       )}
-    </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 };
 
@@ -303,7 +511,7 @@ const createStyles = (colors: any) =>
       backgroundColor: colors.background,
     },
     contentContainer: {
-      padding: 20,
+      padding: 16,
     },
     loadingContainer: {
       flex: 1,
@@ -313,37 +521,77 @@ const createStyles = (colors: any) =>
     },
     loadingText: {
       marginTop: 12,
-      fontSize: 16,
+      fontSize: 15,
       color: colors.textMuted,
     },
+    // Header
     header: {
-      marginBottom: 24,
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+      backgroundColor: colors.backgroundSecondary,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.border,
     },
     backButton: {
-      marginBottom: 16,
+      width: 40,
+      height: 40,
+      justifyContent: 'center',
+      alignItems: 'center',
     },
-    backButtonText: {
-      fontSize: 16,
-      color: colors.primary,
-      fontWeight: '600',
-    },
-    title: {
-      fontSize: 28,
-      fontWeight: 'bold',
+    backArrow: {
+      fontSize: 24,
       color: colors.text,
     },
-    sectionTitle: {
+    headerTitle: {
+      flex: 1,
       fontSize: 18,
-      fontWeight: '600',
+      fontWeight: '700',
       color: colors.text,
-      marginTop: 24,
-      marginBottom: 12,
+      textAlign: 'center',
     },
-    helperText: {
-      fontSize: 14,
+    saveHeaderButton: {
+      width: 56,
+      height: 36,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    saveHeaderButtonText: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: colors.primary,
+    },
+    // Cards
+    card: {
+      backgroundColor: colors.backgroundSecondary,
+      borderRadius: 16,
+      padding: 20,
+      marginBottom: 14,
+      ...Platform.select({
+        ios: {
+          shadowColor: colors.shadow,
+          shadowOffset: { width: 0, height: 1 },
+          shadowOpacity: 0.06,
+          shadowRadius: 8,
+        },
+        android: { elevation: 2 },
+      }),
+    },
+    cardTitle: {
+      fontSize: 17,
+      fontWeight: '700',
+      color: colors.text,
+      marginBottom: 14,
+      letterSpacing: -0.2,
+    },
+    cardSubtitle: {
+      fontSize: 13,
       color: colors.textMuted,
-      marginBottom: 8,
+      marginBottom: 12,
+      lineHeight: 18,
     },
+    // Chips
     chipContainer: {
       flexDirection: 'row',
       flexWrap: 'wrap',
@@ -352,9 +600,9 @@ const createStyles = (colors: any) =>
     chip: {
       paddingHorizontal: 16,
       paddingVertical: 10,
-      borderRadius: 20,
-      backgroundColor: colors.backgroundSecondary,
-      borderWidth: 1,
+      borderRadius: 24,
+      backgroundColor: colors.background,
+      borderWidth: 1.5,
       borderColor: colors.border,
     },
     chipSelected: {
@@ -367,105 +615,208 @@ const createStyles = (colors: any) =>
       fontWeight: '500',
     },
     chipTextSelected: {
-      color: '#FFFFFF',
+      color: colors.buttonText,
     },
-    skillContainer: {
+    // Segmented controls
+    segmentRow: {
       flexDirection: 'row',
-      gap: 12,
+      gap: 8,
     },
-    skillButton: {
+    segmentButton: {
       flex: 1,
-      paddingVertical: 12,
-      borderRadius: 8,
-      backgroundColor: colors.backgroundSecondary,
-      borderWidth: 1,
+      paddingVertical: 14,
+      paddingHorizontal: 8,
+      borderRadius: 12,
+      backgroundColor: colors.background,
+      borderWidth: 1.5,
       borderColor: colors.border,
       alignItems: 'center',
     },
-    skillButtonSelected: {
+    segmentButtonSelected: {
       backgroundColor: colors.primary,
       borderColor: colors.primary,
     },
-    skillButtonText: {
+    segmentText: {
       fontSize: 14,
       fontWeight: '600',
       color: colors.text,
     },
-    skillButtonTextSelected: {
-      color: '#FFFFFF',
+    segmentTextSelected: {
+      color: colors.buttonText,
+    },
+    segmentSubtext: {
+      fontSize: 10,
+      color: colors.textMuted,
+      marginTop: 3,
+    },
+    // Input fields
+    fieldLabel: {
+      fontSize: 14,
+      fontWeight: '500',
+      color: colors.textSecondary,
+      marginBottom: 6,
+      marginTop: 12,
+    },
+    fieldRow: {
+      flexDirection: 'row',
+      marginTop: 4,
     },
     input: {
-      backgroundColor: colors.backgroundSecondary,
-      borderWidth: 1,
+      backgroundColor: colors.background,
+      borderWidth: 1.5,
       borderColor: colors.border,
-      borderRadius: 8,
-      padding: 12,
+      borderRadius: 12,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
       fontSize: 16,
       color: colors.text,
     },
-    inputLabel: {
-      fontSize: 14,
-      fontWeight: '500',
-      color: colors.text,
-      marginBottom: 6,
-    },
-    row: {
-      flexDirection: 'row',
+    // Distribution stepper
+    distributionContainer: {
       gap: 12,
     },
-    halfInput: {
-      flex: 1,
+    distributionItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
     },
+    distributionLabel: {
+      fontSize: 15,
+      fontWeight: '500',
+      color: colors.text,
+      width: 80,
+    },
+    distributionControls: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    distributionValue: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: colors.text,
+      minWidth: 50,
+      textAlign: 'center',
+    },
+    totalText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.success,
+      textAlign: 'center',
+      marginTop: 12,
+    },
+    // Step buttons
+    stepButton: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      backgroundColor: colors.primary + '18',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    stepButtonText: {
+      fontSize: 22,
+      fontWeight: '600',
+      color: colors.primary,
+    },
+    // Stepper
+    stepperRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 24,
+      marginVertical: 8,
+    },
+    stepperDisplay: {
+      alignItems: 'center',
+    },
+    stepperValue: {
+      fontSize: 40,
+      fontWeight: '800',
+      color: colors.primary,
+      letterSpacing: -1,
+    },
+    stepperLabel: {
+      fontSize: 13,
+      color: colors.textMuted,
+      marginTop: -2,
+    },
+    // Toggle card
+    toggleCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderWidth: 1.5,
+      borderColor: colors.border,
+    },
+    toggleCardActive: {
+      borderColor: colors.success,
+      backgroundColor: colors.successLight,
+    },
+    togglePill: {
+      backgroundColor: colors.border,
+      paddingHorizontal: 14,
+      paddingVertical: 7,
+      borderRadius: 20,
+      marginLeft: 12,
+    },
+    togglePillActive: {
+      backgroundColor: colors.success,
+    },
+    togglePillText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.buttonText,
+    },
+    // Save button
     saveButton: {
       backgroundColor: colors.primary,
       paddingVertical: 16,
-      borderRadius: 8,
+      borderRadius: 14,
       alignItems: 'center',
-      marginTop: 32,
+      marginTop: 8,
+      ...Platform.select({
+        ios: {
+          shadowColor: colors.primary,
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.3,
+          shadowRadius: 8,
+        },
+        android: { elevation: 4 },
+      }),
     },
     saveButtonText: {
-      color: '#FFFFFF',
-      fontSize: 16,
-      fontWeight: '600',
+      color: colors.buttonText,
+      fontSize: 17,
+      fontWeight: '700',
     },
-    bottomSpacer: {
-      height: 40,
-    },
+    // Success overlay
     successOverlay: {
       position: 'absolute',
       top: 0,
       left: 0,
       right: 0,
       bottom: 0,
-      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      backgroundColor: colors.overlay,
       justifyContent: 'center',
       alignItems: 'center',
     },
     successCircle: {
-      width: 100,
-      height: 100,
-      borderRadius: 50,
+      width: 88,
+      height: 88,
+      borderRadius: 44,
       backgroundColor: colors.success,
       justifyContent: 'center',
       alignItems: 'center',
-      marginBottom: 16,
-      shadowColor: '#000',
-      shadowOffset: {
-        width: 0,
-        height: 4,
-      },
-      shadowOpacity: 0.3,
-      shadowRadius: 8,
-      elevation: 8,
+      marginBottom: 12,
     },
     successCheckmark: {
-      fontSize: 60,
-      color: '#FFFFFF',
+      fontSize: 48,
+      color: colors.buttonText,
       fontWeight: 'bold',
     },
     successText: {
-      fontSize: 24,
-      fontWeight: 'bold',
-      color: '#FFFFFF',
+      fontSize: 20,
+      fontWeight: '700',
+      color: colors.buttonText,
     },
   });

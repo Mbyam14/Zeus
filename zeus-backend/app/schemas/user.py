@@ -51,6 +51,32 @@ class UserPreferences(BaseModel):
     allergies: list[str] = Field(default=[], description="Food allergies")
     disliked_ingredients: list[str] = Field(default=[], description="Ingredients to avoid")
 
+    # Meal planning preferences
+    meal_calorie_distribution: Dict[str, int] = Field(
+        default={"breakfast": 25, "lunch": 35, "dinner": 40},
+        description="Percentage of daily calories per meal type (must sum to 100)"
+    )
+    cooking_sessions_per_week: int = Field(
+        default=6,
+        ge=3,
+        le=14,
+        description="Number of actual cooking sessions per week (rest are leftovers/repeats)"
+    )
+    recipe_source_preference: str = Field(
+        default="mixed",
+        pattern="^(vetted_only|ai_only|mixed)$",
+        description="Preference for recipe source: vetted_only, ai_only, or mixed"
+    )
+    leftover_tolerance: str = Field(
+        default="moderate",
+        pattern="^(low|moderate|high)$",
+        description="How often the same meal can repeat: low=2x, moderate=3x, high=4x per week"
+    )
+    budget_friendly: bool = Field(
+        default=False,
+        description="Prioritize cheaper ingredients and maximize pantry usage for cost savings"
+    )
+
 
 class UserProfileUpdate(BaseModel):
     """Update user profile including preferences"""

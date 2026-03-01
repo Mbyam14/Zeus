@@ -21,7 +21,7 @@ class MealType(str, Enum):
 class Ingredient(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     quantity: str = Field(..., min_length=1, max_length=100)
-    unit: str = Field(..., min_length=1, max_length=50)
+    unit: str = Field("", max_length=50)  # Allow empty unit (e.g., "3 eggs")
 
 
 class Instruction(BaseModel):
@@ -115,6 +115,7 @@ class RecipeFeedFilter(BaseModel):
     max_prep_time: Optional[int] = Field(None, ge=0, le=480)
     meal_type: Optional[MealType] = None
     dietary_tags: Optional[List[str]] = None
+    search: Optional[str] = None
     use_pantry_items: bool = False
     limit: int = Field(20, ge=1, le=100)
     offset: int = Field(0, ge=0)

@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 # Timeout settings (in seconds)
 RECIPE_GENERATION_TIMEOUT = 60  # 60 seconds for single recipe
-MEAL_PLAN_GENERATION_TIMEOUT = 120  # 120 seconds for full meal plan (21 recipes)
+MEAL_PLAN_GENERATION_TIMEOUT = 180  # 180 seconds for full meal plan with ingredients/instructions
 
 
 class AIService:
@@ -85,7 +85,7 @@ class AIService:
             # Call Claude API with timeout
             logger.info(f"Calling Claude API for recipe generation (timeout: {RECIPE_GENERATION_TIMEOUT}s)")
             response_text = await self._call_claude_with_timeout(
-                model="claude-3-7-sonnet-20250219",
+                model="claude-sonnet-4-5-20250929",
                 max_tokens=2000,
                 temperature=0.7,
                 messages=[
@@ -166,11 +166,11 @@ class AIService:
         prompt += variety_note
 
         try:
-            # Call Claude API for simplified meal plan with timeout
+            # Call Claude API for full meal plan with ingredients/instructions
             logger.info(f"Calling Claude API for meal plan generation (timeout: {MEAL_PLAN_GENERATION_TIMEOUT}s)")
             raw_text = await self._call_claude_with_timeout(
-                model="claude-3-7-sonnet-20250219",
-                max_tokens=4000,
+                model="claude-sonnet-4-5-20250929",
+                max_tokens=32000,  # Large enough for full meal plan with recipes
                 temperature=0.7,
                 messages=[
                     {
@@ -262,8 +262,8 @@ class AIService:
         if user_preferences is None:
             user_preferences = {}
 
-        calorie_target = user_preferences.get("calorie_target", 2000)
-        protein_target = user_preferences.get("protein_target_grams", 150)
+        calorie_target = user_preferences.get("calorie_target") or 2000
+        protein_target = user_preferences.get("protein_target_grams") or 150
 
         # Get batch cooking preferences
         cooking_sessions = user_preferences.get("cooking_sessions_per_week", 6)
@@ -377,7 +377,7 @@ class AIService:
 
         RESPONSE FORMAT:
         1. Respond with ONLY valid JSON - no markdown, no explanations.
-        2. DO NOT include ingredients lists or step-by-step instructions.
+        2. INCLUDE full ingredients list and step-by-step instructions for EACH recipe.
         3. DO NOT use emojis or special unicode characters.
         4. REUSE recipes as specified above - do NOT generate 21 unique meals!
 
@@ -392,9 +392,33 @@ class AIService:
             }},
             "meals": {{
                 "{selected_days[0]}": {{
-                    "breakfast": {{ "title": "Protein Oatmeal Bowl", "description": "...", "prep_time": 5, "cook_time": 10, "servings": {request.servings_per_meal}, "calories": {breakfast_cals}, "protein_grams": {breakfast_protein}, "carbs_grams": 45, "fat_grams": 12, "cuisine_type": "American", "difficulty": "Easy", "meal_type": ["Breakfast"] }},
-                    "lunch": {{ "title": "Chicken Caesar Salad", "description": "...", "prep_time": 10, "cook_time": 0, "servings": {request.servings_per_meal}, "calories": {lunch_cals}, "protein_grams": {lunch_protein}, "carbs_grams": 20, "fat_grams": 25, "cuisine_type": "American", "difficulty": "Easy", "meal_type": ["Lunch"] }},
-                    "dinner": {{ "title": "Beef Stir Fry with Rice", "description": "Makes enough for tomorrow's lunch too", "prep_time": 15, "cook_time": 20, "servings": {request.servings_per_meal}, "calories": {dinner_cals}, "protein_grams": {dinner_protein}, "carbs_grams": 50, "fat_grams": 20, "cuisine_type": "Asian", "difficulty": "Medium", "meal_type": ["Dinner", "Lunch"] }}
+                    "breakfast": {{
+                        "title": "Protein Oatmeal Bowl",
+                        "description": "Hearty oatmeal with protein",
+                        "prep_time": 5,
+                        "cook_time": 10,
+                        "servings": {request.servings_per_meal},
+                        "calories": {breakfast_cals},
+                        "protein_grams": {breakfast_protein},
+                        "carbs_grams": 45,
+                        "fat_grams": 12,
+                        "cuisine_type": "American",
+                        "difficulty": "Easy",
+                        "meal_type": ["Breakfast"],
+                        "dietary_tags": [],
+                        "ingredients": [
+                            {{"name": "rolled oats", "quantity": "1", "unit": "cup"}},
+                            {{"name": "milk", "quantity": "2", "unit": "cups"}},
+                            {{"name": "protein powder", "quantity": "1", "unit": "scoop"}}
+                        ],
+                        "instructions": [
+                            {{"step": 1, "instruction": "Bring milk to a boil in a saucepan."}},
+                            {{"step": 2, "instruction": "Add oats and reduce heat. Cook for 5 minutes."}},
+                            {{"step": 3, "instruction": "Stir in protein powder and serve."}}
+                        ]
+                    }},
+                    "lunch": {{ ... same structure with ingredients and instructions ... }},
+                    "dinner": {{ ... same structure with ingredients and instructions ... }}
                 }},
                 ... include ONLY the selected days: {days_str}
             }},
@@ -476,15 +500,33 @@ class AIService:
             # Extract JSON from response
             start_idx = response_text.find('{')
             end_idx = response_text.rfind('}') + 1
-            
+
             if start_idx == -1 or end_idx == 0:
                 raise ValueError("No JSON found in response")
-            
+
             json_str = response_text[start_idx:end_idx]
-            meal_plan_data = json.loads(json_str)
-            
+            try:
+                meal_plan_data = json.loads(json_str)
+            except json.JSONDecodeError as e:
+                # Attempt to repair truncated JSON by closing open brackets
+                logger.warning(f"JSON parse failed, attempting repair: {e}")
+                repaired = json_str
+                # Count unclosed brackets
+                open_braces = repaired.count('{') - repaired.count('}')
+                open_brackets = repaired.count('[') - repaired.count(']')
+                # Trim trailing incomplete values (after last comma or colon)
+                last_complete = max(repaired.rfind('},'), repaired.rfind('],'), repaired.rfind('",'))
+                if last_complete > 0:
+                    repaired = repaired[:last_complete + 1]
+                    # Recount after trimming
+                    open_braces = repaired.count('{') - repaired.count('}')
+                    open_brackets = repaired.count('[') - repaired.count(']')
+                repaired += ']' * open_brackets + '}' * open_braces
+                meal_plan_data = json.loads(repaired)
+                logger.info("Successfully repaired truncated JSON response")
+
             return meal_plan_data
-            
+
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse meal plan JSON: {e}")
             raise ValueError("Invalid JSON in meal plan response")

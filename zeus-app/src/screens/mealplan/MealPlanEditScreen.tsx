@@ -88,7 +88,7 @@ export const MealPlanEditScreen: React.FC<MealPlanEditScreenProps> = ({ navigati
   const loadRecipes = async () => {
     try {
       setLoadingRecipes(true);
-      const recipes = await recipeService.getMyRecipes();
+      const recipes = await recipeService.getAllRecipes();
       setAllRecipes(recipes);
     } catch (error) {
       console.error('Failed to load recipes:', error);
@@ -317,9 +317,9 @@ export const MealPlanEditScreen: React.FC<MealPlanEditScreenProps> = ({ navigati
         )}
       </View>
 
-      {/* Selection Bar */}
-      <View style={styles.selectionBar}>
-        {selectedRecipe ? (
+      {/* Selection Bar - only show when a recipe is selected */}
+      {selectedRecipe && (
+        <View style={styles.selectionBar}>
           <View style={styles.selectedRecipeInfo}>
             <Text style={styles.selectedRecipeLabel}>Selected:</Text>
             <Text style={styles.selectedRecipeName} numberOfLines={1}>
@@ -337,12 +337,8 @@ export const MealPlanEditScreen: React.FC<MealPlanEditScreenProps> = ({ navigati
               <Text style={styles.clearSelectionText}>×</Text>
             </TouchableOpacity>
           </View>
-        ) : (
-          <Text style={styles.selectionHint}>
-            Select a recipe above, then tap a slot to assign it
-          </Text>
-        )}
-      </View>
+        </View>
+      )}
 
       {/* Meal Grid */}
       <View style={styles.gridSection}>
@@ -442,7 +438,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     fontWeight: '500',
   },
   browserSection: {
-    height: 180,
+    height: 240,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },

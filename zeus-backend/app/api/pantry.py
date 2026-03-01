@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from typing import List, Optional
 from app.schemas.pantry import (
     PantryItemCreate, PantryItemUpdate, PantryItemResponse,
-    PantryFilter, BulkPantryAdd, PantryCategory,
+    PantryFilter, BulkPantryAdd, BulkPantryDelete, PantryCategory,
     ImageAnalysisRequest, ImageAnalysisResponse
 )
 from app.schemas.user import UserResponse
@@ -23,6 +23,16 @@ async def create_pantry_item(
     Requires authentication. The item will be associated with the current user.
     """
     return await pantry_service.create_pantry_item(item_data, current_user.id)
+
+
+@router.post("/bulk-delete")
+async def bulk_delete_pantry_items(
+    bulk_data: BulkPantryDelete,
+    current_user: UserResponse = Depends(get_current_active_user)
+):
+    """Delete multiple pantry items by ID."""
+    deleted_count = await pantry_service.bulk_delete_pantry_items(bulk_data.item_ids, current_user.id)
+    return {"message": f"Deleted {deleted_count} pantry items", "deleted_count": deleted_count}
 
 
 @router.get("/", response_model=List[PantryItemResponse])
@@ -72,6 +82,15 @@ async def update_pantry_item(
     Only the item owner can update their own items.
     """
     return await pantry_service.update_pantry_item(item_id, item_data, current_user.id)
+
+
+@router.delete("/clear-all")
+async def clear_all_pantry_items(
+    current_user: UserResponse = Depends(get_current_active_user)
+):
+    """Delete all pantry items for the current user."""
+    deleted_count = await pantry_service.clear_all_pantry_items(current_user.id)
+    return {"message": f"Deleted {deleted_count} pantry items", "deleted_count": deleted_count}
 
 
 @router.delete("/{item_id}")

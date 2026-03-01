@@ -33,6 +33,20 @@ export interface ThemeColors {
   // Special
   overlay: string;
   shadow: string;
+
+  // Macro colors
+  proteinColor: string;
+  carbsColor: string;
+  fatColor: string;
+
+  // Tab bar
+  tabBarBackground: string;
+  tabBarInactive: string;
+
+  // Extras
+  surface: string;
+  successLight: string;
+  buttonText: string;
 }
 
 export const lightTheme: ThemeColors = {
@@ -64,6 +78,20 @@ export const lightTheme: ThemeColors = {
   // Special
   overlay: 'rgba(0, 0, 0, 0.5)',
   shadow: '#000000',
+
+  // Macro colors
+  proteinColor: '#4ECDC4',
+  carbsColor: '#FFE66D',
+  fatColor: '#FF6B6B',
+
+  // Tab bar
+  tabBarBackground: '#FFFFFF',
+  tabBarInactive: '#7F8C8D',
+
+  // Extras
+  surface: '#FFFFFF',
+  successLight: 'rgba(39, 174, 96, 0.1)',
+  buttonText: '#FFFFFF',
 };
 
 export const darkTheme: ThemeColors = {
@@ -95,6 +123,20 @@ export const darkTheme: ThemeColors = {
   // Special
   overlay: 'rgba(0, 0, 0, 0.7)',
   shadow: '#000000',
+
+  // Macro colors
+  proteinColor: '#4ECDC4',
+  carbsColor: '#FFE66D',
+  fatColor: '#FF6B6B',
+
+  // Tab bar
+  tabBarBackground: '#1E1E1E',
+  tabBarInactive: '#808080',
+
+  // Extras
+  surface: '#252525',
+  successLight: 'rgba(46, 204, 113, 0.15)',
+  buttonText: '#FFFFFF',
 };
 
 const THEME_STORAGE_KEY = 'zeus_theme_mode';

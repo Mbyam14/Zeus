@@ -60,14 +60,67 @@ class RecipeService:
         
         recipe = result.data[0]
         recipe_response = await self._format_recipe_response(recipe)
-        
+
         # Add user context if provided
         if user_id:
             recipe_response.is_liked = await self._is_recipe_liked(recipe_id, user_id)
             recipe_response.is_saved = await self._is_recipe_saved(recipe_id, user_id)
-        
+
         return recipe_response
-    
+
+    async def get_recipes_batch(self, recipe_ids: List[str], user_id: Optional[str] = None) -> List[RecipeResponse]:
+        """
+        Get multiple recipes by IDs in a single database query.
+
+        This is much more efficient than fetching recipes one by one.
+        """
+        if not recipe_ids:
+            return []
+
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_ids = []
+        for rid in recipe_ids:
+            if rid not in seen:
+                seen.add(rid)
+                unique_ids.append(rid)
+
+        # Fetch all recipes in one query
+        result = self.db.table("recipes").select("""
+            *,
+            users!recipes_user_id_fkey(username)
+        """).in_("id", unique_ids).execute()
+
+        if not result.data:
+            return []
+
+        # Build a map for quick lookup
+        recipes_map = {}
+        for recipe_data in result.data:
+            recipes_map[recipe_data["id"]] = recipe_data
+
+        # Get user likes/saves in batch if user_id provided
+        liked_ids = set()
+        saved_ids = set()
+        if user_id:
+            likes_result = self.db.table("recipe_likes").select("recipe_id").eq("user_id", user_id).in_("recipe_id", unique_ids).execute()
+            liked_ids = {like["recipe_id"] for like in likes_result.data}
+
+            saves_result = self.db.table("recipe_saves").select("recipe_id").eq("user_id", user_id).in_("recipe_id", unique_ids).execute()
+            saved_ids = {save["recipe_id"] for save in saves_result.data}
+
+        # Format responses in the original order
+        recipes = []
+        for recipe_id in unique_ids:
+            if recipe_id in recipes_map:
+                recipe_response = await self._format_recipe_response(recipes_map[recipe_id])
+                if user_id:
+                    recipe_response.is_liked = recipe_id in liked_ids
+                    recipe_response.is_saved = recipe_id in saved_ids
+                recipes.append(recipe_response)
+
+        return recipes
+
     async def update_recipe(self, recipe_id: str, recipe_data: RecipeUpdate, user_id: str) -> RecipeResponse:
         """Update a recipe (only by owner)"""
         # Check if recipe exists and user owns it
@@ -155,7 +208,9 @@ class RecipeService:
             query = query.contains("meal_type", [filters.meal_type.value])
         if filters.dietary_tags:
             query = query.overlaps("dietary_tags", filters.dietary_tags)
-        
+        if filters.search:
+            query = query.ilike("title", f"%{filters.search}%")
+
         # Order by creation date (newest first) and apply pagination
         query = query.order("created_at", desc=True)
         query = query.range(filters.offset, filters.offset + filters.limit - 1)

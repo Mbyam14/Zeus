@@ -26,6 +26,7 @@ import {
   getOriginalDay
 } from '../../types/mealplan';
 import { useThemeStore } from '../../store/themeStore';
+import { useDataStore } from '../../store/dataStore';
 
 interface MealPlanScreenProps {
   navigation: any;
@@ -74,10 +75,11 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
     };
   }, [weekOffset]);
 
-  // Reload when returning from edit screen
+  // Reload when returning from edit screen, but only if cache is stale
   useFocusEffect(
     useCallback(() => {
-      if (mealPlan) {
+      const dataStore = useDataStore.getState();
+      if (mealPlan && (!dataStore.isFresh('mealPlan') || dataStore.getCachedWeekOffset() !== weekOffset)) {
         loadMealPlan();
       }
     }, [mealPlan?.id, weekOffset])
@@ -181,7 +183,14 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
         if (isMountedRef.current) {
           setMealPlan(plan);
         }
-        await loadRecipes(plan);
+        // Load recipes and macro summary in parallel
+        await Promise.all([
+          loadRecipes(plan),
+          loadMacroSummary(plan.id),
+        ]);
+        // Update cache
+        useDataStore.getState().setMealPlan(plan, recipes, macroSummary);
+        useDataStore.getState().setCachedWeekOffset(weekOffset);
 
         // Set selected day to current day of week (or first day with meals if current day has none)
         const currentDay = getCurrentDayOfWeek();
@@ -338,16 +347,12 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
 
       if (isMountedRef.current) {
         setRecipes(recipeMap);
-        // Load macro summary after recipes
-        loadMacroSummary(plan.id);
       }
     } catch (error) {
       console.error('❌ Failed to load recipes:', error);
       if (isMountedRef.current) {
         setRecipes(recipeMap); // Set partial results even on error
         setRecipeLoadError('Failed to load recipes. Tap to retry.');
-        // Still try to load macro summary
-        loadMacroSummary(plan.id);
       }
     }
   };
@@ -663,7 +668,7 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
               )}
               {recipe.calories && (
                 <View style={styles.macroPreview}>
-                  <Text style={styles.macroText}>🔥 {recipe.calories} cal</Text>
+                  <Text style={styles.macroText}>🔥 {recipe.calories} cal/serving</Text>
                   {recipe.protein_grams && (
                     <Text style={styles.macroText}>💪 {recipe.protein_grams}g P</Text>
                   )}
@@ -711,6 +716,9 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Meal Plan</Text>
+          <TouchableOpacity style={styles.addButton} onPress={() => navigation.navigate('DaySelection')}>
+            <Text style={styles.addButtonText}>+</Text>
+          </TouchableOpacity>
         </View>
         {/* Week Navigation for empty state too */}
         <View style={styles.weekNavContainer}>
@@ -736,16 +744,9 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
           <Text style={styles.emptyTitle}>No Meal Plan</Text>
           <Text style={styles.emptyDescription}>
             {weekOffset === 0
-              ? 'Create a personalized meal plan - let AI generate it or build it yourself!'
-              : `No meal plan for ${getWeekLabel().toLowerCase()}. Create one now!`}
+              ? 'Tap + to create a personalized meal plan'
+              : `No meal plan for ${getWeekLabel().toLowerCase()}. Tap + to create one!`}
           </Text>
-          <TouchableOpacity
-            style={styles.generateButton}
-            onPress={() => navigation.navigate('DaySelection')}
-          >
-            <Text style={styles.generateButtonText}>Create a Meal Plan</Text>
-            <Text style={styles.generateButtonArrow}>→</Text>
-          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
@@ -877,35 +878,38 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
       {renderLoadingOverlay()}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Meal Plan</Text>
-        <View style={styles.headerButtons}>
-          {mealPlan && (
-            <TouchableOpacity
-              style={styles.editButton}
-              onPress={() => navigation.navigate('MealPlanEdit', { mealPlan, recipes })}
-              disabled={generating}
-            >
-              <Text style={styles.editButtonText}>Edit</Text>
-            </TouchableOpacity>
+        <TouchableOpacity style={styles.addButton} onPress={() => navigation.navigate('DaySelection')}>
+          <Text style={styles.addButtonText}>+</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Action Bar */}
+      <View style={styles.actionBar}>
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={() => navigation.navigate('MealPlanEdit', { mealPlan, recipes })}
+          disabled={generating}
+        >
+          <Text style={styles.actionButtonText}>Edit</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={handleClearMealPlan}
+          disabled={generating}
+        >
+          <Text style={styles.actionButtonText}>Clear</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.actionButtonPrimary}
+          onPress={handleGenerateMealPlan}
+          disabled={generating}
+        >
+          {generating ? (
+            <ActivityIndicator size="small" color={colors.buttonText} />
+          ) : (
+            <Text style={styles.actionButtonPrimaryText}>Generate</Text>
           )}
-          <TouchableOpacity
-            style={styles.clearButton}
-            onPress={handleClearMealPlan}
-            disabled={generating || !mealPlan}
-          >
-            <Text style={styles.clearButtonText}>Clear</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.regenerateAllButton}
-            onPress={handleGenerateMealPlan}
-            disabled={generating}
-          >
-            {generating ? (
-              <ActivityIndicator size="small" color={colors.buttonText} />
-            ) : (
-              <Text style={styles.regenerateAllButtonText}>Generate</Text>
-            )}
-          </TouchableOpacity>
-        </View>
+        </TouchableOpacity>
       </View>
 
       {/* Week Navigation */}
@@ -1282,57 +1286,59 @@ const createStyles = (colors: any) => StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    backgroundColor: colors.card,
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    backgroundColor: colors.backgroundSecondary,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
   headerTitle: {
-    fontSize: 26,
-    fontWeight: '800',
-    color: colors.text,
-    letterSpacing: -0.5,
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: colors.primary,
   },
-  headerButtons: {
+  addButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  addButtonText: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: colors.backgroundSecondary,
+  },
+  actionBar: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingHorizontal: 24,
+    paddingVertical: 8,
     gap: 10,
+    backgroundColor: colors.backgroundSecondary,
   },
-  editButton: {
+  actionButton: {
     backgroundColor: colors.primary + '15',
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 12,
   },
-  editButtonText: {
+  actionButtonText: {
     color: colors.primary,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  clearButton: {
-    backgroundColor: colors.background,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 12,
-  },
-  clearButtonText: {
-    color: colors.textMuted,
     fontSize: 14,
     fontWeight: '600',
   },
-  regenerateAllButton: {
+  actionButtonPrimary: {
     backgroundColor: colors.primary,
     paddingHorizontal: 16,
     paddingVertical: 9,
     borderRadius: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 3,
   },
-  regenerateAllButtonText: {
+  actionButtonPrimaryText: {
     color: colors.buttonText,
     fontSize: 14,
     fontWeight: '700',

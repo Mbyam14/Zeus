@@ -7,6 +7,7 @@ import {
   SafeAreaView,
   ScrollView,
   Alert,
+  Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -25,79 +26,35 @@ export const SettingsScreen: React.FC = () => {
 
   const getThemeDescription = () => {
     switch (mode) {
-      case 'light':
-        return 'Light mode';
-      case 'dark':
-        return 'Dark mode';
-      case 'system':
-        return 'System default';
-      default:
-        return 'Light mode';
+      case 'light': return 'Light mode';
+      case 'dark': return 'Dark mode';
+      case 'system': return 'System default';
+      default: return 'Light mode';
     }
   };
 
   const settingsSections = [
     {
-      title: 'Appearance',
+      title: 'APPEARANCE',
       items: [
-        {
-          icon: '🌙',
-          label: 'Theme',
-          description: getThemeDescription(),
-          onPress: () => navigation.navigate('Theme'),
-        },
-        {
-          icon: '🌐',
-          label: 'App Language',
-          description: 'English',
-          onPress: () => handleComingSoon('Language'),
-        },
+        { icon: '🌙', label: 'Theme', description: getThemeDescription(), onPress: () => navigation.navigate('Theme') },
+        { icon: '🌐', label: 'App Language', description: 'English', onPress: () => handleComingSoon('Language') },
       ],
     },
     {
-      title: 'General',
+      title: 'GENERAL',
       items: [
-        {
-          icon: '🔔',
-          label: 'Notifications',
-          description: 'Manage notification preferences',
-          onPress: () => navigation.navigate('Notifications'),
-        },
-        {
-          icon: '🔒',
-          label: 'Privacy & Security',
-          description: 'Manage your data and privacy',
-          onPress: () => navigation.navigate('PrivacySecurity'),
-        },
-        {
-          icon: '📊',
-          label: 'Data & Storage',
-          description: 'Manage app data and cache',
-          onPress: () => navigation.navigate('DataStorage'),
-        },
+        { icon: '🔔', label: 'Notifications', description: 'Manage alerts', onPress: () => navigation.navigate('Notifications') },
+        { icon: '🔒', label: 'Privacy & Security', description: 'Data & privacy', onPress: () => navigation.navigate('PrivacySecurity') },
+        { icon: '📊', label: 'Data & Storage', description: 'Cache & storage', onPress: () => navigation.navigate('DataStorage') },
       ],
     },
     {
-      title: 'About',
+      title: 'ABOUT',
       items: [
-        {
-          icon: '❓',
-          label: 'Help & Support',
-          description: 'FAQs and contact support',
-          onPress: () => navigation.navigate('HelpSupport'),
-        },
-        {
-          icon: '📄',
-          label: 'Terms of Service',
-          description: 'Read our terms and conditions',
-          onPress: () => navigation.navigate('Terms'),
-        },
-        {
-          icon: '🔐',
-          label: 'Privacy Policy',
-          description: 'How we protect your data',
-          onPress: () => navigation.navigate('PrivacyPolicy'),
-        },
+        { icon: '❓', label: 'Help & Support', description: 'FAQs & contact', onPress: () => navigation.navigate('HelpSupport') },
+        { icon: '📄', label: 'Terms of Service', description: 'Our terms', onPress: () => navigation.navigate('Terms') },
+        { icon: '🔐', label: 'Privacy Policy', description: 'How we protect data', onPress: () => navigation.navigate('PrivacyPolicy') },
       ],
     },
   ];
@@ -108,34 +65,33 @@ export const SettingsScreen: React.FC = () => {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Text style={styles.backButtonText}>←</Text>
+          <Text style={styles.backArrow}>←</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Settings</Text>
-        <View style={styles.backButton} />
+        <View style={{ width: 40 }} />
       </View>
 
-      <ScrollView style={styles.scrollView}>
+      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {settingsSections.map((section, sectionIndex) => (
           <View key={sectionIndex} style={styles.section}>
             <Text style={styles.sectionTitle}>{section.title}</Text>
-            <View style={styles.sectionContent}>
+            <View style={styles.sectionCard}>
               {section.items.map((item, itemIndex) => (
                 <TouchableOpacity
                   key={itemIndex}
                   style={[
                     styles.settingItem,
-                    itemIndex === section.items.length - 1 && styles.lastSettingItem,
+                    itemIndex === section.items.length - 1 && styles.settingItemLast,
                   ]}
                   onPress={item.onPress}
+                  activeOpacity={0.6}
                 >
-                  <View style={styles.settingItemLeft}>
+                  <View style={styles.settingIconContainer}>
                     <Text style={styles.settingIcon}>{item.icon}</Text>
-                    <View style={styles.settingTextContainer}>
-                      <Text style={styles.settingLabel}>{item.label}</Text>
-                      {item.description && (
-                        <Text style={styles.settingDescription}>{item.description}</Text>
-                      )}
-                    </View>
+                  </View>
+                  <View style={styles.settingTextContainer}>
+                    <Text style={styles.settingLabel}>{item.label}</Text>
+                    <Text style={styles.settingDescription}>{item.description}</Text>
                   </View>
                   <Text style={styles.settingArrow}>›</Text>
                 </TouchableOpacity>
@@ -145,8 +101,8 @@ export const SettingsScreen: React.FC = () => {
         ))}
 
         <View style={styles.versionSection}>
-          <Text style={styles.versionText}>Zeus v1.0.0</Text>
-          <Text style={styles.copyrightText}>© 2026 Zeus App. All rights reserved.</Text>
+          <Text style={styles.versionText}>Zeus v1.3.1</Text>
+          <Text style={styles.copyrightText}>© 2026 Zeus App</Text>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -162,11 +118,10 @@ const createStyles = (colors: any) =>
     header: {
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
       paddingHorizontal: 16,
-      paddingVertical: 16,
+      paddingVertical: 14,
       backgroundColor: colors.backgroundSecondary,
-      borderBottomWidth: 1,
+      borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.border,
     },
     backButton: {
@@ -175,14 +130,16 @@ const createStyles = (colors: any) =>
       justifyContent: 'center',
       alignItems: 'center',
     },
-    backButtonText: {
-      fontSize: 28,
+    backArrow: {
+      fontSize: 24,
       color: colors.text,
     },
     headerTitle: {
-      fontSize: 20,
-      fontWeight: 'bold',
+      flex: 1,
+      fontSize: 18,
+      fontWeight: '700',
       color: colors.text,
+      textAlign: 'center',
     },
     scrollView: {
       flex: 1,
@@ -191,40 +148,50 @@ const createStyles = (colors: any) =>
       marginTop: 24,
     },
     sectionTitle: {
-      fontSize: 14,
+      fontSize: 12,
       fontWeight: '600',
       color: colors.textMuted,
       marginBottom: 8,
-      marginLeft: 24,
-      textTransform: 'uppercase',
-      letterSpacing: 0.5,
+      marginLeft: 20,
+      letterSpacing: 1,
     },
-    sectionContent: {
+    sectionCard: {
+      marginHorizontal: 16,
       backgroundColor: colors.backgroundSecondary,
-      borderTopWidth: 1,
-      borderBottomWidth: 1,
-      borderColor: colors.border,
+      borderRadius: 16,
+      overflow: 'hidden',
+      ...Platform.select({
+        ios: {
+          shadowColor: colors.shadow,
+          shadowOffset: { width: 0, height: 1 },
+          shadowOpacity: 0.06,
+          shadowRadius: 8,
+        },
+        android: { elevation: 2 },
+      }),
     },
     settingItem: {
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingVertical: 16,
-      paddingHorizontal: 24,
-      borderBottomWidth: 1,
+      paddingVertical: 14,
+      paddingHorizontal: 16,
+      borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.border,
     },
-    lastSettingItem: {
+    settingItemLast: {
       borderBottomWidth: 0,
     },
-    settingItemLeft: {
-      flexDirection: 'row',
+    settingIconContainer: {
+      width: 40,
+      height: 40,
+      borderRadius: 10,
+      backgroundColor: colors.background,
+      justifyContent: 'center',
       alignItems: 'center',
-      flex: 1,
+      marginRight: 14,
     },
     settingIcon: {
-      fontSize: 24,
-      marginRight: 16,
+      fontSize: 20,
     },
     settingTextContainer: {
       flex: 1,
@@ -236,25 +203,27 @@ const createStyles = (colors: any) =>
       marginBottom: 2,
     },
     settingDescription: {
-      fontSize: 14,
+      fontSize: 13,
       color: colors.textMuted,
     },
     settingArrow: {
-      fontSize: 28,
+      fontSize: 22,
       color: colors.textMuted,
-      fontWeight: '300',
+      fontWeight: '400',
     },
     versionSection: {
       alignItems: 'center',
       paddingVertical: 32,
     },
     versionText: {
-      fontSize: 14,
+      fontSize: 13,
       color: colors.textMuted,
       marginBottom: 4,
+      opacity: 0.6,
     },
     copyrightText: {
       fontSize: 12,
       color: colors.textMuted,
+      opacity: 0.4,
     },
   });

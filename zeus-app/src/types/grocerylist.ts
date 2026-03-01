@@ -16,13 +16,16 @@ export type GroceryCategory =
   | 'Condiments'
   | 'Beverages'
   | 'Frozen'
-  | 'Pantry'
+  | 'Canned & Jarred'
+  | 'Baking'
+  | 'Oils & Vinegars'
+  | 'Snacks'
   | 'Other';
 
 /**
  * Category emoji mapping for UI display
  */
-export const CATEGORY_EMOJIS: Record<GroceryCategory, string> = {
+export const CATEGORY_EMOJIS: Record<string, string> = {
   Produce: '🥬',
   Dairy: '🥛',
   Protein: '🍗',
@@ -31,14 +34,19 @@ export const CATEGORY_EMOJIS: Record<GroceryCategory, string> = {
   Condiments: '🍯',
   Beverages: '🥤',
   Frozen: '❄️',
-  Pantry: '🥫',
+  'Canned & Jarred': '🥫',
+  Baking: '🧁',
+  'Oils & Vinegars': '🫒',
+  Snacks: '🍿',
   Other: '📦',
+  // Keep old value as fallback for existing data
+  Pantry: '🥫',
 };
 
 /**
  * Category color mapping for UI display
  */
-export const CATEGORY_COLORS: Record<GroceryCategory, string> = {
+export const CATEGORY_COLORS: Record<string, string> = {
   Produce: '#4CAF50',
   Dairy: '#2196F3',
   Protein: '#FF5722',
@@ -47,8 +55,13 @@ export const CATEGORY_COLORS: Record<GroceryCategory, string> = {
   Condiments: '#FFC107',
   Beverages: '#00BCD4',
   Frozen: '#3F51B5',
-  Pantry: '#795548',
+  'Canned & Jarred': '#795548',
+  Baking: '#8D6E63',
+  'Oils & Vinegars': '#689F38',
+  Snacks: '#FF7043',
   Other: '#9E9E9E',
+  // Keep old value as fallback for existing data
+  Pantry: '#795548',
 };
 
 /**

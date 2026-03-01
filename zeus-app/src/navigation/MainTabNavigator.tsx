@@ -1,7 +1,6 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
-import { FeedScreen } from '../screens/home/FeedScreen';
 import { ProfileNavigator } from './ProfileNavigator';
 import { MealPlanScreen } from '../screens/mealplan/MealPlanScreen';
 import { MealPlanEditScreen } from '../screens/mealplan/MealPlanEditScreen';
@@ -12,15 +11,17 @@ import { CreateScreen } from '../screens/create/CreateScreen';
 import { PantryScreen } from '../screens/pantry/PantryScreen';
 import { ImageReviewScreen } from '../screens/pantry/ImageReviewScreen';
 import { RecipeDetailScreen } from '../screens/recipe/RecipeDetailScreen';
+import { RecipeHubScreen } from '../screens/recipes/RecipeHubScreen';
 import { GroceryListScreen } from '../screens/grocerylist/GroceryListScreen';
-import { View, Text, StyleSheet, Alert } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DetectedPantryItem } from '../types/pantry';
 import { useThemeStore } from '../store/themeStore';
 
-export type CreateStackParamList = {
-  CreateMain: undefined;
+export type RecipesStackParamList = {
+  RecipeHubMain: undefined;
   RecipeDetail: { recipe: any };
+  CreateRecipe: undefined;
 };
 
 export type MealPlanStackParamList = {
@@ -44,13 +45,13 @@ export type PantryStackParamList = {
 export type MainTabParamList = {
   Pantry: undefined;
   MealPlan: undefined;
-  Create: undefined;
+  Recipes: undefined;
   GroceryList: undefined;
   Profile: undefined;
 };
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
-const CreateStack = createStackNavigator<CreateStackParamList>();
+const RecipesStack = createStackNavigator<RecipesStackParamList>();
 const MealPlanStack = createStackNavigator<MealPlanStackParamList>();
 const PantryStack = createStackNavigator<PantryStackParamList>();
 
@@ -63,12 +64,13 @@ const PantryStackNavigator = () => {
   );
 };
 
-const CreateStackNavigator = () => {
+const RecipesStackNavigator = () => {
   return (
-    <CreateStack.Navigator screenOptions={{ headerShown: false }}>
-      <CreateStack.Screen name="CreateMain" component={CreateScreen} />
-      <CreateStack.Screen name="RecipeDetail" component={RecipeDetailScreen} />
-    </CreateStack.Navigator>
+    <RecipesStack.Navigator screenOptions={{ headerShown: false }}>
+      <RecipesStack.Screen name="RecipeHubMain" component={RecipeHubScreen} />
+      <RecipesStack.Screen name="RecipeDetail" component={RecipeDetailScreen} />
+      <RecipesStack.Screen name="CreateRecipe" component={CreateScreen} />
+    </RecipesStack.Navigator>
   );
 };
 
@@ -132,14 +134,12 @@ export const MainTabNavigator: React.FC = () => {
         }}
       />
       <Tab.Screen
-        name="Create"
-        component={CreateStackNavigator}
+        name="Recipes"
+        component={RecipesStackNavigator}
         options={{
-          tabBarLabel: () => null,
-          tabBarIcon: ({ focused }) => (
-            <View style={[styles.createButton, { backgroundColor: focused ? colors.primary : colors.primary + 'DD' }]}>
-              <Text style={styles.createIcon}>+</Text>
-            </View>
+          tabBarLabel: 'Recipes',
+          tabBarIcon: ({ color }) => (
+            <Text style={[styles.tabIcon, { color }]}>🍳</Text>
           ),
         }}
       />
@@ -170,34 +170,5 @@ const styles = StyleSheet.create({
   tabIcon: {
     fontSize: 26,
     marginTop: 2,
-  },
-  createButton: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: -8,
-  },
-  createIcon: {
-    fontSize: 28,
-    fontWeight: '400',
-    color: '#FFFFFF',
-  },
-  placeholder: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#F8F9FA',
-  },
-  placeholderTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#2C3E50',
-    marginBottom: 8,
-  },
-  placeholderText: {
-    fontSize: 16,
-    color: '#7F8C8D',
   },
 });

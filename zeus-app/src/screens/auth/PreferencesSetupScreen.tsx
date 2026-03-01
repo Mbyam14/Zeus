@@ -7,7 +7,9 @@ import {
   ScrollView,
   StyleSheet,
   Alert,
-  ActivityIndicator
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { UserPreferences } from '../../types/user';
 import { userService } from '../../services/userService';
@@ -59,7 +61,11 @@ export const PreferencesSetupScreen: React.FC<PreferencesSetupScreenProps> = ({ 
   const handleSave = async () => {
     try {
       setLoading(true);
-      await userService.updatePreferences(preferences);
+      const prefsToSave = {
+        ...preferences,
+        household_size: preferences.household_size || 2,
+      };
+      await userService.updatePreferences(prefsToSave);
       Alert.alert('Success', 'Your preferences have been saved!');
       setSetupCompleted();  // AppNavigator will auto-navigate to main app
     } catch (error) {
@@ -76,7 +82,8 @@ export const PreferencesSetupScreen: React.FC<PreferencesSetupScreenProps> = ({ 
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
+    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer} keyboardShouldPersistTaps="handled">
       <Text style={styles.title}>Set Up Your Preferences</Text>
       <Text style={styles.subtitle}>Help us personalize your meal plans</Text>
 
@@ -152,11 +159,14 @@ export const PreferencesSetupScreen: React.FC<PreferencesSetupScreenProps> = ({ 
       <TextInput
         style={styles.input}
         keyboardType="numeric"
-        value={String(preferences.household_size)}
-        onChangeText={text => setPreferences(prev => ({
-          ...prev,
-          household_size: parseInt(text) || 2
-        }))}
+        value={preferences.household_size ? String(preferences.household_size) : ''}
+        onChangeText={text => {
+          const num = parseInt(text);
+          setPreferences(prev => ({
+            ...prev,
+            household_size: text === '' ? 0 : (isNaN(num) ? prev.household_size : Math.min(20, Math.max(1, num)))
+          }));
+        }}
         placeholder="2"
       />
 
@@ -212,6 +222,7 @@ export const PreferencesSetupScreen: React.FC<PreferencesSetupScreenProps> = ({ 
 
       <View style={styles.bottomSpacer} />
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 };
 

@@ -26,7 +26,7 @@ export const mealPlanService = {
     const response = await api.post<MealPlanGenerateResponse>(
       '/api/meal-plans/generate/',
       null,
-      { params }
+      { params, timeout: 60000 }
     );
     return response.data;
   },
@@ -65,7 +65,7 @@ export const mealPlanService = {
     const response = await api.post<MealPlanGenerateResponse>(
       `/api/meal-plans/generate/week/${weekOffset}`,
       null,
-      { params }
+      { params, timeout: 60000 }
     );
     return response.data;
   },
@@ -74,7 +74,7 @@ export const mealPlanService = {
    * Get a specific meal plan by ID
    */
   async getMealPlan(mealPlanId: string): Promise<MealPlan> {
-    const response = await api.get<MealPlan>(`/api/meal-plans/${mealPlanId}/`);
+    const response = await api.get<MealPlan>(`/api/meal-plans/${mealPlanId}`);
     return response.data;
   },
 
@@ -87,7 +87,7 @@ export const mealPlanService = {
     mealType: MealType
   ): Promise<Recipe> {
     const response = await api.post<Recipe>(
-      `/api/meal-plans/${mealPlanId}/regenerate-meal/`,
+      `/api/meal-plans/${mealPlanId}/regenerate-meal`,
       null,
       {
         params: {
@@ -103,13 +103,13 @@ export const mealPlanService = {
    * Get a specific recipe by ID
    */
   async getRecipe(recipeId: string): Promise<Recipe> {
-    const response = await api.get<Recipe>(`/api/recipes/${recipeId}/`);
+    const response = await api.get<Recipe>(`/api/recipes/${recipeId}`);
     return response.data;
   },
 
   /**
-   * Get multiple recipes by IDs (batch fetch with resilient error handling)
-   * Uses Promise.allSettled to handle partial failures gracefully
+   * Get multiple recipes by IDs using batch endpoint (single request)
+   * Much more efficient than fetching recipes one by one
    */
   async getRecipes(recipeIds: string[]): Promise<Recipe[]> {
     if (!recipeIds || recipeIds.length === 0) {
@@ -123,39 +123,18 @@ export const mealPlanService = {
       return [];
     }
 
-    const promises = validIds.map(id => this.getRecipe(id));
-    const results = await Promise.allSettled(promises);
+    try {
+      // Use the batch endpoint - single request instead of N requests
+      const response = await api.post<Recipe[]>('/api/recipes/batch', validIds);
+      return response.data;
+    } catch (error) {
+      console.error('Batch fetch failed, falling back to individual requests:', error);
 
-    const recipes: Recipe[] = [];
-    const failures: string[] = [];
-
-    results.forEach((result, index) => {
-      if (result.status === 'fulfilled') {
-        recipes.push(result.value);
-      } else {
-        failures.push(validIds[index]);
-        console.warn(`Failed to load recipe ${validIds[index]}:`, result.reason);
-      }
-    });
-
-    // Retry failed recipes once
-    if (failures.length > 0 && failures.length < validIds.length) {
-      console.log(`Retrying ${failures.length} failed recipe(s)...`);
-
-      const retryPromises = failures.map(id => this.getRecipe(id));
-      const retryResults = await Promise.allSettled(retryPromises);
-
-      retryResults.forEach((result, index) => {
-        if (result.status === 'fulfilled') {
-          recipes.push(result.value);
-          console.log(`Successfully loaded recipe ${failures[index]} on retry`);
-        } else {
-          console.error(`Failed to load recipe ${failures[index]} after retry:`, result.reason);
-        }
-      });
+      // Fallback to individual requests if batch fails
+      const promises = validIds.map(id => this.getRecipe(id).catch(() => null));
+      const results = await Promise.all(promises);
+      return results.filter((r): r is Recipe => r !== null);
     }
-
-    return recipes;
   },
 
   /**
@@ -172,7 +151,7 @@ export const mealPlanService = {
    * Delete a meal plan
    */
   async deleteMealPlan(mealPlanId: string): Promise<void> {
-    await api.delete(`/api/meal-plans/${mealPlanId}/`);
+    await api.delete(`/api/meal-plans/${mealPlanId}`);
   },
 
   /**

@@ -29,6 +29,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { groceryListService } from '../../services/groceryListService';
 import { mealPlanService } from '../../services/mealPlanService';
+import { InstacartCheckoutModal } from '../../components/InstacartCheckoutModal';
 import {
   GroceryList,
   GroceryListItem,
@@ -53,6 +54,7 @@ export const GroceryListScreen: React.FC = () => {
   const [filter, setFilter] = useState<GroceryListFilter>('all');
   const [togglingItems, setTogglingItems] = useState<Set<string>>(new Set());
   const [showWarnings, setShowWarnings] = useState<boolean>(false);
+  const [showInstacartModal, setShowInstacartModal] = useState<boolean>(false);
 
   // Load grocery list on mount
   useEffect(() => {
@@ -134,50 +136,37 @@ export const GroceryListScreen: React.FC = () => {
    * Toggle item purchased status
    */
   const handleToggleItemPurchased = async (item: GroceryListItem) => {
-    // Optimistic update
-    setTogglingItems((prev) => new Set(prev).add(item.id));
+    const previousList = groceryList; // Save for rollback
+
+    // Optimistic update - update UI immediately
+    setGroceryList((prev) => {
+      if (!prev) return prev;
+      const updatedItems = prev.items.map((i) =>
+        i.id === item.id ? { ...i, is_purchased: !i.is_purchased } : i
+      );
+      const itemsByCategory: Record<string, GroceryListItem[]> = {};
+      updatedItems.forEach((i) => {
+        if (!itemsByCategory[i.category]) {
+          itemsByCategory[i.category] = [];
+        }
+        itemsByCategory[i.category].push(i);
+      });
+      const purchasedCount = updatedItems.filter((i) => i.is_purchased).length;
+      return {
+        ...prev,
+        items: updatedItems,
+        items_by_category: itemsByCategory,
+        purchased_items_count: purchasedCount,
+      };
+    });
 
     try {
-      const updatedItem = await groceryListService.toggleItemPurchased(
-        item.id,
-        !item.is_purchased
-      );
-
-      // Update local state
-      setGroceryList((prev) => {
-        if (!prev) return prev;
-
-        const updatedItems = prev.items.map((i) =>
-          i.id === updatedItem.id ? updatedItem : i
-        );
-
-        // Regroup by category
-        const itemsByCategory: Record<string, GroceryListItem[]> = {};
-        updatedItems.forEach((item) => {
-          if (!itemsByCategory[item.category]) {
-            itemsByCategory[item.category] = [];
-          }
-          itemsByCategory[item.category].push(item);
-        });
-
-        const purchasedCount = updatedItems.filter((i) => i.is_purchased).length;
-
-        return {
-          ...prev,
-          items: updatedItems,
-          items_by_category: itemsByCategory,
-          purchased_items_count: purchasedCount,
-        };
-      });
+      await groceryListService.toggleItemPurchased(item.id, !item.is_purchased);
     } catch (error: any) {
       console.error('Error toggling item:', error);
-      Alert.alert('Error', 'Failed to update item');
-    } finally {
-      setTogglingItems((prev) => {
-        const newSet = new Set(prev);
-        newSet.delete(item.id);
-        return newSet;
-      });
+      // Rollback on failure
+      setGroceryList(previousList);
+      Alert.alert('Error', 'Failed to update item. Please try again.');
     }
   };
 
@@ -419,9 +408,9 @@ export const GroceryListScreen: React.FC = () => {
   if (loading && !groceryList) {
     return (
       <SafeAreaView style={styles.container}>
-        <LinearGradient colors={['#FF6B35', '#F7931E']} style={styles.header}>
+        <View style={styles.header}>
           <Text style={styles.headerTitle}>Grocery List</Text>
-        </LinearGradient>
+        </View>
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color="#FF6B35" />
         </View>
@@ -432,9 +421,9 @@ export const GroceryListScreen: React.FC = () => {
   if (!groceryList && !loading) {
     return (
       <SafeAreaView style={styles.container}>
-        <LinearGradient colors={['#FF6B35', '#F7931E']} style={styles.header}>
+        <View style={styles.header}>
           <Text style={styles.headerTitle}>Grocery List</Text>
-        </LinearGradient>
+        </View>
 
         <View style={styles.emptyContainer}>
           <Ionicons name="cart-outline" size={80} color="#CCC" />
@@ -467,24 +456,41 @@ export const GroceryListScreen: React.FC = () => {
 
   // Main render with grocery list
   const sections = getSectionedItems();
-  const progress = groceryList
+  const progress = groceryList && groceryList.total_items > 0
     ? (groceryList.purchased_items_count / groceryList.total_items) * 100
     : 0;
 
   return (
     <SafeAreaView style={styles.container}>
-      <LinearGradient colors={['#FF6B35', '#F7931E']} style={styles.header}>
+      <View style={styles.header}>
         <Text style={styles.headerTitle}>Grocery List</Text>
         <TouchableOpacity style={styles.moreButton} onPress={handleMarkAllPurchased}>
-          <Ionicons name="checkmark-done" size={24} color="#FFF" />
+          <Ionicons name="checkmark-done" size={24} color={colors.primary} />
         </TouchableOpacity>
-      </LinearGradient>
+      </View>
 
       {/* Summary Card */}
       <View style={styles.summaryCard}>
         <Text style={styles.summaryTitle}>{groceryList?.name}</Text>
         <Text style={styles.summaryDate}>
-          Week of {new Date(groceryList?.week_start_date || '').toLocaleDateString()}
+          Week of {(() => {
+            const dateStr = groceryList?.week_start_date;
+            if (!dateStr) return 'Unknown';
+            try {
+              // Handle YYYY-MM-DD format explicitly to avoid timezone issues
+              const parts = String(dateStr).split('-');
+              if (parts.length === 3) {
+                const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+                if (!isNaN(d.getTime())) {
+                  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                }
+              }
+              const d = new Date(dateStr);
+              return isNaN(d.getTime()) ? String(dateStr) : d.toLocaleDateString();
+            } catch {
+              return String(dateStr);
+            }
+          })()}
         </Text>
 
         {/* Progress Bar */}
@@ -557,9 +563,24 @@ export const GroceryListScreen: React.FC = () => {
           onPress={handleRefresh}
         >
           <Ionicons name="refresh" size={20} color="#FF6B35" />
-          <Text style={styles.actionButtonTextSecondary}>Regenerate List</Text>
+          <Text style={styles.actionButtonTextSecondary}>Regenerate</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.actionButton, styles.actionButtonPrimary]}
+          onPress={() => setShowInstacartModal(true)}
+        >
+          <Ionicons name="cart" size={20} color="#FFF" />
+          <Text style={styles.actionButtonText}>Order with Instacart</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Instacart Checkout Modal */}
+      <InstacartCheckoutModal
+        visible={showInstacartModal}
+        groceryList={groceryList}
+        onClose={() => setShowInstacartModal(false)}
+      />
     </SafeAreaView>
   );
 };
@@ -571,16 +592,19 @@ const createStyles = (colors: any) =>
       backgroundColor: colors.background,
     },
     header: {
-      paddingVertical: 16,
-      paddingHorizontal: 24,
       flexDirection: 'row',
-      alignItems: 'center',
       justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: 24,
+      paddingVertical: 16,
+      backgroundColor: colors.backgroundSecondary,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
     },
     headerTitle: {
       fontSize: 28,
       fontWeight: 'bold',
-      color: '#FFF',
+      color: colors.primary,
       flex: 1,
     },
     moreButton: {

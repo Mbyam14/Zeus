@@ -7,6 +7,7 @@ const BASE_URL = config.API_BASE_URL;
 
 const api = axios.create({
   baseURL: BASE_URL,
+  timeout: 15000, // 15 second default timeout
   headers: {
     'Content-Type': 'application/json',
   },
@@ -43,15 +44,33 @@ api.interceptors.request.use(
   }
 );
 
-// Response interceptor to handle auth errors
+// Response interceptor to handle auth errors and retry on failures
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
+    const config = error.config;
+
+    // Handle 401 - token expired
     if (error.response?.status === 401) {
-      // Token expired or invalid, clear it
       await SecureStore.deleteItemAsync('auth_token');
-      // You might want to redirect to login here
+      return Promise.reject(error);
     }
+
+    // Retry logic: retry up to 2x on network errors and 5xx responses
+    if (!config._retryCount) config._retryCount = 0;
+    const isRetryable =
+      error.code === 'ECONNABORTED' ||
+      error.code === 'ERR_NETWORK' ||
+      (!error.response && error.message === 'Network Error') ||
+      (error.response?.status >= 500 && error.response?.status < 600);
+
+    if (config._retryCount < 2 && isRetryable) {
+      config._retryCount++;
+      const delay = 1000 * Math.pow(2, config._retryCount - 1); // 1s, 2s
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      return api(config);
+    }
+
     return Promise.reject(error);
   }
 );
