@@ -270,7 +270,7 @@ const styles = StyleSheet.create({
   image: {
     width: '100%',
     height: 300,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#FFF8F0',
   },
   content: {
     padding: 24,
@@ -365,7 +365,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   tag: {
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#FFF8F0',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
@@ -442,7 +442,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FF6B35',
   },
   shareButton: {
-    backgroundColor: '#004E89',
+    backgroundColor: '#2D6A4F',
   },
   actionButtonIcon: {
     fontSize: 18,
@@ -453,7 +453,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   macrosSection: {
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#FFF8F0',
     borderRadius: 12,
     padding: 16,
     marginBottom: 24,

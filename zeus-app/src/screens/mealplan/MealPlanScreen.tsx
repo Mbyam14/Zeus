@@ -374,7 +374,7 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#FFF8F0',
   },
   loadingContainer: {
     flex: 1,
@@ -461,7 +461,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 12,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#FFF8F0',
     minWidth: 70,
   },
   dayCardSelected: {
@@ -488,7 +488,7 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#004E89',
+    backgroundColor: '#2D6A4F',
     marginTop: 4,
   },
   mealsContainer: {
@@ -531,7 +531,7 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 8,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#FFF8F0',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,

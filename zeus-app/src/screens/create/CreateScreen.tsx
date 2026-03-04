@@ -532,7 +532,7 @@ export const CreateScreen: React.FC<CreateScreenProps> = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F7FA',
+    backgroundColor: '#FFF8F0',
   },
   header: {
     paddingHorizontal: 24,
@@ -707,7 +707,7 @@ const styles = StyleSheet.create({
     color: '#FF6B35',
   },
   input: {
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#FFF8F0',
     borderWidth: 1,
     borderColor: '#E1E8ED',
     borderRadius: 12,
@@ -727,7 +727,7 @@ const styles = StyleSheet.create({
   },
   factItem: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#FFF8F0',
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
@@ -777,7 +777,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 2,
     borderColor: '#E1E8ED',
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#FFF8F0',
     alignItems: 'center',
   },
   difficultyChipActive: {
@@ -804,7 +804,7 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     borderWidth: 2,
     borderColor: '#E1E8ED',
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#FFF8F0',
   },
   chipActive: {
     backgroundColor: '#FF6B35',

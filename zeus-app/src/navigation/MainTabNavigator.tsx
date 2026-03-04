@@ -153,7 +153,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#FFF8F0',
   },
   placeholderTitle: {
     fontSize: 24,

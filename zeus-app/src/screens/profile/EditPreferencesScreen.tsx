@@ -295,7 +295,7 @@ export const EditPreferencesScreen: React.FC<EditPreferencesScreenProps> = ({ na
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#FFF8F0',
   },
   contentContainer: {
     padding: 20,
@@ -304,7 +304,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#FFF8F0',
   },
   loadingText: {
     marginTop: 12,

@@ -213,7 +213,7 @@ export const PreferencesSetupScreen: React.FC<PreferencesSetupScreenProps> = ({ 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#FFF8F0',
   },
   contentContainer: {
     padding: 20,

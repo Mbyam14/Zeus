@@ -121,7 +121,7 @@ export const ProfileScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#FFF8F0',
   },
   header: {
     paddingHorizontal: 24,
@@ -201,7 +201,7 @@ const styles = StyleSheet.create({
     color: '#7F8C8D',
   },
   editButton: {
-    backgroundColor: '#004E89',
+    backgroundColor: '#2D6A4F',
     paddingHorizontal: 32,
     paddingVertical: 12,
     borderRadius: 24,

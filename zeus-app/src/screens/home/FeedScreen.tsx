@@ -453,7 +453,7 @@ const getDifficultyColor = (difficulty: string) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#FFF8F0',
   },
   header: {
     flexDirection: 'row',
@@ -474,7 +474,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#FFF8F0',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -530,7 +530,7 @@ const styles = StyleSheet.create({
   },
   recipeSubtitle: {
     fontSize: 18,
-    color: '#F8F9FA',
+    color: '#FFF8F0',
     marginBottom: 16,
   },
   metaRow: {
@@ -542,7 +542,7 @@ const styles = StyleSheet.create({
   },
   metaLabel: {
     fontSize: 14,
-    color: '#F8F9FA',
+    color: '#FFF8F0',
   },
   difficultyContainer: {
     flexDirection: 'row',
@@ -562,14 +562,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 12,
-    backgroundColor: '#004E89',
+    backgroundColor: '#2D6A4F',
     color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '600',
   },
   description: {
     fontSize: 16,
-    color: '#F8F9FA',
+    color: '#FFF8F0',
     lineHeight: 22,
   },
   actionButtons: {

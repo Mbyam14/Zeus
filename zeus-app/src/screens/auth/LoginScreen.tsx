@@ -154,7 +154,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     fontSize: 16,
     color: '#2C3E50',
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#FFF8F0',
   },
   passwordContainer: {
     flexDirection: 'row',
@@ -171,7 +171,7 @@ const styles = StyleSheet.create({
     paddingRight: 48,
     fontSize: 16,
     color: '#2C3E50',
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#FFF8F0',
   },
   eyeIcon: {
     position: 'absolute',
@@ -202,7 +202,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   forgotPasswordText: {
-    color: '#004E89',
+    color: '#2D6A4F',
     fontSize: 14,
   },
   footer: {

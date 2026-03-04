@@ -181,7 +181,7 @@ export const AIScreen: React.FC<AIScreenProps> = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#FFF8F0',
   },
   header: {
     flexDirection: 'row',
