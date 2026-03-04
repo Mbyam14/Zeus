@@ -7,7 +7,7 @@ from app.schemas.recipe import (
 from app.schemas.user import UserResponse
 from app.services.recipe_service import recipe_service
 from app.services.s3_service import s3_service
-from app.utils.dependencies import get_current_active_user
+from app.utils.dependencies import get_current_active_user, get_current_user_optional
 
 router = APIRouter(prefix="/api/recipes", tags=["Recipes"])
 
@@ -15,15 +15,14 @@ router = APIRouter(prefix="/api/recipes", tags=["Recipes"])
 @router.post("/", response_model=RecipeResponse)
 async def create_recipe(
     recipe_data: RecipeCreate,
-    current_user: Optional[UserResponse] = Depends(get_current_active_user)
+    current_user: UserResponse = Depends(get_current_active_user)
 ):
     """
     Create a new recipe.
 
     Requires authentication. The recipe will be associated with the current user.
     """
-    user_id = current_user.id if current_user else "anonymous"
-    return await recipe_service.create_recipe(recipe_data, user_id)
+    return await recipe_service.create_recipe(recipe_data, current_user.id)
 
 
 @router.get("/feed", response_model=List[RecipeResponse])
@@ -36,11 +35,11 @@ async def get_recipe_feed(
     use_pantry_items: bool = Query(False, description="Prioritize recipes using pantry items"),
     limit: int = Query(20, ge=1, le=100, description="Number of recipes to return"),
     offset: int = Query(0, ge=0, description="Number of recipes to skip"),
-    current_user: Optional[UserResponse] = Depends(get_current_active_user)
+    current_user: Optional[UserResponse] = Depends(get_current_user_optional)
 ):
     """
     Get paginated recipe feed with optional filters.
-    
+
     If authenticated, includes user-specific data like likes and saves.
     """
     filters = RecipeFeedFilter(
@@ -89,7 +88,7 @@ async def get_my_liked_recipes(
 @router.get("/{recipe_id}", response_model=RecipeResponse)
 async def get_recipe(
     recipe_id: str,
-    current_user: Optional[UserResponse] = Depends(get_current_active_user)
+    current_user: Optional[UserResponse] = Depends(get_current_user_optional)
 ):
     """
     Get a specific recipe by ID.
@@ -189,7 +188,7 @@ async def get_user_recipes(
     user_id: str,
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    current_user: Optional[UserResponse] = Depends(get_current_active_user)
+    current_user: Optional[UserResponse] = Depends(get_current_user_optional)
 ):
     """
     Get recipes created by a specific user.

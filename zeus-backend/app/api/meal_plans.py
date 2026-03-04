@@ -8,7 +8,6 @@ from app.services.ai_service import ai_service
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 import logging
-import json
 
 logger = logging.getLogger(__name__)
 
@@ -63,11 +62,6 @@ async def generate_meal_plan(
         meal_plan_response = meal_plan_data.get("meal_plan", {})
         meals_dict = meal_plan_response.get("meals", {})
 
-        # Write debug info to file
-        with open("debug_meal_plan.txt", "w") as f:
-            f.write(f"meal_plan_response keys: {list(meal_plan_response.keys())}\n")
-            f.write(f"meals_dict keys: {list(meals_dict.keys())}\n")
-
         # Save recipes to database and build meal plan structure
         saved_recipes: Dict[str, Dict[str, str]] = {}
         days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
@@ -84,14 +78,6 @@ async def generate_meal_plan(
                     continue
 
                 recipe_data = day_meals[meal_type]
-
-                # Debug: Log what nutrition data we're getting
-                with open("debug_meal_plan.txt", "a") as f:
-                    f.write(f"\n{day} {meal_type} nutrition data:\n")
-                    f.write(f"  calories: {recipe_data.get('calories')}\n")
-                    f.write(f"  protein_grams: {recipe_data.get('protein_grams')}\n")
-                    f.write(f"  carbs_grams: {recipe_data.get('carbs_grams')}\n")
-                    f.write(f"  fat_grams: {recipe_data.get('fat_grams')}\n")
 
                 # Ensure instructions have proper step numbers
                 instructions = recipe_data.get("instructions", [])
@@ -133,11 +119,6 @@ async def generate_meal_plan(
                 recipe_id = recipe_result.data[0]["id"]
                 saved_recipes[day][meal_type] = recipe_id
 
-        # Write saved recipes to file
-        with open("debug_meal_plan.txt", "a") as f:
-            f.write(f"Saved {len(saved_recipes)} days with {sum(len(m) for m in saved_recipes.values())} total meals\n")
-            f.write(f"saved_recipes structure:\n{json.dumps(saved_recipes, indent=2)}\n")
-
         # Save meal plan
         meal_plan_record = {
             "user_id": current_user.id,
@@ -160,7 +141,7 @@ async def generate_meal_plan(
         logger.error(f"Failed to generate meal plan: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to generate meal plan: {str(e)}"
+            detail="Failed to generate meal plan. Please try again."
         )
 
 
@@ -197,12 +178,6 @@ async def get_current_week_meal_plan(
             "meals": meal_plan["meals"],
             "created_at": meal_plan["created_at"]
         }
-
-        # Debug: Write response to file
-        with open("debug_current_meal_plan.txt", "w") as f:
-            f.write(f"Returning meal plan: {meal_plan['id']}\n")
-            f.write(f"Number of days in meals: {len(meal_plan['meals'])}\n")
-            f.write(f"Meals structure:\n{json.dumps(meal_plan['meals'], indent=2)}\n")
 
         return response_data
 
@@ -331,5 +306,5 @@ async def regenerate_single_meal(
         logger.error(f"Failed to regenerate meal: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to regenerate meal: {str(e)}"
+            detail="Failed to regenerate meal. Please try again."
         )

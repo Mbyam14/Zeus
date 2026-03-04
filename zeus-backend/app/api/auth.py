@@ -10,7 +10,7 @@ router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 async def register(user_data: UserRegister):
     """
     Register a new user account.
-    
+
     Returns JWT token and user information upon successful registration.
     """
     return await auth_service.register_user(user_data)
@@ -20,7 +20,7 @@ async def register(user_data: UserRegister):
 async def login(user_data: UserLogin):
     """
     Login with email and password.
-    
+
     Returns JWT token and user information upon successful authentication.
     """
     return await auth_service.login_user(user_data)
@@ -30,7 +30,7 @@ async def login(user_data: UserLogin):
 async def get_current_user_info(current_user: UserResponse = Depends(get_current_active_user)):
     """
     Get current authenticated user's information.
-    
+
     Requires valid JWT token in Authorization header.
     """
     return current_user
@@ -43,7 +43,7 @@ async def update_profile(
 ):
     """
     Update current user's profile information.
-    
+
     Requires valid JWT token in Authorization header.
     """
     update_data = profile_data.dict()

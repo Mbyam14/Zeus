@@ -5,7 +5,7 @@ from functools import lru_cache
 class Settings(BaseSettings):
     app_name: str = "Zeus"
     environment: str = "development"
-    debug: bool = True
+    debug: bool = False
     secret_key: str
     
     # Supabase

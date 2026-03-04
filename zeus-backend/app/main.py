@@ -8,16 +8,18 @@ app = FastAPI(
     title=settings.app_name,
     description="Zeus - Social Meal Planning Application Backend",
     version="1.0.0",
-    debug=settings.debug
+    debug=settings.debug,
+    docs_url="/docs" if settings.debug else None,
+    redoc_url="/redoc" if settings.debug else None,
 )
 
-# CORS middleware
+# CORS middleware - restrict methods and headers
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins.split(","),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 # Include routers

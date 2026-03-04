@@ -8,6 +8,24 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+ALLOWED_IMAGE_EXTENSIONS = {'jpg', 'jpeg', 'png', 'gif', 'webp'}
+
+
+def _validate_file_extension(filename: str) -> str:
+    """Validate and return the file extension from an allowlist."""
+    if not filename or '.' not in filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File must have a valid image extension"
+        )
+    ext = filename.rsplit('.', 1)[-1].lower()
+    if ext not in ALLOWED_IMAGE_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File extension '.{ext}' not allowed. Allowed: {', '.join(ALLOWED_IMAGE_EXTENSIONS)}"
+        )
+    return ext
+
 
 class S3Service:
     def __init__(self):
@@ -47,8 +65,8 @@ class S3Service:
                 detail="File size must be less than 10MB"
             )
         
-        # Generate unique filename
-        file_extension = file.filename.split('.')[-1] if '.' in file.filename else 'jpg'
+        # Validate and generate unique filename
+        file_extension = _validate_file_extension(file.filename)
         unique_filename = f"recipes/{user_id}/{uuid.uuid4()}.{file_extension}"
         
         try:
@@ -116,8 +134,8 @@ class S3Service:
                 detail="Profile image must be less than 5MB"
             )
         
-        # Generate unique filename
-        file_extension = file.filename.split('.')[-1] if '.' in file.filename else 'jpg'
+        # Validate and generate unique filename
+        file_extension = _validate_file_extension(file.filename)
         unique_filename = f"profiles/{user_id}/avatar.{file_extension}"
         
         try:

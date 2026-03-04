@@ -12,23 +12,14 @@ router = APIRouter(prefix="/api/ai", tags=["AI Features"])
 @router.post("/generate-recipe", response_model=RecipeResponse)
 async def generate_recipe(
     request: AIRecipeRequest,
-    current_user: Optional[UserResponse] = Depends(get_current_active_user)
+    current_user: UserResponse = Depends(get_current_active_user)
 ):
     """
     Generate a recipe using AI based on user preferences and pantry items.
 
-    The AI will consider:
-    - Available pantry items
-    - Dietary restrictions
-    - Cuisine preferences
-    - Cooking skill level
-    - Time constraints
-    - Serving size requirements
-
-    The generated recipe will be saved to the user's recipes and marked as AI-generated.
+    Requires authentication. The generated recipe will be saved to the user's recipes.
     """
-    user_id = current_user.id if current_user else "anonymous"
-    return await ai_service.generate_recipe(request, user_id)
+    return await ai_service.generate_recipe(request, current_user.id)
 
 
 @router.post("/generate-meal-plan")
@@ -38,12 +29,12 @@ async def generate_meal_plan(
 ) -> Dict[str, Any]:
     """
     Generate a weekly meal plan using AI based on user preferences.
-    
+
     The AI will create:
     - A complete weekly meal plan
     - A comprehensive grocery list
     - Meal prep tips and suggestions
-    
+
     The response includes suggested recipes that can be saved individually.
     """
     return await ai_service.generate_meal_plan(request, current_user.id)
@@ -54,17 +45,10 @@ async def get_recipe_suggestions(
     current_user: UserResponse = Depends(get_current_active_user)
 ) -> Dict[str, Any]:
     """
-    Get personalized recipe suggestions based on:
-    - User's pantry items
-    - Past recipe preferences
-    - Dietary restrictions from profile
-    - Current trending recipes
-    
+    Get personalized recipe suggestions.
+
     Returns a list of suggested recipes without creating them.
     """
-    # This could be implemented to analyze user's pantry and suggest existing recipes
-    # or generate quick AI suggestions without full recipe creation
-    
     return {
         "message": "Recipe suggestions feature coming soon!",
         "suggestions": [
