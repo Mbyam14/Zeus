@@ -41,7 +41,6 @@ export const ProfileScreen: React.FC = () => {
 
   const menuItems = [
     { icon: '✏️', label: 'Edit Profile', subtitle: 'Update your info', screen: 'EditProfile' as const },
-    { icon: '📖', label: 'My Recipes', subtitle: 'View & manage recipes', screen: 'MyRecipes' as const },
     { icon: '🎯', label: 'Meal Preferences', subtitle: 'Diet, goals & planning', screen: 'EditPreferences' as const },
     { icon: '⚙️', label: 'Settings', subtitle: 'App configuration', screen: 'Settings' as const },
   ];

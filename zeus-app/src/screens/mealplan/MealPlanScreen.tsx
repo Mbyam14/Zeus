@@ -5,13 +5,11 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   ScrollView,
   ActivityIndicator,
   Alert,
-  Modal,
-  Animated,
-  Easing,
+  Image,
+  Platform,
 } from 'react-native';
 import { mealPlanService } from '../../services/mealPlanService';
 import {
@@ -34,7 +32,6 @@ interface MealPlanScreenProps {
 
 export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
-  const [generating, setGenerating] = useState(false);
   const [mealPlan, setMealPlan] = useState<MealPlan | null>(null);
   const [recipes, setRecipes] = useState<{ [key: string]: Recipe }>({});
   const [recipeLoadError, setRecipeLoadError] = useState<string | null>(null);
@@ -43,7 +40,8 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
   const [macroSummary, setMacroSummary] = useState<MacroSummaryResponse | null>(null);
   const [showMacroSummary, setShowMacroSummary] = useState(false);
   const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set());
-  const [weekOffset, setWeekOffset] = useState(0); // 0 = current week, 1 = next week, -1 = last week
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [showMenu, setShowMenu] = useState(false);
 
   const { colors } = useThemeStore();
   const styles = createStyles(colors);
@@ -53,14 +51,6 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
   const regeneratingMealsRef = useRef(new Set<string>());
   const dayScrollRef = useRef<ScrollView>(null);
   const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Animated values for loading overlay (must be at top level with other hooks)
-  const floatAnim1 = useRef(new Animated.Value(0)).current;
-  const floatAnim2 = useRef(new Animated.Value(0)).current;
-  const floatAnim3 = useRef(new Animated.Value(0)).current;
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-  const rotateAnim = useRef(new Animated.Value(0)).current;
-  const [loadingStep, setLoadingStep] = useState(0);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -76,95 +66,18 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
   }, [weekOffset]);
 
   // Reload when returning from edit screen, but only if cache is stale
+  // Also close dropdown menu when navigating away
   useFocusEffect(
     useCallback(() => {
       const dataStore = useDataStore.getState();
       if (mealPlan && (!dataStore.isFresh('mealPlan') || dataStore.getCachedWeekOffset() !== weekOffset)) {
         loadMealPlan();
       }
+      return () => {
+        setShowMenu(false);
+      };
     }, [mealPlan?.id, weekOffset])
   );
-
-  // Animation effect for loading overlay (must be before any early returns)
-  useEffect(() => {
-    if (generating) {
-      setLoadingStep(0);
-
-      const createFloatAnimation = (anim: Animated.Value, delay: number) => {
-        return Animated.loop(
-          Animated.sequence([
-            Animated.timing(anim, {
-              toValue: 1,
-              duration: 2000,
-              delay,
-              easing: Easing.inOut(Easing.sin),
-              useNativeDriver: true,
-            }),
-            Animated.timing(anim, {
-              toValue: 0,
-              duration: 2000,
-              easing: Easing.inOut(Easing.sin),
-              useNativeDriver: true,
-            }),
-          ])
-        );
-      };
-
-      const pulseAnimation = Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, {
-            toValue: 1.02,
-            duration: 1500,
-            easing: Easing.inOut(Easing.ease),
-            useNativeDriver: true,
-          }),
-          Animated.timing(pulseAnim, {
-            toValue: 1,
-            duration: 1500,
-            easing: Easing.inOut(Easing.ease),
-            useNativeDriver: true,
-          }),
-        ])
-      );
-
-      const rotateAnimation = Animated.loop(
-        Animated.timing(rotateAnim, {
-          toValue: 1,
-          duration: 8000,
-          easing: Easing.linear,
-          useNativeDriver: true,
-        })
-      );
-
-      const float1 = createFloatAnimation(floatAnim1, 0);
-      const float2 = createFloatAnimation(floatAnim2, 500);
-      const float3 = createFloatAnimation(floatAnim3, 1000);
-
-      float1.start();
-      float2.start();
-      float3.start();
-      pulseAnimation.start();
-      rotateAnimation.start();
-
-      const stepInterval = setInterval(() => {
-        setLoadingStep(prev => (prev + 1) % 6);
-      }, 4000);
-
-      return () => {
-        float1.stop();
-        float2.stop();
-        float3.stop();
-        pulseAnimation.stop();
-        rotateAnimation.stop();
-        clearInterval(stepInterval);
-        floatAnim1.setValue(0);
-        floatAnim2.setValue(0);
-        floatAnim3.setValue(0);
-        pulseAnim.setValue(1);
-        rotateAnim.setValue(0);
-      };
-    }
-  }, [generating]);
 
   const loadMealPlan = async () => {
     try {
@@ -233,35 +146,6 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
         setLoading(false);
       }
     }
-  };
-
-  // Poll for meal plan with exponential backoff (fixes race condition)
-  const pollForMealPlan = async (maxAttempts = 5, initialDelay = 300): Promise<boolean> => {
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const delay = initialDelay * Math.pow(1.5, attempt); // Exponential backoff: 300ms, 450ms, 675ms, 1012ms, 1518ms
-      console.log(`🔄 Polling attempt ${attempt + 1}/${maxAttempts} (waiting ${delay}ms)...`);
-
-      await new Promise(resolve => setTimeout(resolve, delay));
-
-      if (!isMountedRef.current) {
-        console.log('⚠️ Component unmounted, stopping poll');
-        return false;
-      }
-
-      try {
-        const plan = await mealPlanService.getCurrentWeekMealPlan();
-        if (plan && Object.keys(plan.meals).length > 0) {
-          console.log('✅ Meal plan found with meals!');
-          return true;
-        }
-        console.log(`⏳ Meal plan not ready yet (attempt ${attempt + 1}/${maxAttempts})`);
-      } catch (error) {
-        console.error(`❌ Error during poll attempt ${attempt + 1}:`, error);
-      }
-    }
-
-    console.log('⚠️ Max polling attempts reached');
-    return false;
   };
 
   /**
@@ -415,61 +299,6 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
         dayScrollRef.current?.scrollTo({ x: scrollPosition, animated: true });
       }
     }, 100);
-  };
-
-  const handleGenerateMealPlan = async () => {
-    const weekLabel = weekOffset === 0 ? 'this week' : weekOffset === 1 ? 'next week' : `week ${weekOffset > 0 ? '+' : ''}${weekOffset}`;
-    Alert.alert(
-      'Generate Meal Plan',
-      `This will create a full week of meals for ${weekLabel} based on your pantry and preferences. This may take a minute.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Generate',
-          onPress: async () => {
-            try {
-              setGenerating(true);
-
-              // Use the week offset endpoint for generation
-              const generateResponse = await mealPlanService.generateMealPlanForWeek(weekOffset);
-              console.log('🆕 Generation response:', generateResponse);
-              console.log('🆕 New meal plan ID from generation:', generateResponse.meal_plan_id);
-
-              // Clear old state before loading new meal plan
-              if (isMountedRef.current) {
-                setMealPlan(null);
-                setRecipes({});
-              }
-
-              // Poll for meal plan with exponential backoff (replaces hardcoded 500ms delay)
-              console.log('🔄 Polling for newly generated meal plan...');
-              const success = await pollForMealPlan();
-
-              if (success && isMountedRef.current) {
-                // Load the newly generated meal plan
-                console.log('🔄 Now fetching current meal plan from API...');
-                await loadMealPlan();
-                Alert.alert('Success', 'Your meal plan has been generated!');
-              } else if (isMountedRef.current) {
-                Alert.alert(
-                  'Partial Success',
-                  'Meal plan was generated but took longer than expected to load. Please refresh.'
-                );
-              }
-            } catch (error) {
-              console.error('Failed to generate meal plan:', error);
-              if (isMountedRef.current) {
-                Alert.alert('Error', 'Failed to generate meal plan. Please try again.');
-              }
-            } finally {
-              if (isMountedRef.current) {
-                setGenerating(false);
-              }
-            }
-          }
-        }
-      ]
-    );
   };
 
   const handleRegenerateMeal = async (day: DayOfWeek, mealType: MealType) => {
@@ -656,9 +485,13 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
             style={styles.plannedMeal}
             onPress={() => handleViewRecipe(recipe.id)}
           >
-            <View style={styles.mealImagePlaceholder}>
-              <Text style={styles.mealEmoji}>🍽️</Text>
-            </View>
+            {recipe.image_url ? (
+              <Image source={{ uri: recipe.image_url }} style={styles.mealImage} />
+            ) : (
+              <View style={styles.mealImagePlaceholder}>
+                <Text style={styles.mealEmoji}>🍽️</Text>
+              </View>
+            )}
             <View style={styles.mealInfo}>
               <Text style={styles.mealTitle}>{recipe.title}</Text>
               {originalDay && (
@@ -702,24 +535,25 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <View style={styles.container}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={colors.primary} />
           <Text style={styles.loadingText}>Loading meal plan...</Text>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   if (!mealPlan) {
     return (
-      <SafeAreaView style={styles.container}>
+      <View style={styles.container}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Meal Plan</Text>
           <TouchableOpacity style={styles.addButton} onPress={() => navigation.navigate('DaySelection')}>
             <Text style={styles.addButtonText}>+</Text>
           </TouchableOpacity>
         </View>
+
         {/* Week Navigation for empty state too */}
         <View style={styles.weekNavContainer}>
           <TouchableOpacity
@@ -748,169 +582,73 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
               : `No meal plan for ${getWeekLabel().toLowerCase()}. Tap + to create one!`}
           </Text>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   const daysOfWeek = getDaysOfWeek();
 
-  const loadingSteps = [
-    'Analyzing your preferences...',
-    'Selecting recipes...',
-    'Calculating nutrition...',
-    'Building your meal plan...',
-    'Adding ingredients & instructions...',
-    'Almost there...',
-  ];
-
-  // Loading overlay component with animations
-  const renderLoadingOverlay = () => {
-    const float1Y = floatAnim1.interpolate({
-      inputRange: [0, 1],
-      outputRange: [0, -20],
-    });
-    const float2Y = floatAnim2.interpolate({
-      inputRange: [0, 1],
-      outputRange: [0, -25],
-    });
-    const float3Y = floatAnim3.interpolate({
-      inputRange: [0, 1],
-      outputRange: [0, -15],
-    });
-    const rotate = rotateAnim.interpolate({
-      inputRange: [0, 1],
-      outputRange: ['0deg', '360deg'],
-    });
-
-    return (
-      <Modal
-        visible={generating}
-        transparent={true}
-        animationType="fade"
-      >
-        <View style={styles.loadingOverlay}>
-          {/* Floating food emojis */}
-          <Animated.Text style={[
-            styles.floatingEmoji,
-            styles.floatingEmoji1,
-            { transform: [{ translateY: float1Y }] }
-          ]}>
-            🥗
-          </Animated.Text>
-          <Animated.Text style={[
-            styles.floatingEmoji,
-            styles.floatingEmoji2,
-            { transform: [{ translateY: float2Y }] }
-          ]}>
-            🍳
-          </Animated.Text>
-          <Animated.Text style={[
-            styles.floatingEmoji,
-            styles.floatingEmoji3,
-            { transform: [{ translateY: float3Y }] }
-          ]}>
-            🥘
-          </Animated.Text>
-          <Animated.Text style={[
-            styles.floatingEmoji,
-            styles.floatingEmoji4,
-            { transform: [{ translateY: float1Y }] }
-          ]}>
-            🍝
-          </Animated.Text>
-          <Animated.Text style={[
-            styles.floatingEmoji,
-            styles.floatingEmoji5,
-            { transform: [{ translateY: float2Y }] }
-          ]}>
-            🥑
-          </Animated.Text>
-
-          <Animated.View style={[
-            styles.loadingCard,
-            { transform: [{ scale: pulseAnim }] }
-          ]}>
-            {/* Rotating ring behind spinner */}
-            <View style={styles.spinnerContainer}>
-              <Animated.View style={[
-                styles.rotatingRing,
-                { transform: [{ rotate }] }
-              ]}>
-                <View style={[styles.ringDot, { backgroundColor: colors.primary }]} />
-                <View style={[styles.ringDot, styles.ringDot2, { backgroundColor: colors.secondary }]} />
-                <View style={[styles.ringDot, styles.ringDot3, { backgroundColor: colors.primary, opacity: 0.5 }]} />
-              </Animated.View>
-              <ActivityIndicator size="large" color={colors.primary} />
-            </View>
-
-            <Text style={styles.loadingTitle}>Generating Your Meal Plan</Text>
-
-            {/* Animated step indicator */}
-            <View style={styles.loadingStepContainer}>
-              <Text style={styles.loadingStep}>{loadingSteps[loadingStep]}</Text>
-            </View>
-
-            {/* Progress dots */}
-            <View style={styles.progressDots}>
-              {loadingSteps.map((_, index) => (
-                <View
-                  key={index}
-                  style={[
-                    styles.progressDot,
-                    index === loadingStep && styles.progressDotActive,
-                    { backgroundColor: index === loadingStep ? colors.primary : colors.border }
-                  ]}
-                />
-              ))}
-            </View>
-
-            <Text style={styles.loadingSubtext}>
-              Creating personalized recipes with full ingredients, instructions, and nutrition info
-            </Text>
-          </Animated.View>
-        </View>
-      </Modal>
-    );
-  };
-
   return (
-    <SafeAreaView style={styles.container}>
-      {renderLoadingOverlay()}
+    <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Meal Plan</Text>
-        <TouchableOpacity style={styles.addButton} onPress={() => navigation.navigate('DaySelection')}>
-          <Text style={styles.addButtonText}>+</Text>
-        </TouchableOpacity>
+        <View style={{ zIndex: 101 }}>
+          <TouchableOpacity style={styles.addButton} onPress={() => setShowMenu(!showMenu)}>
+            <Text style={styles.addButtonText}>{showMenu ? '×' : '+'}</Text>
+          </TouchableOpacity>
+
+          {/* Dropdown Menu - anchored below the button */}
+          {showMenu && (
+            <View style={styles.dropdownMenu}>
+              <TouchableOpacity
+                style={styles.dropdownMenuItem}
+                onPress={() => {
+                  setShowMenu(false);
+                  navigation.navigate('DaySelection');
+                }}
+              >
+                <View style={styles.dropdownMenuIcon}>
+                  <Text style={styles.dropdownMenuIconText}>📅</Text>
+                </View>
+                <Text style={styles.dropdownMenuText}>Create Meal Plan</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.dropdownMenuItem}
+                onPress={() => {
+                  setShowMenu(false);
+                  navigation.navigate('MealPlanEdit', { mealPlan, recipes });
+                }}
+              >
+                <View style={styles.dropdownMenuIcon}>
+                  <Text style={styles.dropdownMenuIconText}>✏️</Text>
+                </View>
+                <Text style={styles.dropdownMenuText}>Edit Meal Plan</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.dropdownMenuItem}
+                onPress={() => {
+                  setShowMenu(false);
+                  handleClearMealPlan();
+                }}
+              >
+                <View style={styles.dropdownMenuIcon}>
+                  <Text style={styles.dropdownMenuIconText}>🗑️</Text>
+                </View>
+                <Text style={[styles.dropdownMenuText, { color: colors.error || '#E53E3E' }]}>Clear Meal Plan</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
       </View>
 
-      {/* Action Bar */}
-      <View style={styles.actionBar}>
+      {/* Dropdown Backdrop */}
+      {showMenu && (
         <TouchableOpacity
-          style={styles.actionButton}
-          onPress={() => navigation.navigate('MealPlanEdit', { mealPlan, recipes })}
-          disabled={generating}
-        >
-          <Text style={styles.actionButtonText}>Edit</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.actionButton}
-          onPress={handleClearMealPlan}
-          disabled={generating}
-        >
-          <Text style={styles.actionButtonText}>Clear</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.actionButtonPrimary}
-          onPress={handleGenerateMealPlan}
-          disabled={generating}
-        >
-          {generating ? (
-            <ActivityIndicator size="small" color={colors.buttonText} />
-          ) : (
-            <Text style={styles.actionButtonPrimaryText}>Generate</Text>
-          )}
-        </TouchableOpacity>
-      </View>
+          style={styles.dropdownBackdrop}
+          activeOpacity={1}
+          onPress={() => setShowMenu(false)}
+        />
+      )}
 
       {/* Week Navigation */}
       <View style={styles.weekNavContainer}>
@@ -1211,7 +949,7 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
 
         <View style={{ height: 20 }} />
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -1255,42 +993,17 @@ const createStyles = (colors: any) => StyleSheet.create({
     lineHeight: 24,
     fontWeight: '400',
   },
-  generateButton: {
-    backgroundColor: colors.primary,
-    paddingVertical: 18,
-    paddingHorizontal: 40,
-    borderRadius: 16,
-    minWidth: 220,
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'center',
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 6,
-  },
-  generateButtonText: {
-    color: colors.buttonText,
-    fontSize: 17,
-    fontWeight: '700',
-    letterSpacing: 0.3,
-  },
-  generateButtonArrow: {
-    color: colors.buttonText,
-    fontSize: 18,
-    fontWeight: '700',
-    marginLeft: 8,
-  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 24,
-    paddingVertical: 16,
+    paddingTop: Platform.OS === 'ios' ? 60 : 16,
+    paddingBottom: 16,
     backgroundColor: colors.backgroundSecondary,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+    zIndex: 100,
   },
   headerTitle: {
     fontSize: 28,
@@ -1310,38 +1023,54 @@ const createStyles = (colors: any) => StyleSheet.create({
     fontWeight: 'bold',
     color: colors.backgroundSecondary,
   },
-  actionBar: {
+  dropdownMenu: {
+    position: 'absolute',
+    top: '100%',
+    right: 0,
+    marginTop: 16,
+    backgroundColor: colors.card,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+    overflow: 'hidden',
+    minWidth: 200,
+    zIndex: 101,
+  },
+  dropdownMenuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
-    paddingHorizontal: 24,
-    paddingVertical: 8,
-    gap: 10,
-    backgroundColor: colors.backgroundSecondary,
-  },
-  actionButton: {
-    backgroundColor: colors.primary + '15',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 12,
-  },
-  actionButtonText: {
-    color: colors.primary,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  actionButtonPrimary: {
-    backgroundColor: colors.primary,
+    paddingVertical: 14,
     paddingHorizontal: 16,
-    paddingVertical: 9,
-    borderRadius: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
-  actionButtonPrimaryText: {
-    color: colors.buttonText,
-    fontSize: 14,
-    fontWeight: '700',
+  dropdownMenuIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.background,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  dropdownMenuIconText: {
+    fontSize: 18,
+  },
+  dropdownMenuText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: colors.text,
+  },
+  dropdownBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 99,
   },
   // Week Navigation Styles
   weekNavContainer: {
@@ -1535,6 +1264,12 @@ const createStyles = (colors: any) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
+  mealImage: {
+    width: 64,
+    height: 64,
+    borderRadius: 14,
+    marginRight: 14,
+  },
   mealImagePlaceholder: {
     width: 64,
     height: 64,
@@ -1593,124 +1328,6 @@ const createStyles = (colors: any) => StyleSheet.create({
     color: colors.primary,
     fontWeight: '300',
     marginBottom: 4,
-  },
-  loadingOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.85)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  loadingCard: {
-    backgroundColor: colors.card,
-    borderRadius: 24,
-    padding: 32,
-    alignItems: 'center',
-    maxWidth: 340,
-    width: '90%',
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 16,
-    elevation: 12,
-  },
-  spinnerContainer: {
-    width: 80,
-    height: 80,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  rotatingRing: {
-    position: 'absolute',
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    borderWidth: 2,
-    borderColor: colors.primary + '20',
-  },
-  ringDot: {
-    position: 'absolute',
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    top: -5,
-    left: '50%',
-    marginLeft: -5,
-  },
-  ringDot2: {
-    top: '50%',
-    left: -5,
-    marginLeft: 0,
-    marginTop: -5,
-  },
-  ringDot3: {
-    top: '100%',
-    left: '50%',
-    marginTop: -5,
-  },
-  loadingTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: colors.text,
-    marginTop: 20,
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  loadingStepContainer: {
-    height: 24,
-    justifyContent: 'center',
-    marginBottom: 12,
-  },
-  loadingStep: {
-    fontSize: 15,
-    color: colors.primary,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  progressDots: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 16,
-  },
-  progressDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  progressDotActive: {
-    width: 24,
-    borderRadius: 4,
-  },
-  loadingSubtext: {
-    fontSize: 14,
-    color: colors.textMuted,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  floatingEmoji: {
-    position: 'absolute',
-    fontSize: 36,
-    opacity: 0.6,
-  },
-  floatingEmoji1: {
-    top: '15%',
-    left: '10%',
-  },
-  floatingEmoji2: {
-    top: '20%',
-    right: '12%',
-  },
-  floatingEmoji3: {
-    bottom: '25%',
-    left: '15%',
-  },
-  floatingEmoji4: {
-    bottom: '20%',
-    right: '10%',
-  },
-  floatingEmoji5: {
-    top: '45%',
-    left: '5%',
   },
   // Macro Summary Styles - Prominent Button
   macroToggleButton: {

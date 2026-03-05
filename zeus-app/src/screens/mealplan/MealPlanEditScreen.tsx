@@ -9,6 +9,7 @@ import {
   SafeAreaView,
 } from 'react-native';
 import { useThemeStore, ThemeColors } from '../../store/themeStore';
+import { useAuthStore } from '../../store/authStore';
 import { mealPlanService } from '../../services/mealPlanService';
 import { recipeService } from '../../services/recipeService';
 import { RecipeBrowser } from '../../components/RecipeBrowser';
@@ -21,28 +22,39 @@ import {
   getRecipeIdFromSlot,
 } from '../../types/mealplan';
 
-interface MealPlanEditScreenProps {
+interface MealPlanBuilderProps {
   navigation: any;
   route: {
     params: {
-      mealPlan: MealPlan;
-      recipes: Record<string, Recipe>;
+      // Edit mode: existing meal plan
+      mealPlan?: MealPlan;
+      recipes?: Record<string, Recipe>;
+      // Build mode: selected days for new plan
+      selectedDays?: DayOfWeek[];
     };
   };
 }
 
-export const MealPlanEditScreen: React.FC<MealPlanEditScreenProps> = ({ navigation, route }) => {
+export const MealPlanEditScreen: React.FC<MealPlanBuilderProps> = ({ navigation, route }) => {
   const { colors } = useThemeStore();
+  const { user } = useAuthStore();
   const styles = createStyles(colors);
-  const { mealPlan: initialMealPlan, recipes: initialRecipes } = route.params;
 
-  // Get selected days from meal plan or default to all 7
-  const selectedDays: DayOfWeek[] = initialMealPlan.selected_days ||
-    ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+  // Get user's dietary restrictions for filtering recipes
+  const dietaryRestrictions = user?.profile_data?.preferences?.dietary_restrictions || [];
 
-  // Convert initial meal plan to MealAssignment format
-  const convertToAssignments = (): Record<DayOfWeek, Record<MealType, MealAssignment | undefined>> => {
-    const assignments: Record<DayOfWeek, Record<MealType, MealAssignment | undefined>> = {} as any;
+  const existingMealPlan = route.params.mealPlan;
+  const existingRecipes = route.params.recipes;
+  const isEditMode = !!existingMealPlan;
+
+  // Determine selected days
+  const selectedDays: DayOfWeek[] = isEditMode
+    ? (existingMealPlan.selected_days || ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'])
+    : (route.params.selectedDays || ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']);
+
+  // Convert existing meal plan to assignment format (edit mode only)
+  const convertToAssignments = (): Record<string, Record<string, MealAssignment | undefined>> => {
+    const assignments: Record<string, Record<string, MealAssignment | undefined>> = {};
 
     for (const day of selectedDays) {
       assignments[day] = {
@@ -52,15 +64,15 @@ export const MealPlanEditScreen: React.FC<MealPlanEditScreenProps> = ({ navigati
         snack: undefined,
       };
 
-      const dayMeals = initialMealPlan.meals[day];
-      if (dayMeals) {
+      if (isEditMode && existingMealPlan.meals[day]) {
+        const dayMeals = existingMealPlan.meals[day];
         const mealTypes: MealType[] = ['breakfast', 'lunch', 'dinner'];
         for (const mealType of mealTypes) {
           const slot = dayMeals[mealType];
           const recipeId = getRecipeIdFromSlot(slot);
-          if (recipeId && initialRecipes[recipeId]) {
+          if (recipeId && existingRecipes?.[recipeId]) {
             assignments[day][mealType] = {
-              recipe: initialRecipes[recipeId],
+              recipe: existingRecipes[recipeId],
               isRepeat: typeof slot === 'object' && slot.is_repeat === true,
             };
           }
@@ -71,9 +83,7 @@ export const MealPlanEditScreen: React.FC<MealPlanEditScreenProps> = ({ navigati
     return assignments;
   };
 
-  const [mealPlan, setMealPlan] = useState<Record<DayOfWeek, Record<MealType, MealAssignment | undefined>>>(
-    convertToAssignments()
-  );
+  const [mealPlan, setMealPlan] = useState(convertToAssignments());
   const [allRecipes, setAllRecipes] = useState<Recipe[]>([]);
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
   const [saving, setSaving] = useState(false);
@@ -82,28 +92,30 @@ export const MealPlanEditScreen: React.FC<MealPlanEditScreenProps> = ({ navigati
   const [loadingRecipes, setLoadingRecipes] = useState(true);
 
   useEffect(() => {
-    loadRecipes();
+    const load = async () => {
+      try {
+        setLoadingRecipes(true);
+        // Pass dietary restrictions to backend for server-side filtering
+        const recipes = await recipeService.getAllRecipes(
+          50, 0, undefined, undefined,
+          dietaryRestrictions.length > 0 ? dietaryRestrictions : undefined
+        );
+        setAllRecipes(recipes);
+      } catch (error) {
+        console.error('Failed to load recipes:', error);
+      } finally {
+        setLoadingRecipes(false);
+      }
+    };
+    load();
   }, []);
 
-  const loadRecipes = async () => {
-    try {
-      setLoadingRecipes(true);
-      const recipes = await recipeService.getAllRecipes();
-      setAllRecipes(recipes);
-    } catch (error) {
-      console.error('Failed to load recipes:', error);
-    } finally {
-      setLoadingRecipes(false);
-    }
-  };
-
-  const handleRecipeSelect = (recipe: Recipe) => {
+  const handleRecipeSelect = (recipe: Recipe | null) => {
     setSelectedRecipe(recipe);
   };
 
   const handleSlotPress = (day: DayOfWeek, mealType: MealType) => {
     if (selectedRecipe) {
-      // Assign selected recipe to this slot
       setMealPlan(prev => ({
         ...prev,
         [day]: {
@@ -115,32 +127,17 @@ export const MealPlanEditScreen: React.FC<MealPlanEditScreenProps> = ({ navigati
         },
       }));
       setHasChanges(true);
-      // Keep recipe selected for batch assignment
     } else {
-      // If no recipe selected and slot has a recipe, remove it
       const currentAssignment = mealPlan[day]?.[mealType];
       if (currentAssignment?.recipe) {
-        Alert.alert(
-          'Remove Meal',
-          `Remove ${currentAssignment.recipe.title} from this slot?`,
-          [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Remove',
-              style: 'destructive',
-              onPress: () => {
-                setMealPlan(prev => ({
-                  ...prev,
-                  [day]: {
-                    ...prev[day],
-                    [mealType]: undefined,
-                  },
-                }));
-                setHasChanges(true);
-              },
-            },
-          ]
-        );
+        setMealPlan(prev => ({
+          ...prev,
+          [day]: {
+            ...prev[day],
+            [mealType]: undefined,
+          },
+        }));
+        setHasChanges(true);
       }
     }
   };
@@ -159,47 +156,7 @@ export const MealPlanEditScreen: React.FC<MealPlanEditScreenProps> = ({ navigati
   };
 
   const getTotalSlotsCount = (): number => {
-    return selectedDays.length * 3; // 3 meals per day
-  };
-
-  const handleFillWithAI = async () => {
-    const filledCount = getFilledSlotsCount();
-    const totalCount = getTotalSlotsCount();
-    const emptyCount = totalCount - filledCount;
-
-    if (emptyCount === 0) {
-      Alert.alert('All Filled', 'All meal slots are already filled!');
-      return;
-    }
-
-    Alert.alert(
-      'Fill with AI',
-      `AI will generate recipes for ${emptyCount} empty slot${emptyCount > 1 ? 's' : ''}. Continue?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Fill',
-          onPress: async () => {
-            setFillingWithAI(true);
-            try {
-              // First save current changes
-              await handleSaveInternal();
-
-              // Then fill remaining slots with AI
-              await mealPlanService.fillRemainingWithAI(initialMealPlan.id);
-
-              Alert.alert('Success', 'Empty slots have been filled with AI-generated recipes!', [
-                { text: 'OK', onPress: () => navigation.navigate('MealPlanMain') }
-              ]);
-            } catch (error: any) {
-              Alert.alert('Error', error.message || 'Failed to fill with AI');
-            } finally {
-              setFillingWithAI(false);
-            }
-          },
-        },
-      ]
-    );
+    return selectedDays.length * 3;
   };
 
   const convertToApiFormat = (): Record<string, Record<string, any>> => {
@@ -234,16 +191,41 @@ export const MealPlanEditScreen: React.FC<MealPlanEditScreenProps> = ({ navigati
     return mealsForApi;
   };
 
+  const getStartDate = (): string => {
+    const today = new Date();
+    const dayOfWeek = today.getDay();
+    const monday = new Date(today);
+    monday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+    return monday.toISOString().split('T')[0];
+  };
+
   const handleSaveInternal = async () => {
     const mealsForApi = convertToApiFormat();
-    await mealPlanService.updateMealPlanMeals(initialMealPlan.id, mealsForApi);
+
+    if (isEditMode) {
+      await mealPlanService.updateMealPlanMeals(existingMealPlan.id, mealsForApi);
+    } else {
+      const startDate = getStartDate();
+      await mealPlanService.createManualMealPlan(startDate, selectedDays, mealsForApi);
+    }
   };
 
   const handleSave = async () => {
+    if (!isEditMode) {
+      const filledCount = getFilledSlotsCount();
+      if (filledCount === 0) {
+        Alert.alert(
+          'Empty Plan',
+          'You haven\'t added any meals yet. Add some meals or use "Fill AI".',
+        );
+        return;
+      }
+    }
+
     setSaving(true);
     try {
       await handleSaveInternal();
-      Alert.alert('Success', 'Meal plan updated successfully!', [
+      Alert.alert('Success', isEditMode ? 'Meal plan updated!' : 'Meal plan created!', [
         { text: 'OK', onPress: () => navigation.navigate('MealPlanMain') }
       ]);
     } catch (error: any) {
@@ -253,13 +235,61 @@ export const MealPlanEditScreen: React.FC<MealPlanEditScreenProps> = ({ navigati
     }
   };
 
+  const handleFillWithAI = async () => {
+    const filledCount = getFilledSlotsCount();
+    const totalCount = getTotalSlotsCount();
+    const emptyCount = totalCount - filledCount;
+
+    if (emptyCount === 0) {
+      Alert.alert('All Filled', 'All meal slots are already filled!');
+      return;
+    }
+
+    Alert.alert(
+      'Fill with AI',
+      `AI will generate recipes for ${emptyCount} empty slot${emptyCount > 1 ? 's' : ''}. Continue?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Fill',
+          onPress: async () => {
+            setFillingWithAI(true);
+            try {
+              if (isEditMode) {
+                await handleSaveInternal();
+                await mealPlanService.fillRemainingWithAI(existingMealPlan.id);
+              } else {
+                const startDate = getStartDate();
+                const mealsForApi = convertToApiFormat();
+                const createdPlan = await mealPlanService.createManualMealPlan(
+                  startDate,
+                  selectedDays,
+                  mealsForApi
+                );
+                await mealPlanService.fillRemainingWithAI(createdPlan.id);
+              }
+
+              Alert.alert('Success', 'Empty slots have been filled with AI-generated recipes!', [
+                { text: 'OK', onPress: () => navigation.navigate('MealPlanMain') }
+              ]);
+            } catch (error: any) {
+              Alert.alert('Error', error.message || 'Failed to fill with AI');
+            } finally {
+              setFillingWithAI(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const handleCancel = () => {
     if (hasChanges) {
       Alert.alert(
         'Discard Changes?',
         'You have unsaved changes. Are you sure you want to discard them?',
         [
-          { text: 'Keep Editing', style: 'cancel' },
+          { text: 'Keep Building', style: 'cancel' },
           { text: 'Discard', style: 'destructive', onPress: () => navigation.goBack() },
         ]
       );
@@ -270,26 +300,45 @@ export const MealPlanEditScreen: React.FC<MealPlanEditScreenProps> = ({ navigati
 
   const filledCount = getFilledSlotsCount();
   const totalCount = getTotalSlotsCount();
+  const canSave = isEditMode ? hasChanges : filledCount > 0;
+
+  if (saving || fillingWithAI) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingFullscreen}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.loadingFullscreenText}>
+            {fillingWithAI ? 'AI is filling empty slots...' : 'Saving your meal plan...'}
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={handleCancel} style={styles.backButton}>
-          <Text style={styles.backButtonText}>← Cancel</Text>
+          <Text style={styles.backButtonText}>←</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Edit Plan</Text>
-        <TouchableOpacity
-          style={[styles.fillButton, fillingWithAI && styles.fillButtonDisabled]}
-          onPress={handleFillWithAI}
-          disabled={fillingWithAI}
-        >
-          {fillingWithAI ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
-          ) : (
+        <Text style={styles.headerTitle}>Build Mode</Text>
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={[styles.fillButton, fillingWithAI && styles.fillButtonDisabled]}
+            onPress={handleFillWithAI}
+            disabled={fillingWithAI}
+          >
             <Text style={styles.fillButtonText}>Fill AI</Text>
-          )}
-        </TouchableOpacity>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.saveHeaderButton, !canSave && styles.saveHeaderButtonDisabled]}
+            onPress={handleSave}
+            disabled={!canSave}
+          >
+            <Text style={styles.saveHeaderButtonText}>Save</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Progress indicator */}
@@ -300,36 +349,27 @@ export const MealPlanEditScreen: React.FC<MealPlanEditScreenProps> = ({ navigati
         <Text style={styles.progressText}>{filledCount} / {totalCount} meals</Text>
       </View>
 
-      {/* Recipe Browser */}
+      {/* Recipe Browser + Selection Bar */}
       <View style={styles.browserSection}>
-        {loadingRecipes ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="small" color={colors.primary} />
-            <Text style={styles.loadingText}>Loading recipes...</Text>
-          </View>
-        ) : (
-          <RecipeBrowser
-            recipes={allRecipes}
-            selectedRecipe={selectedRecipe}
-            onSelectRecipe={handleRecipeSelect}
-            onSearchChange={() => {}}
-          />
-        )}
-      </View>
-
-      {/* Selection Bar - only show when a recipe is selected */}
-      {selectedRecipe && (
-        <View style={styles.selectionBar}>
-          <View style={styles.selectedRecipeInfo}>
-            <Text style={styles.selectedRecipeLabel}>Selected:</Text>
+        <View style={styles.browserContent}>
+          {loadingRecipes ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="small" color={colors.primary} />
+            </View>
+          ) : (
+            <RecipeBrowser
+              recipes={allRecipes}
+              selectedRecipe={selectedRecipe}
+              onSelectRecipe={handleRecipeSelect}
+              onSearchChange={() => {}}
+            />
+          )}
+        </View>
+        {selectedRecipe && (
+          <View style={styles.selectionBar}>
             <Text style={styles.selectedRecipeName} numberOfLines={1}>
               {selectedRecipe.title}
             </Text>
-            {selectedRecipe.calories && (
-              <Text style={styles.selectedRecipeCalories}>
-                {selectedRecipe.calories} cal
-              </Text>
-            )}
             <TouchableOpacity
               style={styles.clearSelectionButton}
               onPress={() => setSelectedRecipe(null)}
@@ -337,8 +377,8 @@ export const MealPlanEditScreen: React.FC<MealPlanEditScreenProps> = ({ navigati
               <Text style={styles.clearSelectionText}>×</Text>
             </TouchableOpacity>
           </View>
-        </View>
-      )}
+        )}
+      </View>
 
       {/* Meal Grid */}
       <View style={styles.gridSection}>
@@ -348,21 +388,6 @@ export const MealPlanEditScreen: React.FC<MealPlanEditScreenProps> = ({ navigati
           onSlotPress={handleSlotPress}
           selectedRecipe={selectedRecipe}
         />
-      </View>
-
-      {/* Save Button */}
-      <View style={styles.footer}>
-        <TouchableOpacity
-          style={[styles.saveButton, (!hasChanges || saving) && styles.saveButtonDisabled]}
-          onPress={handleSave}
-          disabled={!hasChanges || saving}
-        >
-          {saving ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
-          ) : (
-            <Text style={styles.saveButtonText}>Save Changes</Text>
-          )}
-        </TouchableOpacity>
       </View>
     </SafeAreaView>
   );
@@ -377,160 +402,143 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
     backgroundColor: colors.backgroundSecondary,
   },
   backButton: {
-    paddingVertical: 4,
+    width: 36,
+    height: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   backButtonText: {
-    fontSize: 16,
+    fontSize: 20,
     color: colors.primary,
     fontWeight: '500',
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '700',
     color: colors.text,
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   fillButton: {
-    backgroundColor: colors.primary,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    backgroundColor: colors.textMuted + '20',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: 8,
   },
   fillButtonDisabled: {
     opacity: 0.6,
   },
   fillButtonText: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  saveHeaderButton: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  saveHeaderButtonDisabled: {
+    opacity: 0.4,
+  },
+  saveHeaderButtonText: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
   },
   progressContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     backgroundColor: colors.backgroundSecondary,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
   progressBar: {
     flex: 1,
-    height: 6,
+    height: 4,
     backgroundColor: colors.border,
-    borderRadius: 3,
-    marginRight: 12,
+    borderRadius: 2,
+    marginRight: 10,
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
     backgroundColor: colors.primary,
-    borderRadius: 3,
+    borderRadius: 2,
   },
   progressText: {
-    fontSize: 13,
+    fontSize: 12,
     color: colors.textMuted,
     fontWeight: '500',
   },
   browserSection: {
-    height: 240,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+  },
+  browserContent: {
+    height: 170,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  loadingText: {
-    marginTop: 8,
-    fontSize: 14,
-    color: colors.textMuted,
-  },
   selectionBar: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: colors.card,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    minHeight: 50,
-    justifyContent: 'center',
-  },
-  selectedRecipeInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  selectedRecipeLabel: {
-    fontSize: 13,
-    color: colors.textMuted,
-    marginRight: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: colors.primary + '15',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.primary + '30',
   },
   selectedRecipeName: {
     flex: 1,
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '600',
     color: colors.text,
   },
-  selectedRecipeCalories: {
-    fontSize: 13,
-    color: colors.primary,
-    fontWeight: '500',
-    marginLeft: 8,
-  },
   clearSelectionButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     backgroundColor: colors.border,
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: 12,
+    marginLeft: 8,
   },
   clearSelectionText: {
-    fontSize: 18,
-    color: colors.textMuted,
-    fontWeight: '600',
-  },
-  selectionHint: {
     fontSize: 14,
     color: colors.textMuted,
-    textAlign: 'center',
+    fontWeight: '600',
   },
   gridSection: {
     flex: 1,
-    paddingHorizontal: 16,
-    paddingTop: 12,
+    paddingHorizontal: 12,
+    paddingTop: 8,
   },
-  footer: {
-    padding: 16,
-    backgroundColor: colors.backgroundSecondary,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  saveButton: {
-    backgroundColor: colors.primary,
-    paddingVertical: 16,
-    borderRadius: 12,
+  loadingFullscreen: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
   },
-  saveButtonDisabled: {
-    opacity: 0.5,
-    shadowOpacity: 0,
-  },
-  saveButtonText: {
-    color: '#FFFFFF',
-    fontSize: 17,
-    fontWeight: '600',
+  loadingFullscreenText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: colors.textSecondary,
   },
 });
 

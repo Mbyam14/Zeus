@@ -42,6 +42,7 @@ export const RecipeDetailScreen: React.FC<RecipeDetailScreenProps> = ({
   // Recipe action state
   const [isSaved, setIsSaved] = useState(recipe.is_saved || false);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
+  const [showFullImage, setShowFullImage] = useState(false);
 
   // Cooking mode state
   const [cookingMode, setCookingMode] = useState(false);
@@ -234,7 +235,9 @@ Shared from Zeus - Your AI Meal Planner`;
               style={[styles.headerActionButton, isSaved && styles.headerActionButtonActive]}
               onPress={handleSaveToggle}
             >
-              <Text style={styles.headerActionText}>{isSaved ? '🔖' : '📑'}</Text>
+              <Text style={[styles.headerActionText, isSaved && { color: '#FFFFFF' }]}>
+                {isSaved ? '✓' : '📌'}
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.headerActionButton}
@@ -245,12 +248,14 @@ Shared from Zeus - Your AI Meal Planner`;
           </View>
         </View>
 
-        {/* Recipe Image - only show if image exists */}
+        {/* Recipe Image - tappable for fullscreen */}
         {recipe.image_url && (
-          <Image
-            source={{ uri: recipe.image_url }}
-            style={styles.image}
-          />
+          <TouchableOpacity activeOpacity={0.9} onPress={() => setShowFullImage(true)}>
+            <Image
+              source={{ uri: recipe.image_url }}
+              style={styles.image}
+            />
+          </TouchableOpacity>
         )}
 
         {/* Recipe Header */}
@@ -366,9 +371,21 @@ Shared from Zeus - Your AI Meal Planner`;
             </View>
           )}
 
+          {/* Start Cooking Button */}
+          {recipe.instructions && recipe.instructions.length > 0 && (
+            <TouchableOpacity
+              style={styles.startCookingButtonFull}
+              onPress={startCookingMode}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.startCookingIconFull}>👨‍🍳</Text>
+              <Text style={styles.startCookingTextFull}>Start Cooking</Text>
+            </TouchableOpacity>
+          )}
+
           {/* Ingredients */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Ingredients</Text>
+            <Text style={[styles.sectionTitle, { marginBottom: 16 }]}>Ingredients</Text>
             {recipe.ingredients && recipe.ingredients.length > 0 ? (
               recipe.ingredients.map((ingredient, index) => (
                 <View key={index} style={styles.ingredientItem}>
@@ -391,18 +408,7 @@ Shared from Zeus - Your AI Meal Planner`;
 
           {/* Instructions */}
           <View style={styles.section}>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionTitle}>Instructions</Text>
-              {recipe.instructions && recipe.instructions.length > 0 && (
-                <TouchableOpacity
-                  style={styles.startCookingButton}
-                  onPress={startCookingMode}
-                >
-                  <Text style={styles.startCookingIcon}>👨‍🍳</Text>
-                  <Text style={styles.startCookingText}>Start Cooking</Text>
-                </TouchableOpacity>
-              )}
-            </View>
+            <Text style={[styles.sectionTitle, { marginBottom: 16 }]}>Instructions</Text>
             {recipe.instructions && recipe.instructions.length > 0 ? (
               recipe.instructions.map((instruction, index) => (
                 <View key={index} style={styles.instructionItem}>
@@ -426,6 +432,34 @@ Shared from Zeus - Your AI Meal Planner`;
         </View>
       </ScrollView>
 
+      {/* Fullscreen Image Modal */}
+      {recipe.image_url && (
+        <Modal
+          visible={showFullImage}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setShowFullImage(false)}
+        >
+          <TouchableOpacity
+            style={styles.fullImageOverlay}
+            activeOpacity={1}
+            onPress={() => setShowFullImage(false)}
+          >
+            <Image
+              source={{ uri: recipe.image_url }}
+              style={styles.fullImage}
+              resizeMode="contain"
+            />
+            <TouchableOpacity
+              style={styles.fullImageCloseButton}
+              onPress={() => setShowFullImage(false)}
+            >
+              <Text style={styles.fullImageCloseText}>✕</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </Modal>
+      )}
+
       {/* Options Menu Modal */}
       <Modal
         visible={showOptionsMenu}
@@ -442,8 +476,8 @@ Shared from Zeus - Your AI Meal Planner`;
             <Text style={styles.optionsMenuTitle}>{recipe.title}</Text>
 
             <TouchableOpacity style={styles.optionsMenuItem} onPress={handleSaveToggle}>
-              <Text style={styles.optionsMenuIcon}>{isSaved ? '🔖' : '📑'}</Text>
-              <Text style={styles.optionsMenuText}>{isSaved ? 'Remove from Saved' : 'Save Recipe'}</Text>
+              <Text style={styles.optionsMenuIcon}>{isSaved ? '✓' : '📌'}</Text>
+              <Text style={styles.optionsMenuText}>{isSaved ? 'Saved — Tap to Remove' : 'Save Recipe'}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.optionsMenuItem} onPress={handleShare}>
@@ -731,6 +765,32 @@ const createStyles = (colors: any) =>
       height: 300,
       backgroundColor: colors.background,
     },
+    fullImageOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0, 0, 0, 0.95)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    fullImage: {
+      width: screenWidth,
+      height: screenHeight * 0.7,
+    },
+    fullImageCloseButton: {
+      position: 'absolute',
+      top: 60,
+      right: 20,
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: 'rgba(255, 255, 255, 0.2)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    fullImageCloseText: {
+      fontSize: 22,
+      color: '#FFFFFF',
+      fontWeight: 'bold',
+    },
     content: {
       padding: 24,
       backgroundColor: colors.backgroundSecondary,
@@ -812,33 +872,28 @@ const createStyles = (colors: any) =>
     section: {
       marginBottom: 24,
     },
-    sectionHeaderRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: 16,
-    },
     sectionTitle: {
       fontSize: 20,
       fontWeight: 'bold',
       color: colors.text,
     },
-    startCookingButton: {
+    startCookingButtonFull: {
       flexDirection: 'row',
       alignItems: 'center',
+      justifyContent: 'center',
       backgroundColor: colors.primary,
-      paddingHorizontal: 14,
-      paddingVertical: 8,
-      borderRadius: 20,
-      gap: 6,
+      paddingVertical: 14,
+      borderRadius: 14,
+      gap: 10,
+      marginBottom: 24,
     },
-    startCookingIcon: {
-      fontSize: 16,
+    startCookingIconFull: {
+      fontSize: 22,
     },
-    startCookingText: {
+    startCookingTextFull: {
       color: '#FFFFFF',
-      fontSize: 14,
-      fontWeight: '600',
+      fontSize: 17,
+      fontWeight: '700',
     },
     description: {
       fontSize: 16,
@@ -870,7 +925,10 @@ const createStyles = (colors: any) =>
     ingredientItem: {
       flexDirection: 'row',
       alignItems: 'center',
-      marginBottom: 12,
+      paddingVertical: 8,
+      marginBottom: 4,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.border,
     },
     ingredientBullet: {
       width: 8,

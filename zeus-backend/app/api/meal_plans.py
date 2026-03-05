@@ -1,26 +1,70 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
-from app.schemas.meal_plan import AIMealPlanRequest, MealSlot
-from app.schemas.recipe import RecipeCreate, RecipeResponse, Ingredient, Instruction, DifficultyLevel
 from app.schemas.user import UserResponse
 from app.utils.dependencies import get_current_active_user
 from app.database import get_database
 from app.services.ai_service import ai_service
 from app.services.nutrition_service import nutrition_service
 from app.services.meal_assignment_service import meal_assignment_service
+from app.services.recipe_shortlist_service import recipe_shortlist_service
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 import logging
-import json
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/meal-plans", tags=["Meal Plans"])
 
 
+def _calculate_unique_recipe_counts(
+    num_days: int,
+    cooking_sessions: int,
+    leftover_tolerance: str,
+) -> Dict[str, int]:
+    """
+    Calculate how many unique recipes are needed per meal type.
+
+    Based on number of days, cooking sessions per week, and leftover tolerance.
+    """
+    # Distribute cooking sessions across meal types
+    # Breakfast: simpler, fewer unique needed (people repeat breakfasts)
+    # Dinner: most variety desired
+    # Lunch: often leftovers from dinner, fewer unique needed
+    if cooking_sessions >= num_days * 2:
+        # High variety mode
+        breakfast_count = min(num_days, max(2, num_days // 2))
+        dinner_count = min(num_days, cooking_sessions // 2)
+        lunch_count = min(num_days, max(1, cooking_sessions // 4))
+    elif cooking_sessions >= num_days:
+        # Moderate variety
+        breakfast_count = min(num_days, max(2, num_days // 3))
+        dinner_count = min(num_days, max(3, cooking_sessions // 2))
+        lunch_count = min(num_days, max(1, cooking_sessions // 4))
+    else:
+        # Minimal cooking (batch heavy)
+        breakfast_count = max(1, min(3, num_days // 3))
+        dinner_count = max(2, cooking_sessions)
+        lunch_count = max(1, cooking_sessions // 3)
+
+    # Adjust based on leftover tolerance
+    if leftover_tolerance == "high":
+        breakfast_count = max(1, breakfast_count - 1)
+        dinner_count = max(2, dinner_count - 1)
+    elif leftover_tolerance == "low":
+        breakfast_count = min(num_days, breakfast_count + 1)
+        dinner_count = min(num_days, dinner_count + 1)
+        lunch_count = min(num_days, lunch_count + 1)
+
+    return {
+        "breakfast": breakfast_count,
+        "lunch": lunch_count,
+        "dinner": dinner_count,
+    }
+
+
 @router.post("/generate/")
 async def generate_meal_plan(
-    start_date: str,
-    selected_days: Optional[List[str]] = None,
+    start_date: str = Query(..., description="Start date (YYYY-MM-DD)"),
+    selected_days: Optional[List[str]] = Query(None, description="Days to include"),
     current_user: UserResponse = Depends(get_current_active_user)
 ) -> Dict[str, Any]:
     """
@@ -42,21 +86,10 @@ async def generate_meal_plan(
         profile_data = user_result.data[0].get("profile_data", {}) if user_result.data else {}
         preferences = profile_data.get("preferences", {})
 
-        # Get pantry items
-        pantry_result = db.table("pantry_items").select("*").eq("user_id", current_user.id).execute()
-        pantry_items = [
-            item["item_name"]
-            for item in pantry_result.data
-        ]
-
-        # Build AI meal plan request
-        from datetime import datetime as dt
-
         # Normalize and validate selected_days
         all_days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
         if selected_days:
             normalized_days = [d.lower() for d in selected_days]
-            # Validate days
             for d in normalized_days:
                 if d not in all_days:
                     raise HTTPException(
@@ -66,142 +99,87 @@ async def generate_meal_plan(
         else:
             normalized_days = all_days
 
-        request = AIMealPlanRequest(
-            meals_per_day=[MealSlot.BREAKFAST, MealSlot.LUNCH, MealSlot.DINNER],
-            week_start_date=dt.fromisoformat(start_date).date(),
-            selected_days=normalized_days,
-            dietary_preferences=preferences.get("dietary_restrictions", []),
-            cuisine_preferences=preferences.get("cuisine_preferences", []),
-            cooking_skill=preferences.get("cooking_skill", "intermediate"),
-            pantry_items=pantry_items,
-            servings_per_meal=preferences.get("household_size", 2),
-            goals=["use-pantry-items"]
-        )
-
-        # Generate meal plan with AI (pass preferences for macro-aware generation)
-        logger.info(f"Generating meal plan for user {current_user.id} starting {start_date}")
+        # Hybrid AI meal plan generation: shortlist DB recipes → Claude picks → assign
+        logger.info(f"Generating hybrid meal plan for user {current_user.id} starting {start_date}")
         logger.info(f"User calorie target: {preferences.get('calorie_target', 'not set')}, protein target: {preferences.get('protein_target_grams', 'not set')}")
 
         # Get batch cooking preferences
         cooking_sessions = preferences.get("cooking_sessions_per_week", 6)
         leftover_tolerance = preferences.get("leftover_tolerance", "moderate")
+        num_days = len(normalized_days)
 
-        logger.info(f"Batch cooking mode: {cooking_sessions} cooking sessions, {leftover_tolerance} leftover tolerance")
+        logger.info(f"Batch cooking mode: {cooking_sessions} sessions, {leftover_tolerance} tolerance, {num_days} days")
 
-        meal_plan_data = await ai_service.generate_meal_plan(request, current_user.id, preferences)
+        # Calculate how many unique recipes needed per meal type
+        unique_recipe_counts = _calculate_unique_recipe_counts(
+            num_days, cooking_sessions, leftover_tolerance
+        )
+        logger.info(f"Unique recipe counts needed: {unique_recipe_counts}")
 
-        # Extract meals from response
-        meal_plan_response = meal_plan_data.get("meal_plan", {})
-        meals_dict = meal_plan_response.get("meals", {})
-
-        # Collect all recipes and DEDUPLICATE by title before saving
-        # Use selected days instead of hardcoded 7 days
-        days = normalized_days
-        unique_recipes_by_title: Dict[str, Dict[str, Any]] = {}  # title -> recipe_data
-
-        # First pass: collect unique recipes by title
-        for day in days:
-            if day not in meals_dict:
-                continue
-
-            day_meals = meals_dict[day]
-
-            for meal_type in ["breakfast", "lunch", "dinner"]:
-                if meal_type not in day_meals or not day_meals[meal_type]:
-                    continue
-
-                recipe_data = day_meals[meal_type]
-                title = recipe_data.get("title", "").strip()
-
-                # Skip if we already have this recipe (by title)
-                if title in unique_recipes_by_title:
-                    continue
-
-                # Ensure instructions have proper step numbers
-                instructions = recipe_data.get("instructions", [])
-                if instructions:
-                    for i, instruction in enumerate(instructions):
-                        if "step" not in instruction:
-                            instruction["step"] = i + 1
-
-                # Map difficulty to valid values
-                difficulty = recipe_data.get("difficulty", "Medium")
-                if difficulty == "Intermediate":
-                    difficulty = "Medium"
-                elif difficulty not in ["Easy", "Medium", "Hard"]:
-                    difficulty = "Medium"
-
-                unique_recipes_by_title[title] = {
-                    "user_id": current_user.id,
-                    "title": title,
-                    "description": recipe_data.get("description"),
-                    "ingredients": recipe_data.get("ingredients", []),
-                    "instructions": instructions,
-                    "servings": recipe_data.get("servings", request.servings_per_meal),
-                    "prep_time": recipe_data.get("prep_time"),
-                    "cook_time": recipe_data.get("cook_time"),
-                    "cuisine_type": recipe_data.get("cuisine_type"),
-                    "difficulty": difficulty,
-                    "meal_type": recipe_data.get("meal_type", [meal_type.capitalize()]),
-                    "dietary_tags": recipe_data.get("dietary_tags", []),
-                    "is_ai_generated": True,
-                    "calories": recipe_data.get("calories"),
-                    "protein_grams": recipe_data.get("protein_grams"),
-                    "carbs_grams": recipe_data.get("carbs_grams"),
-                    "fat_grams": recipe_data.get("fat_grams"),
-                    "serving_size": recipe_data.get("serving_size")
-                }
-
-        logger.info(f"Found {len(unique_recipes_by_title)} unique recipes (deduplicated by title)")
-
-        # Second pass: save unique recipes to database
-        saved_recipe_records: List[Dict[str, Any]] = []
-        title_to_id: Dict[str, str] = {}
-
-        for title, recipe_record in unique_recipes_by_title.items():
-            recipe_result = db.table("recipes").insert(recipe_record).execute()
-            recipe_id = recipe_result.data[0]["id"]
-            title_to_id[title] = recipe_id
-
-            saved_recipe_records.append({
-                "id": recipe_id,
-                "title": title,
-                "meal_type": recipe_record.get("meal_type", ["Dinner"])
-            })
-
-        logger.info(f"Saved {len(saved_recipe_records)} unique recipes to database")
-
-        # Use MealAssignmentService to distribute recipes across slots with batch cooking logic
-        assignments = meal_assignment_service.assign_meals_to_week(
-            recipes=saved_recipe_records,
-            cooking_sessions=cooking_sessions,
-            leftover_tolerance=leftover_tolerance
+        # Step 1: Shortlist candidates from the recipe database
+        candidates = await recipe_shortlist_service.shortlist_candidates(
+            preferences=preferences,
+            selected_days=normalized_days,
+            meal_types=["breakfast", "lunch", "dinner"],
         )
 
-        # Convert assignments to final meal plan structure (new format with is_repeat, original_day)
-        saved_recipes: Dict[str, Dict[str, Any]] = {}
-        for day in days:
-            if day in assignments:
-                saved_recipes[day] = assignments[day]
+        total_candidates = sum(len(v) for v in candidates.values())
+        logger.info(f"Shortlisted {total_candidates} candidate recipes from database")
 
-        # Save meal plan with selected_days metadata
+        # Step 2: Claude selects the best combination (or algorithmic fallback)
+        selected_ids = await ai_service.select_meal_plan_recipes(
+            candidates=candidates,
+            preferences=preferences,
+            selected_days=normalized_days,
+            unique_recipe_counts=unique_recipe_counts,
+        )
+
+        # Step 3: Fetch selected recipes from DB
+        all_selected_ids = []
+        for ids in selected_ids.values():
+            all_selected_ids.extend(ids)
+
+        if not all_selected_ids:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="No recipes could be selected for the meal plan"
+            )
+
+        recipes_result = db.table("recipes").select(
+            "id, title, meal_type"
+        ).in_("id", all_selected_ids).execute()
+
+        selected_recipes = recipes_result.data or []
+        logger.info(f"Fetched {len(selected_recipes)} selected recipes from database")
+
+        # Step 4: Assign recipes to week slots for selected days only
+        assignments = meal_assignment_service.assign_meals_to_week(
+            recipes=selected_recipes,
+            cooking_sessions=cooking_sessions,
+            leftover_tolerance=leftover_tolerance,
+            selected_days=normalized_days
+        )
+
+        saved_recipes = assignments
+
+        # Step 5: Save meal plan
         meal_plan_record = {
             "user_id": current_user.id,
-            "plan_name": f"Meal Plan - {len(normalized_days)} days starting {start_date}",
+            "plan_name": f"Meal Plan - {num_days} days starting {start_date}",
             "week_start_date": start_date,
             "selected_days": normalized_days,
             "meals": saved_recipes
         }
         result = db.table("meal_plans").insert(meal_plan_record).execute()
 
-        logger.info(f"Successfully created meal plan {result.data[0]['id']} with {len(saved_recipes)} days for {normalized_days}")
+        logger.info(f"Successfully created hybrid meal plan {result.data[0]['id']} with {len(saved_recipes)} days")
 
         return {
             "meal_plan_id": result.data[0]["id"],
             "selected_days": normalized_days,
             "meals": saved_recipes,
-            "summary": meal_plan_response.get("week_summary", {}),
-            "grocery_list": meal_plan_response.get("grocery_list", [])
+            "summary": {},
+            "grocery_list": []
         }
 
     except Exception as e:
@@ -400,7 +378,7 @@ async def get_meal_plan_by_week(
 @router.post("/generate/week/{week_offset}")
 async def generate_meal_plan_for_week(
     week_offset: int,
-    selected_days: Optional[List[str]] = None,
+    selected_days: Optional[List[str]] = Query(None, description="Days to include"),
     current_user: UserResponse = Depends(get_current_active_user)
 ) -> Dict[str, Any]:
     """
@@ -437,10 +415,6 @@ async def generate_meal_plan_for_week(
         profile_data = user_result.data[0].get("profile_data", {}) if user_result.data else {}
         preferences = profile_data.get("preferences", {})
 
-        # Get pantry items
-        pantry_result = db.table("pantry_items").select("*").eq("user_id", current_user.id).execute()
-        pantry_items = [item["item_name"] for item in pantry_result.data]
-
         # Normalize and validate selected_days
         all_days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
         if selected_days:
@@ -454,138 +428,82 @@ async def generate_meal_plan_for_week(
         else:
             normalized_days = all_days
 
-        # Build AI meal plan request
-        request = AIMealPlanRequest(
-            meals_per_day=[MealSlot.BREAKFAST, MealSlot.LUNCH, MealSlot.DINNER],
-            week_start_date=datetime.strptime(target_monday, "%Y-%m-%d").date(),
-            selected_days=normalized_days,
-            dietary_preferences=preferences.get("dietary_restrictions", []),
-            cuisine_preferences=preferences.get("cuisine_preferences", []),
-            cooking_skill=preferences.get("cooking_skill", "intermediate"),
-            pantry_items=pantry_items,
-            servings_per_meal=preferences.get("household_size", 2),
-            goals=["use-pantry-items"]
-        )
-
         # Get batch cooking preferences
         cooking_sessions = preferences.get("cooking_sessions_per_week", 6)
         leftover_tolerance = preferences.get("leftover_tolerance", "moderate")
+        num_days = len(normalized_days)
 
-        logger.info(f"Generating meal plan for user {current_user.id} starting {target_monday}")
-        logger.info(f"Batch cooking: {cooking_sessions} sessions, {leftover_tolerance} tolerance")
+        logger.info(f"Generating hybrid meal plan for user {current_user.id} starting {target_monday}")
+        logger.info(f"Batch cooking: {cooking_sessions} sessions, {leftover_tolerance} tolerance, {num_days} days")
 
-        # Generate meal plan with AI
-        meal_plan_data = await ai_service.generate_meal_plan(request, current_user.id, preferences)
-
-        meal_plan_response = meal_plan_data.get("meal_plan", {})
-        meals_dict = meal_plan_response.get("meals", {})
-
-        # Collect all recipes and DEDUPLICATE by title before saving
-        # Use selected days instead of hardcoded 7 days
-        days = normalized_days
-        unique_recipes_by_title: Dict[str, Dict[str, Any]] = {}  # title -> recipe_data
-
-        # First pass: collect unique recipes by title
-        for day in days:
-            if day not in meals_dict:
-                continue
-
-            day_meals = meals_dict[day]
-
-            for meal_type in ["breakfast", "lunch", "dinner"]:
-                if meal_type not in day_meals or not day_meals[meal_type]:
-                    continue
-
-                recipe_data = day_meals[meal_type]
-                title = recipe_data.get("title", "").strip()
-
-                # Skip if we already have this recipe (by title)
-                if title in unique_recipes_by_title:
-                    continue
-
-                instructions = recipe_data.get("instructions", [])
-                if instructions:
-                    for i, instruction in enumerate(instructions):
-                        if "step" not in instruction:
-                            instruction["step"] = i + 1
-
-                difficulty = recipe_data.get("difficulty", "Medium")
-                if difficulty == "Intermediate":
-                    difficulty = "Medium"
-                elif difficulty not in ["Easy", "Medium", "Hard"]:
-                    difficulty = "Medium"
-
-                unique_recipes_by_title[title] = {
-                    "user_id": current_user.id,
-                    "title": title,
-                    "description": recipe_data.get("description"),
-                    "ingredients": recipe_data.get("ingredients", []),
-                    "instructions": instructions,
-                    "servings": recipe_data.get("servings", request.servings_per_meal),
-                    "prep_time": recipe_data.get("prep_time"),
-                    "cook_time": recipe_data.get("cook_time"),
-                    "cuisine_type": recipe_data.get("cuisine_type"),
-                    "difficulty": difficulty,
-                    "meal_type": recipe_data.get("meal_type", [meal_type.capitalize()]),
-                    "dietary_tags": recipe_data.get("dietary_tags", []),
-                    "is_ai_generated": True,
-                    "calories": recipe_data.get("calories"),
-                    "protein_grams": recipe_data.get("protein_grams"),
-                    "carbs_grams": recipe_data.get("carbs_grams"),
-                    "fat_grams": recipe_data.get("fat_grams"),
-                    "serving_size": recipe_data.get("serving_size")
-                }
-
-        logger.info(f"Found {len(unique_recipes_by_title)} unique recipes (deduplicated by title)")
-
-        # Second pass: save unique recipes to database
-        saved_recipe_records: List[Dict[str, Any]] = []
-        title_to_id: Dict[str, str] = {}
-
-        for title, recipe_record in unique_recipes_by_title.items():
-            recipe_result = db.table("recipes").insert(recipe_record).execute()
-            recipe_id = recipe_result.data[0]["id"]
-            title_to_id[title] = recipe_id
-
-            saved_recipe_records.append({
-                "id": recipe_id,
-                "title": title,
-                "meal_type": recipe_record.get("meal_type", ["Dinner"])
-            })
-
-        logger.info(f"Saved {len(saved_recipe_records)} unique recipes to database")
-
-        # Use MealAssignmentService to distribute recipes across slots
-        assignments = meal_assignment_service.assign_meals_to_week(
-            recipes=saved_recipe_records,
-            cooking_sessions=cooking_sessions,
-            leftover_tolerance=leftover_tolerance
+        # Calculate unique recipe counts
+        unique_recipe_counts = _calculate_unique_recipe_counts(
+            num_days, cooking_sessions, leftover_tolerance
         )
 
-        # Convert assignments to final meal plan structure
-        saved_recipes: Dict[str, Dict[str, Any]] = {}
-        for day in days:
-            if day in assignments:
-                saved_recipes[day] = assignments[day]
+        # Step 1: Shortlist candidates from the recipe database
+        candidates = await recipe_shortlist_service.shortlist_candidates(
+            preferences=preferences,
+            selected_days=normalized_days,
+            meal_types=["breakfast", "lunch", "dinner"],
+        )
 
-        # Save meal plan with selected_days metadata
+        total_candidates = sum(len(v) for v in candidates.values())
+        logger.info(f"Shortlisted {total_candidates} candidate recipes from database")
+
+        # Step 2: Claude selects the best combination
+        selected_ids = await ai_service.select_meal_plan_recipes(
+            candidates=candidates,
+            preferences=preferences,
+            selected_days=normalized_days,
+            unique_recipe_counts=unique_recipe_counts,
+        )
+
+        # Step 3: Fetch selected recipes from DB
+        all_selected_ids = []
+        for ids in selected_ids.values():
+            all_selected_ids.extend(ids)
+
+        if not all_selected_ids:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="No recipes could be selected for the meal plan"
+            )
+
+        recipes_result = db.table("recipes").select(
+            "id, title, meal_type"
+        ).in_("id", all_selected_ids).execute()
+
+        selected_recipes = recipes_result.data or []
+
+        # Step 4: Assign recipes to week slots for selected days only
+        assignments = meal_assignment_service.assign_meals_to_week(
+            recipes=selected_recipes,
+            cooking_sessions=cooking_sessions,
+            leftover_tolerance=leftover_tolerance,
+            selected_days=normalized_days
+        )
+
+        saved_recipes = assignments
+
+        # Step 5: Save meal plan
         meal_plan_record = {
             "user_id": current_user.id,
-            "plan_name": f"Meal Plan - {len(normalized_days)} days starting {target_monday}",
+            "plan_name": f"Meal Plan - {num_days} days starting {target_monday}",
             "week_start_date": target_monday,
             "selected_days": normalized_days,
             "meals": saved_recipes
         }
         result = db.table("meal_plans").insert(meal_plan_record).execute()
 
-        logger.info(f"Successfully created meal plan {result.data[0]['id']} with {len(saved_recipes)} days for {normalized_days}")
+        logger.info(f"Successfully created hybrid meal plan {result.data[0]['id']} with {len(saved_recipes)} days")
 
         return {
             "meal_plan_id": result.data[0]["id"],
             "selected_days": normalized_days,
             "meals": saved_recipes,
-            "summary": meal_plan_response.get("week_summary", {}),
-            "grocery_list": meal_plan_response.get("grocery_list", [])
+            "summary": {},
+            "grocery_list": []
         }
 
     except Exception as e:
@@ -761,11 +679,11 @@ async def regenerate_single_meal(
     day: str,
     meal_type: str,
     current_user: UserResponse = Depends(get_current_active_user)
-) -> RecipeResponse:
+) -> Dict[str, Any]:
     """
     Regenerate a single meal in an existing meal plan.
 
-    Generates a new AI recipe and updates the meal plan.
+    Picks a new recipe from the database and updates the meal plan.
     """
     try:
         db = get_database()
@@ -790,11 +708,7 @@ async def regenerate_single_meal(
         profile_data = user_result.data[0].get("profile_data", {}) if user_result.data else {}
         preferences = profile_data.get("preferences", {})
 
-        # Get pantry items
-        pantry_result = db.table("pantry_items").select("*").eq("user_id", current_user.id).execute()
-        pantry_items = [item["item_name"] for item in pantry_result.data]
-
-        # Get existing recipe titles in this meal plan to avoid duplicates
+        # Collect existing recipe IDs in this meal plan to exclude
         meals = meal_plan["meals"]
         existing_recipe_ids = set()
         for day_meals in meals.values():
@@ -805,75 +719,36 @@ async def regenerate_single_meal(
                     elif isinstance(meal_data, dict) and 'recipe_id' in meal_data:
                         existing_recipe_ids.add(meal_data['recipe_id'])
 
-        # Fetch existing recipe titles to tell AI what to avoid
-        existing_titles = []
-        if existing_recipe_ids:
-            existing_recipes_result = db.table("recipes")\
-                .select("title")\
-                .in_("id", list(existing_recipe_ids))\
-                .execute()
-            existing_titles = [r["title"] for r in existing_recipes_result.data]
+        logger.info(f"Regenerating {meal_type} for {day} in meal plan {meal_plan_id}")
 
-        avoid_list = ", ".join(existing_titles) if existing_titles else "none"
-
-        # Generate new recipe
-        from app.schemas.recipe import AIRecipeRequest, MealType
-        request = AIRecipeRequest(
-            pantry_items=pantry_items,
-            dietary_restrictions=preferences.get("dietary_restrictions", []),
-            cooking_skill=preferences.get("cooking_skill", "intermediate"),
-            servings=preferences.get("household_size", 2),
-            meal_type=MealType(meal_type.capitalize()) if meal_type != "snack" else MealType.SNACK,
-            additional_preferences=f"Generate a {meal_type} recipe for {day}. IMPORTANT: Do NOT generate any of these recipes that already exist in the meal plan: [{avoid_list}]. Create something completely different."
+        # Pick a new recipe from the database using shortlist service
+        new_recipe_id = await recipe_shortlist_service.pick_top_for_slot(
+            preferences=preferences,
+            meal_type=meal_type,
+            exclude_recipe_ids=list(existing_recipe_ids),
         )
 
-        logger.info(f"Regenerating {meal_type} for {day} in meal plan {meal_plan_id}")
-        logger.info(f"Avoiding existing recipes: {existing_titles}")
-        new_recipe = await ai_service.generate_recipe(request, current_user.id)
-
-        # Check if a recipe with this exact title already exists (deduplication)
-        # This prevents the same recipe from having different nutrition values
-        duplicate_check = db.table("recipes")\
-            .select("*")\
-            .eq("title", new_recipe.title)\
-            .eq("user_id", current_user.id)\
-            .neq("id", new_recipe.id)\
-            .limit(1)\
-            .execute()
-
-        if duplicate_check.data:
-            # Use existing recipe instead of newly generated one
-            logger.info(f"Found existing recipe with same title: {new_recipe.title}, using existing one")
-            existing = duplicate_check.data[0]
-            # Delete the duplicate we just created
-            db.table("recipes").delete().eq("id", new_recipe.id).execute()
-            # Use the existing recipe
-            new_recipe = RecipeResponse(
-                id=existing["id"],
-                user_id=existing["user_id"],
-                title=existing["title"],
-                ingredients=existing.get("ingredients", []),
-                instructions=existing.get("instructions", []),
-                prep_time_minutes=existing.get("prep_time_minutes"),
-                cook_time_minutes=existing.get("cook_time_minutes"),
-                servings=existing.get("servings"),
-                calories=existing.get("calories"),
-                protein_grams=existing.get("protein_grams"),
-                carbs_grams=existing.get("carbs_grams"),
-                fat_grams=existing.get("fat_grams"),
-                tags=existing.get("tags", []),
-                source=existing.get("source"),
-                notes=existing.get("notes"),
-                created_at=existing.get("created_at"),
-                updated_at=existing.get("updated_at")
+        if not new_recipe_id:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"No suitable {meal_type} recipe found"
             )
 
-        # Update meal plan (use new format with is_repeat=False for regenerated meals)
-        meals = meal_plan["meals"]
+        # Fetch the full recipe for the response
+        recipe_result = db.table("recipes").select("*").eq("id", new_recipe_id).execute()
+        if not recipe_result.data:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Selected recipe not found in database"
+            )
+
+        recipe_data = recipe_result.data[0]
+
+        # Update meal plan
         if day not in meals:
             meals[day] = {}
         meals[day][meal_type] = {
-            "recipe_id": new_recipe.id,
+            "recipe_id": new_recipe_id,
             "is_repeat": False,
             "original_day": None,
             "order": {"breakfast": 1, "lunch": 2, "dinner": 3, "snack": 2}.get(meal_type, 1)
@@ -881,9 +756,9 @@ async def regenerate_single_meal(
 
         db.table("meal_plans").update({"meals": meals}).eq("id", meal_plan_id).execute()
 
-        logger.info(f"Successfully regenerated {meal_type} for {day}")
+        logger.info(f"Successfully regenerated {meal_type} for {day} with recipe: {recipe_data.get('title')}")
 
-        return new_recipe
+        return recipe_data
 
     except HTTPException:
         raise
@@ -956,11 +831,7 @@ async def fill_remaining_with_ai(
         profile_data = user_result.data[0].get("profile_data", {}) if user_result.data else {}
         preferences = profile_data.get("preferences", {})
 
-        # Get pantry items
-        pantry_result = db.table("pantry_items").select("*").eq("user_id", current_user.id).execute()
-        pantry_items = [item["item_name"] for item in pantry_result.data]
-
-        # Get existing recipe titles to avoid duplicates
+        # Collect existing recipe IDs to exclude
         existing_recipe_ids = set()
         for day_meals in meals.values():
             if isinstance(day_meals, dict):
@@ -970,54 +841,40 @@ async def fill_remaining_with_ai(
                     elif isinstance(meal_data, dict) and 'recipe_id' in meal_data:
                         existing_recipe_ids.add(meal_data['recipe_id'])
 
-        existing_titles = []
-        if existing_recipe_ids:
-            existing_recipes_result = db.table("recipes")\
-                .select("title")\
-                .in_("id", list(existing_recipe_ids))\
-                .execute()
-            existing_titles = [r["title"] for r in existing_recipes_result.data]
-
-        avoid_list = ", ".join(existing_titles) if existing_titles else "none"
-
-        # Generate recipes for empty slots
-        from app.schemas.recipe import AIRecipeRequest, MealType
+        # Fill empty slots using shortlist service (instant, no AI calls)
         filled_count = 0
+        exclude_ids = list(existing_recipe_ids)
 
         for day, meal_type in empty_slots:
             try:
-                request = AIRecipeRequest(
-                    pantry_items=pantry_items,
-                    dietary_restrictions=preferences.get("dietary_restrictions", []),
-                    cooking_skill=preferences.get("cooking_skill", "intermediate"),
-                    servings=preferences.get("household_size", 2),
-                    meal_type=MealType(meal_type.capitalize()) if meal_type != "snack" else MealType.SNACK,
-                    additional_preferences=f"Generate a {meal_type} recipe for {day}. IMPORTANT: Avoid these recipes: [{avoid_list}]. Create something different."
+                new_recipe_id = await recipe_shortlist_service.pick_top_for_slot(
+                    preferences=preferences,
+                    meal_type=meal_type,
+                    exclude_recipe_ids=exclude_ids,
                 )
 
-                new_recipe = await ai_service.generate_recipe(request, current_user.id)
-
-                # Add to avoid list for subsequent generations
-                if new_recipe.title not in existing_titles:
-                    existing_titles.append(new_recipe.title)
-                    avoid_list = ", ".join(existing_titles)
+                if not new_recipe_id:
+                    logger.warning(f"No suitable {meal_type} recipe found for {day}")
+                    continue
 
                 # Update meal plan with new recipe
                 if day not in meals:
                     meals[day] = {}
                 meals[day][meal_type] = {
-                    "recipe_id": new_recipe.id,
+                    "recipe_id": new_recipe_id,
                     "is_repeat": False,
                     "original_day": None,
                     "order": {"breakfast": 1, "lunch": 2, "dinner": 3, "snack": 2}.get(meal_type, 1)
                 }
                 filled_count += 1
 
-                logger.info(f"Generated {meal_type} for {day}: {new_recipe.title}")
+                # Add to exclude list to avoid duplicates in subsequent slots
+                exclude_ids.append(new_recipe_id)
+
+                logger.info(f"Filled {meal_type} for {day} with recipe {new_recipe_id}")
 
             except Exception as e:
-                logger.error(f"Failed to generate {meal_type} for {day}: {e}")
-                # Continue with other slots even if one fails
+                logger.error(f"Failed to fill {meal_type} for {day}: {e}")
                 continue
 
         # Save updated meal plan

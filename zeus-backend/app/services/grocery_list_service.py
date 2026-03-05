@@ -135,39 +135,52 @@ class GroceryListService:
             }).execute()
             grocery_list_id = grocery_list_result.data[0]["id"]
 
-        # 8. Create grocery list items
+        # 8. Create grocery list items (consolidate alternate units into one item)
         grocery_items = []
         for agg_ingredient in aggregated_ingredients.values():
             pantry_match = pantry_matches.get(agg_ingredient.normalized_name)
+
+            # Combine all recipe IDs from primary + alternate entries
+            all_recipe_ids = list(agg_ingredient.recipe_ids)
+            for alt_entry in agg_ingredient.alternate_entries:
+                all_recipe_ids.extend(alt_entry.recipe_ids)
+
+            # Build combined unit string if there are alternate entries
+            if agg_ingredient.alternate_entries:
+                # Format: "2 cups + 3 tablespoons"
+                parts = []
+                if agg_ingredient.total_quantity and agg_ingredient.total_quantity > 0:
+                    qty_str = str(int(agg_ingredient.total_quantity)) if agg_ingredient.total_quantity == int(agg_ingredient.total_quantity) else str(agg_ingredient.total_quantity)
+                    parts.append(f"{qty_str} {agg_ingredient.unit or ''}".strip())
+                for alt_entry in agg_ingredient.alternate_entries:
+                    if alt_entry.quantity and alt_entry.quantity > 0:
+                        qty_str = str(int(alt_entry.quantity)) if alt_entry.quantity == int(alt_entry.quantity) else str(alt_entry.quantity)
+                        parts.append(f"{qty_str} {alt_entry.unit or ''}".strip())
+                combined_unit = " + ".join(parts) if parts else None
+                # Truncate to fit the 50 char max on the unit field
+                if combined_unit and len(combined_unit) > 50:
+                    combined_unit = combined_unit[:47] + "..."
+            else:
+                combined_unit = None
+
+            final_unit = combined_unit if combined_unit else agg_ingredient.unit
+            if final_unit and len(final_unit) > 50:
+                final_unit = final_unit[:47] + "..."
 
             item_data = GroceryListItemCreate(
                 item_name=agg_ingredient.display_name,
                 normalized_name=agg_ingredient.normalized_name,
                 quantity=agg_ingredient.total_quantity,
-                unit=agg_ingredient.unit,
+                unit=final_unit,
                 category=agg_ingredient.category,
                 have_in_pantry=pantry_match.match_type != 'none' if pantry_match else False,
                 pantry_quantity=pantry_match.pantry_quantity if pantry_match else None,
                 pantry_unit=pantry_match.pantry_unit if pantry_match else None,
                 needed_quantity=pantry_match.needed_quantity if pantry_match else agg_ingredient.total_quantity,
-                recipe_ids=agg_ingredient.recipe_ids
+                recipe_ids=all_recipe_ids
             )
 
             grocery_items.append(item_data.model_dump())
-
-            # Handle alternate entries (incompatible units)
-            for alt_entry in agg_ingredient.alternate_entries:
-                alt_item_data = GroceryListItemCreate(
-                    item_name=f"{agg_ingredient.display_name} ({alt_entry.unit})",
-                    normalized_name=agg_ingredient.normalized_name,
-                    quantity=alt_entry.quantity,
-                    unit=alt_entry.unit,
-                    category=agg_ingredient.category,
-                    have_in_pantry=False,  # Alternate entries don't match pantry
-                    needed_quantity=alt_entry.quantity,
-                    recipe_ids=alt_entry.recipe_ids
-                )
-                grocery_items.append(alt_item_data.model_dump())
 
         # Insert all items
         if grocery_items:
@@ -702,28 +715,43 @@ class GroceryListService:
         """
         pantry_matches = {}
 
+        # Pre-normalize all pantry item names for matching
+        pantry_with_normalized = []
+        for pantry_item in pantry_items:
+            pantry_name = pantry_item.get("item_name") or pantry_item.get("normalized_name") or ""
+            pantry_normalized = self._normalize_ingredient_name(pantry_name)
+            pantry_with_normalized.append((pantry_item, pantry_normalized))
+
         for normalized_name, ingredient in aggregated_ingredients.items():
             best_match = None
             match_type = 'none'
 
             # Try exact match first
-            for pantry_item in pantry_items:
-                pantry_normalized = pantry_item.get("normalized_name") or ""
-
+            for pantry_item, pantry_normalized in pantry_with_normalized:
                 if pantry_normalized and pantry_normalized == normalized_name:
                     best_match = pantry_item
                     match_type = 'exact'
                     break
 
-            # Try partial match if no exact match
+            # Try partial/substring match if no exact match
             if not best_match:
-                for pantry_item in pantry_items:
-                    pantry_normalized = pantry_item.get("normalized_name") or ""
-
-                    # Check if one contains the other (only if both are non-empty)
+                for pantry_item, pantry_normalized in pantry_with_normalized:
                     if pantry_normalized and normalized_name:
                         if (pantry_normalized in normalized_name or
                             normalized_name in pantry_normalized):
+                            best_match = pantry_item
+                            match_type = 'partial'
+                            break
+
+            # Try word-overlap match as last resort (e.g. "bell pepper" vs "green bell pepper")
+            if not best_match and normalized_name:
+                ingredient_words = set(normalized_name.split())
+                for pantry_item, pantry_normalized in pantry_with_normalized:
+                    if pantry_normalized and len(pantry_normalized) >= 3:
+                        pantry_words = set(pantry_normalized.split())
+                        # Match if all words of the shorter name appear in the longer one
+                        shorter, longer = (pantry_words, ingredient_words) if len(pantry_words) <= len(ingredient_words) else (ingredient_words, pantry_words)
+                        if shorter and shorter.issubset(longer):
                             best_match = pantry_item
                             match_type = 'partial'
                             break
@@ -817,11 +845,31 @@ class GroceryListService:
         ]):
             return GroceryCategory.DAIRY
 
+        # Spices (check before Protein so "ground ginger" doesn't match "ground beef")
+        if any(word in name_lower for word in [
+            'salt', 'cumin', 'paprika', 'oregano', 'basil', 'thyme',
+            'rosemary', 'cinnamon', 'nutmeg', 'ginger', 'turmeric', 'chili',
+            'cayenne', 'parsley', 'cilantro', 'dill', 'sage', 'bay leaf',
+            'clove', 'allspice', 'cardamom', 'coriander', 'fennel seed',
+            'curry powder', 'garlic powder', 'onion powder', 'seasoning',
+            'black pepper', 'white pepper', 'red pepper flake'
+        ]):
+            return GroceryCategory.SPICES
+
+        # Condiments (check before Protein so "fish sauce" matches "sauce" not "fish")
+        if any(word in name_lower for word in [
+            'sauce', 'ketchup', 'mustard', 'mayo', 'mayonnaise', 'vinegar',
+            'oil', 'olive oil', 'vegetable oil', 'soy sauce', 'hot sauce',
+            'salsa', 'dressing', 'honey', 'syrup', 'jam', 'jelly', 'peanut butter'
+        ]):
+            return GroceryCategory.CONDIMENTS
+
         # Protein
         if any(word in name_lower for word in [
             'chicken', 'beef', 'pork', 'turkey', 'fish', 'salmon', 'tuna',
             'shrimp', 'egg', 'tofu', 'tempeh', 'bacon', 'sausage', 'lamb',
-            'steak', 'ground', 'breast'
+            'steak', 'ground beef', 'ground turkey', 'ground pork', 'ground chicken',
+            'breast', 'thigh', 'drumstick', 'mince'
         ]):
             return GroceryCategory.PROTEIN
 
@@ -831,22 +879,6 @@ class GroceryListService:
             'cereal', 'tortilla', 'noodle', 'couscous', 'bagel', 'roll'
         ]):
             return GroceryCategory.GRAINS
-
-        # Spices
-        if any(word in name_lower for word in [
-            'salt', 'pepper', 'cumin', 'paprika', 'oregano', 'basil', 'thyme',
-            'rosemary', 'cinnamon', 'nutmeg', 'ginger', 'turmeric', 'chili',
-            'cayenne', 'parsley', 'cilantro', 'dill', 'sage', 'bay leaf'
-        ]):
-            return GroceryCategory.SPICES
-
-        # Condiments
-        if any(word in name_lower for word in [
-            'sauce', 'ketchup', 'mustard', 'mayo', 'mayonnaise', 'vinegar',
-            'oil', 'olive oil', 'vegetable oil', 'soy sauce', 'hot sauce',
-            'salsa', 'dressing', 'honey', 'syrup', 'jam', 'jelly', 'peanut butter'
-        ]):
-            return GroceryCategory.CONDIMENTS
 
         # Beverages
         if any(word in name_lower for word in [

@@ -15,6 +15,7 @@ import { PanGestureHandler, State, GestureHandlerRootView } from 'react-native-g
 import { Recipe } from '../../types/recipe';
 import { recipeService } from '../../services/recipeService';
 import { useThemeStore } from '../../store/themeStore';
+import { useAuthStore } from '../../store/authStore';
 
 // Mock data for now - we'll connect to API later
 const mockRecipes: Recipe[] = [
@@ -114,12 +115,14 @@ const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
 export const FeedScreen: React.FC = () => {
   const { colors } = useThemeStore();
+  const { user } = useAuthStore();
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [isInteracting, setIsInteracting] = useState(false);
 
+  const dietaryRestrictions = user?.profile_data?.preferences?.dietary_restrictions || [];
   const styles = createStyles(colors);
 
   // Animation values
@@ -137,7 +140,9 @@ export const FeedScreen: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-      const fetchedRecipes = await recipeService.getRecipeFeed();
+      const fetchedRecipes = await recipeService.getRecipeFeed(
+        dietaryRestrictions.length > 0 ? { dietary_tags: dietaryRestrictions } : undefined
+      );
 
       if (fetchedRecipes.length > 0) {
         setRecipes(fetchedRecipes);

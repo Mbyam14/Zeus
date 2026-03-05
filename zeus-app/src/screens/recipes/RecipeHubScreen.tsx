@@ -21,6 +21,7 @@ import { Recipe } from '../../types/recipe';
 import { recipeService } from '../../services/recipeService';
 import { pantryService } from '../../services/pantryService';
 import { useThemeStore, ThemeColors } from '../../store/themeStore';
+import { useAuthStore } from '../../store/authStore';
 import { PantryItem } from '../../types/pantry';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -31,51 +32,470 @@ type MyRecipesSubTab = 'created' | 'saved' | 'liked';
 // ============================================================
 // DISCOVER TAB - Swipe-based recipe discovery
 // ============================================================
+interface SessionPreferences {
+  likedCuisines: Record<string, number>;
+  likedDifficulties: Record<string, number>;
+  skippedCuisines: Record<string, number>;
+  totalLikes: number;
+  totalSkips: number;
+}
+
+export interface DiscoverState {
+  recipes: Recipe[];
+  currentIndex: number;
+  hasMore: boolean;
+  offset: number;
+  loaded: boolean;
+  sessionPrefs: SessionPreferences;
+}
+
+const EMPTY_SESSION_PREFS: SessionPreferences = {
+  likedCuisines: {},
+  likedDifficulties: {},
+  skippedCuisines: {},
+  totalLikes: 0,
+  totalSkips: 0,
+};
+
+const DISCOVER_INITIAL: DiscoverState = {
+  recipes: [],
+  currentIndex: 0,
+  hasMore: true,
+  offset: 0,
+  loaded: false,
+  sessionPrefs: { ...EMPTY_SESSION_PREFS },
+};
+
+export interface BrowseState {
+  recipes: Recipe[];
+  hasMore: boolean;
+  offset: number;
+  loaded: boolean;
+}
+
+const BROWSE_INITIAL: BrowseState = {
+  recipes: [],
+  hasMore: true,
+  offset: 0,
+  loaded: false,
+};
+
+export interface MyRecipesState {
+  liked: Recipe[];
+  saved: Recipe[];
+  created: Recipe[];
+  likedLoaded: boolean;
+  savedLoaded: boolean;
+  createdLoaded: boolean;
+}
+
+const MY_RECIPES_INITIAL: MyRecipesState = {
+  liked: [],
+  saved: [],
+  created: [],
+  likedLoaded: false,
+  savedLoaded: false,
+  createdLoaded: false,
+};
+
+/**
+ * Score and reorder upcoming recipes based on session swipe behavior.
+ * Only reorders recipes AFTER currentIndex to avoid disrupting the user's position.
+ * Mixes boosted recipes with others to maintain variety.
+ */
+const reorderUpcoming = (recipes: Recipe[], currentIndex: number, prefs: SessionPreferences): Recipe[] => {
+  if (prefs.totalLikes < 3) return recipes; // Need enough signal before reordering
+
+  const seen = recipes.slice(0, currentIndex + 1);
+  const upcoming = [...recipes.slice(currentIndex + 1)];
+
+  // Score each upcoming recipe
+  const scored = upcoming.map(recipe => {
+    let score = 0;
+    const cuisine = recipe.cuisine_type?.toLowerCase() || '';
+    const difficulty = recipe.difficulty?.toLowerCase() || '';
+
+    // Boost cuisines the user likes
+    for (const [liked, count] of Object.entries(prefs.likedCuisines)) {
+      if (cuisine === liked.toLowerCase()) {
+        score += count * 2;
+      }
+    }
+
+    // Slight penalty for cuisines the user skips a lot
+    for (const [skipped, count] of Object.entries(prefs.skippedCuisines)) {
+      if (cuisine === skipped.toLowerCase() && count >= 3) {
+        score -= Math.min(count, 5);
+      }
+    }
+
+    // Boost matching difficulty
+    for (const [liked, count] of Object.entries(prefs.likedDifficulties)) {
+      if (difficulty === liked.toLowerCase()) {
+        score += count;
+      }
+    }
+
+    return { recipe, score };
+  });
+
+  // Sort by score but interleave: take top scored, then one random, repeat
+  // This prevents monotonous runs of the same cuisine
+  scored.sort((a, b) => b.score - a.score);
+
+  const reordered: Recipe[] = [];
+  const boosted = scored.filter(s => s.score > 0);
+  const neutral = scored.filter(s => s.score <= 0);
+  let bIdx = 0;
+  let nIdx = 0;
+
+  while (bIdx < boosted.length || nIdx < neutral.length) {
+    // Add 2 boosted, then 1 neutral for variety
+    for (let i = 0; i < 2 && bIdx < boosted.length; i++) {
+      reordered.push(boosted[bIdx++].recipe);
+    }
+    if (nIdx < neutral.length) {
+      reordered.push(neutral[nIdx++].recipe);
+    }
+  }
+
+  return [...seen, ...reordered];
+};
+
+// ============================================================
+// INGREDIENT NORMALIZATION - for pantry matching
+// ============================================================
+
+/** Common staples that most people have and recipes often assume */
+const COMMON_STAPLES = new Set([
+  'salt', 'pepper', 'water', 'oil', 'olive oil', 'vegetable oil',
+  'cooking spray', 'ice', 'black pepper', 'kosher salt', 'sea salt',
+  'cooking oil', 'canola oil', 'sunflower oil', 'sugar', 'flour',
+]);
+
+/** Words to strip from ingredient names (preparations, modifiers) */
+const STRIP_WORDS = new Set([
+  'fresh', 'dried', 'frozen', 'canned', 'chopped', 'diced', 'sliced',
+  'minced', 'grated', 'shredded', 'crushed', 'ground', 'whole',
+  'large', 'small', 'medium', 'thin', 'thick', 'fine', 'coarse',
+  'raw', 'cooked', 'boneless', 'skinless', 'organic', 'unsalted',
+  'salted', 'extra', 'virgin', 'light', 'dark', 'plain', 'pure',
+  'ripe', 'firm', 'soft', 'hot', 'cold', 'warm', 'to', 'taste',
+  'for', 'garnish', 'optional', 'packed', 'loosely', 'tightly',
+]);
+
+/**
+ * Normalize an ingredient name for matching.
+ * Handles parentheticals, plurals, modifiers, and spacing.
+ */
+const normalizeIngredient = (name: string): string => {
+  let n = name.toLowerCase().trim();
+
+  // Remove content in parentheses: "Butter (Tablespoons)" → "Butter"
+  n = n.replace(/\([^)]*\)/g, '').trim();
+
+  // Remove content after comma: "chicken breast, boneless" → "chicken breast"
+  n = n.replace(/,.*$/, '').trim();
+
+  // Remove numbers and units at the start: "2 cups flour" → "flour"
+  n = n.replace(/^[\d./\s]+(cups?|tbsp|tsp|tablespoons?|teaspoons?|oz|ounces?|lbs?|pounds?|g|grams?|kg|ml|l|liters?|pieces?|cloves?|stalks?|heads?|bunche?s?|cans?|jars?|bottles?|packets?|pinche?s?|dashe?s?)?\s*/i, '').trim();
+
+  // Remove modifier words
+  const words = n.split(/\s+/).filter(w => !STRIP_WORDS.has(w));
+  n = words.join(' ');
+
+  // Remove trailing 's' for simple pluralization (but not for words ending in 'ss', 'us')
+  if (n.endsWith('s') && n.length > 3 && !n.endsWith('ss') && !n.endsWith('us')) {
+    n = n.slice(0, -1);
+  }
+  // Handle 'ies' → 'y' (e.g., "berries" → "berry")
+  if (n.endsWith('ie') && n.length > 4) {
+    n = n.slice(0, -2) + 'y';
+  }
+
+  return n.trim();
+};
+
+/** Remove all spaces/hyphens for compound word matching ("hot sauce" == "hotsauce") */
+const compactName = (name: string): string => name.replace(/[\s\-]/g, '');
+
+/** Base ingredient synonyms - maps variations to a canonical form */
+const INGREDIENT_SYNONYMS: Record<string, string[]> = {
+  'egg': ['eggs', 'egg'],
+  'milk': ['milk', 'whole milk', '2% milk', 'skim milk', 'semi-skimmed milk'],
+  'butter': ['butter', 'unsalted butter', 'salted butter'],
+  'cream cheese': ['cream cheese', 'philadelphia'],
+  'sour cream': ['sour cream', 'soured cream'],
+  'yogurt': ['yogurt', 'yoghurt', 'greek yogurt', 'natural yogurt'],
+  'chicken': ['chicken', 'chicken breast', 'chicken thigh', 'chicken leg', 'chicken drumstick'],
+  'beef': ['beef', 'beef mince', 'ground beef', 'stewing beef', 'beef steak'],
+  'pork': ['pork', 'pork chop', 'pork loin', 'ground pork', 'pork mince'],
+  'garlic': ['garlic', 'garlic clove', 'garlic cloves'],
+  'onion': ['onion', 'onions', 'yellow onion', 'white onion', 'brown onion'],
+  'tomato': ['tomato', 'tomatoes', 'cherry tomato', 'cherry tomatoes', 'plum tomato'],
+  'potato': ['potato', 'potatoes', 'russet potato', 'yukon gold'],
+  'rice': ['rice', 'white rice', 'brown rice', 'basmati rice', 'jasmine rice', 'long grain rice'],
+  'pasta': ['pasta', 'spaghetti', 'penne', 'fettuccine', 'linguine', 'macaroni', 'fusilli'],
+  'bell pepper': ['bell pepper', 'red pepper', 'green pepper', 'yellow pepper', 'capsicum', 'romano pepper'],
+  'hot sauce': ['hot sauce', 'hotsauce', 'chili sauce', 'chilli sauce', 'sriracha', 'tabasco'],
+  'soy sauce': ['soy sauce', 'soya sauce', 'shoyu'],
+  'lemon': ['lemon', 'lemon juice', 'lemons'],
+  'lime': ['lime', 'lime juice', 'limes'],
+  'parsley': ['parsley', 'flat leaf parsley', 'italian parsley', 'curly parsley'],
+  'cilantro': ['cilantro', 'coriander', 'fresh coriander', 'coriander leaves'],
+  'cheese': ['cheese', 'cheddar', 'mozzarella', 'parmesan', 'gruyere', 'feta', 'gouda'],
+  'cream': ['cream', 'heavy cream', 'whipping cream', 'double cream', 'single cream', 'heavy whipping cream'],
+  'stock': ['stock', 'broth', 'chicken stock', 'chicken broth', 'beef stock', 'beef broth', 'vegetable stock', 'vegetable broth'],
+  'spring onion': ['spring onion', 'green onion', 'scallion', 'scallions', 'spring onions', 'green onions'],
+  'zucchini': ['zucchini', 'courgette', 'zucchinis', 'courgettes'],
+  'eggplant': ['eggplant', 'aubergine', 'eggplants', 'aubergines'],
+  'shrimp': ['shrimp', 'prawns', 'prawn', 'shrimps', 'king prawn', 'tiger prawn'],
+};
+
+/** Pre-computed reverse lookup: variant → canonical */
+const SYNONYM_LOOKUP: Record<string, string> = {};
+for (const [canonical, variants] of Object.entries(INGREDIENT_SYNONYMS)) {
+  for (const v of variants) {
+    SYNONYM_LOOKUP[v] = canonical;
+  }
+}
+
+/**
+ * Check if a recipe ingredient matches a pantry item.
+ * Uses multi-tier matching: exact → synonym → word overlap → compact.
+ */
+const ingredientsMatch = (recipeIngredient: string, pantryItem: string): boolean => {
+  const ri = normalizeIngredient(recipeIngredient);
+  const pi = normalizeIngredient(pantryItem);
+
+  if (!ri || !pi) return false;
+
+  // Tier 1: Exact normalized match
+  if (ri === pi) return true;
+
+  // Tier 2: One contains the other (e.g., "chicken breast" contains "chicken")
+  if (ri.includes(pi) || pi.includes(ri)) return true;
+
+  // Tier 3: Synonym lookup - both map to the same canonical name
+  const riCanonical = SYNONYM_LOOKUP[ri];
+  const piCanonical = SYNONYM_LOOKUP[pi];
+  if (riCanonical && piCanonical && riCanonical === piCanonical) return true;
+  // Also check if one is the canonical form of the other
+  if (riCanonical && (riCanonical === pi || piCanonical === riCanonical)) return true;
+  if (piCanonical && (piCanonical === ri || riCanonical === piCanonical)) return true;
+
+  // Tier 4: Compact match (remove spaces/hyphens): "hot sauce" == "hotsauce"
+  if (compactName(ri) === compactName(pi)) return true;
+
+  // Tier 5: Word overlap - all words of the shorter name appear in the longer
+  const riWords = new Set(ri.split(/\s+/));
+  const piWords = new Set(pi.split(/\s+/));
+  const [shorter, longer] = riWords.size <= piWords.size ? [riWords, piWords] : [piWords, riWords];
+  if (shorter.size > 0 && [...shorter].every(w => longer.has(w))) return true;
+
+  return false;
+};
+
+/** Check if a recipe ingredient is a common staple */
+const isStaple = (ingredientName: string): boolean => {
+  const n = normalizeIngredient(ingredientName);
+  if (COMMON_STAPLES.has(n)) return true;
+  // Also check if any staple is contained in the name
+  for (const staple of COMMON_STAPLES) {
+    if (n.includes(staple) || staple.includes(n)) return true;
+  }
+  return false;
+};
+
 const DiscoverTab: React.FC<{
   colors: ThemeColors;
   onViewRecipe: (recipe: Recipe) => void;
-}> = ({ colors, onViewRecipe }) => {
+  dietaryRestrictions: string[];
+  discoverState: DiscoverState;
+  setDiscoverState: React.Dispatch<React.SetStateAction<DiscoverState>>;
+}> = ({ colors, onViewRecipe, dietaryRestrictions, discoverState, setDiscoverState }) => {
   const styles = createDiscoverStyles(colors);
-  const [recipes, setRecipes] = useState<Recipe[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [loading, setLoading] = useState(!discoverState.loaded);
   const [isInteracting, setIsInteracting] = useState(false);
+  const [pantryMode, setPantryMode] = useState(false);
+  const [pantryItems, setPantryItems] = useState<string[]>([]);
+  const [pantryLoaded, setPantryLoaded] = useState(false);
+  const loadingMoreRef = useRef(false);
+  const INITIAL_SIZE = 10;
+  const BATCH_SIZE = 50;
 
   const translateX = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(0)).current;
+  const opacity = useRef(new Animated.Value(1)).current;
 
-  const currentRecipe = recipes[currentIndex];
+  const { recipes, currentIndex, hasMore } = discoverState;
+
+  // Filter recipes by pantry ingredients when pantry mode is on
+  const filteredRecipes = React.useMemo(() => {
+    if (!pantryMode || pantryItems.length === 0) return recipes;
+    return recipes.filter(recipe => {
+      if (!recipe.ingredients || recipe.ingredients.length === 0) return false;
+      const total = recipe.ingredients.length;
+      // Count non-staple ingredients (the ones that actually matter)
+      const nonStapleIngredients = recipe.ingredients.filter(ing => !isStaple(ing.name));
+      // Count non-staple ingredients matched by pantry
+      const pantryMatchCount = nonStapleIngredients.filter(ing =>
+        pantryItems.some(pi => ingredientsMatch(ing.name, pi))
+      ).length;
+      // Must have at least 80% of non-staple ingredients in pantry
+      // If all ingredients are staples, always show (you can make it with basics)
+      if (nonStapleIngredients.length === 0) return true;
+      return pantryMatchCount / nonStapleIngredients.length >= 0.8;
+    });
+  }, [recipes, pantryMode, pantryItems]);
+
+  const currentRecipe = filteredRecipes[currentIndex] || filteredRecipes[0];
 
   useEffect(() => {
-    loadRecipes();
+    if (!discoverState.loaded) {
+      loadRecipes();
+    }
   }, []);
+
+  // Load pantry items when pantry mode is toggled on
+  useEffect(() => {
+    if (pantryMode && !pantryLoaded) {
+      pantryService.getPantryItems().then(items => {
+        setPantryItems(items.map(i => i.item_name));
+        setPantryLoaded(true);
+      }).catch(() => {});
+    }
+  }, [pantryMode]);
+
+  // Reset index when toggling pantry mode
+  useEffect(() => {
+    setDiscoverState(prev => ({ ...prev, currentIndex: 0 }));
+  }, [pantryMode]);
+
+  const buildFilters = (limit: number, offset: number) => {
+    const filters: any = { limit, offset };
+    if (dietaryRestrictions.length > 0) {
+      filters.dietary_tags = dietaryRestrictions;
+    }
+    return filters;
+  };
 
   const loadRecipes = async () => {
     try {
       setLoading(true);
-      const fetched = await recipeService.getRecipeFeed();
-      setRecipes(fetched.length > 0 ? fetched : []);
+      const fetched = await recipeService.getRecipeFeed(buildFilters(INITIAL_SIZE, 0));
+      setDiscoverState(prev => ({
+        ...prev,
+        recipes: fetched,
+        offset: fetched.length,
+        hasMore: fetched.length >= INITIAL_SIZE,
+        loaded: true,
+      }));
     } catch (err) {
       console.error('Error loading discover recipes:', err);
     } finally {
       setLoading(false);
+      // Silently load the next batch in the background
+      loadMoreRecipes(true);
+    }
+  };
+
+  const loadMoreRecipes = async (isInitialBackground = false) => {
+    if (loadingMoreRef.current) return;
+    loadingMoreRef.current = true;
+    try {
+      const currentOffset = isInitialBackground ? INITIAL_SIZE : discoverState.offset;
+      const fetched = await recipeService.getRecipeFeed(buildFilters(BATCH_SIZE, currentOffset));
+      if (fetched.length > 0) {
+        setDiscoverState(prev => {
+          const combined = [...prev.recipes, ...fetched];
+          const reordered = prev.sessionPrefs.totalLikes >= 3
+            ? reorderUpcoming(combined, prev.currentIndex, prev.sessionPrefs)
+            : combined;
+          return {
+            ...prev,
+            recipes: reordered,
+            offset: prev.offset + fetched.length,
+            hasMore: fetched.length >= BATCH_SIZE,
+          };
+        });
+      } else {
+        setDiscoverState(prev => ({ ...prev, hasMore: false }));
+      }
+    } catch (err) {
+      console.error('Error loading more discover recipes:', err);
+    } finally {
+      loadingMoreRef.current = false;
     }
   };
 
   const nextRecipe = () => {
-    translateX.setValue(0);
-    translateY.setValue(0);
-    setIsInteracting(false);
-    if (currentIndex < recipes.length - 1) {
-      setCurrentIndex(currentIndex + 1);
+    const nextIdx = currentIndex + 1;
+    if (nextIdx < filteredRecipes.length) {
+      // Pre-fetch more when 10 recipes away from the end (use full list length)
+      if (nextIdx >= recipes.length - 10 && hasMore) {
+        loadMoreRecipes();
+      }
+      // Update index while card is still off-screen, then fade in the new card
+      setDiscoverState(prev => ({ ...prev, currentIndex: nextIdx }));
+      // Reset position off-screen briefly, then animate to center
+      translateX.setValue(0);
+      translateY.setValue(0);
+      opacity.setValue(0);
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 150,
+        useNativeDriver: true,
+      }).start(() => setIsInteracting(false));
+    } else if (hasMore) {
+      translateX.setValue(0);
+      translateY.setValue(0);
+      setIsInteracting(false);
+      loadMoreRecipes();
     } else {
-      setCurrentIndex(0);
+      setDiscoverState(prev => ({ ...prev, currentIndex: 0 }));
+      translateX.setValue(0);
+      translateY.setValue(0);
+      opacity.setValue(0);
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 150,
+        useNativeDriver: true,
+      }).start(() => setIsInteracting(false));
     }
+  };
+
+  const recordPreference = (recipe: Recipe, action: 'like' | 'skip' | 'save') => {
+    setDiscoverState(prev => {
+      const prefs = { ...prev.sessionPrefs };
+      const cuisine = recipe.cuisine_type || 'Unknown';
+      const difficulty = recipe.difficulty || 'Medium';
+
+      if (action === 'like' || action === 'save') {
+        prefs.likedCuisines = { ...prefs.likedCuisines, [cuisine]: (prefs.likedCuisines[cuisine] || 0) + 1 };
+        prefs.likedDifficulties = { ...prefs.likedDifficulties, [difficulty]: (prefs.likedDifficulties[difficulty] || 0) + 1 };
+        prefs.totalLikes = prefs.totalLikes + 1;
+      } else {
+        prefs.skippedCuisines = { ...prefs.skippedCuisines, [cuisine]: (prefs.skippedCuisines[cuisine] || 0) + 1 };
+        prefs.totalSkips = prefs.totalSkips + 1;
+      }
+
+      // Reorder upcoming recipes every 5 interactions
+      const totalActions = prefs.totalLikes + prefs.totalSkips;
+      if (totalActions >= 3 && totalActions % 5 === 0) {
+        return { ...prev, sessionPrefs: prefs, recipes: reorderUpcoming(prev.recipes, prev.currentIndex, prefs) };
+      }
+
+      return { ...prev, sessionPrefs: prefs };
+    });
   };
 
   const handleSwipeLeft = () => {
     if (isInteracting) return;
     setIsInteracting(true);
+    if (currentRecipe) {
+      recordPreference(currentRecipe, 'skip');
+    }
     Animated.timing(translateX, {
       toValue: -500,
       duration: 200,
@@ -88,6 +508,7 @@ const DiscoverTab: React.FC<{
     setIsInteracting(true);
     if (currentRecipe) {
       recipeService.likeRecipe(currentRecipe.id).catch(() => {});
+      recordPreference(currentRecipe, 'like');
     }
     Animated.timing(translateX, {
       toValue: 500,
@@ -101,6 +522,7 @@ const DiscoverTab: React.FC<{
     setIsInteracting(true);
     if (currentRecipe) {
       recipeService.saveRecipe(currentRecipe.id).catch(() => {});
+      recordPreference(currentRecipe, 'save');
     }
     Animated.timing(translateY, {
       toValue: -500,
@@ -160,12 +582,29 @@ const DiscoverTab: React.FC<{
     );
   }
 
-  if (!currentRecipe || recipes.length === 0) {
+  if (!currentRecipe || filteredRecipes.length === 0) {
     return (
       <View style={styles.centerContainer}>
+        {/* Pantry Toggle - show even in empty state */}
+        <View style={styles.pantryToggleRow}>
+          <TouchableOpacity
+            style={[styles.pantryToggle, !pantryMode && styles.pantryToggleActive]}
+            onPress={() => setPantryMode(false)}
+          >
+            <Text style={[styles.pantryToggleText, !pantryMode && styles.pantryToggleTextActive]}>All Recipes</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.pantryToggle, pantryMode && styles.pantryToggleActive]}
+            onPress={() => setPantryMode(true)}
+          >
+            <Text style={[styles.pantryToggleText, pantryMode && styles.pantryToggleTextActive]}>My Pantry</Text>
+          </TouchableOpacity>
+        </View>
         <Text style={styles.emptyIcon}>🍽️</Text>
-        <Text style={styles.emptyTitle}>No Recipes to Discover</Text>
-        <Text style={styles.emptySubtitle}>Check back later for new recipes!</Text>
+        <Text style={styles.emptyTitle}>{pantryMode ? 'No Pantry Matches' : 'No Recipes to Discover'}</Text>
+        <Text style={styles.emptySubtitle}>
+          {pantryMode ? 'Add more items to your pantry or switch to All Recipes' : 'Check back later for new recipes!'}
+        </Text>
         <TouchableOpacity style={styles.retryButton} onPress={loadRecipes}>
           <Text style={styles.retryButtonText}>Refresh</Text>
         </TouchableOpacity>
@@ -193,6 +632,7 @@ const DiscoverTab: React.FC<{
             style={[
               styles.card,
               {
+                opacity,
                 transform: [{ translateX }, { translateY }, { rotate }],
               },
             ]}
@@ -217,45 +657,71 @@ const DiscoverTab: React.FC<{
                 source={{ uri: currentRecipe.image_url || 'https://via.placeholder.com/400x300/FF6B35/FFFFFF?text=Recipe' }}
                 style={styles.recipeImage}
               />
+
+              {/* Pantry Mode Toggle - overlayed top right */}
+              <View style={styles.pantryToggleRow}>
+                <TouchableOpacity
+                  style={[styles.pantryToggle, !pantryMode && styles.pantryToggleActive]}
+                  onPress={() => setPantryMode(false)}
+                >
+                  <Text style={[styles.pantryToggleText, !pantryMode && styles.pantryToggleTextActive]}>All</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.pantryToggle, pantryMode && styles.pantryToggleActive]}
+                  onPress={() => setPantryMode(true)}
+                >
+                  <Text style={[styles.pantryToggleText, pantryMode && styles.pantryToggleTextActive]}>Pantry</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Recipe info overlay at bottom of card */}
               <View style={styles.imageOverlay}>
-                <Text style={styles.recipeTitle}>{currentRecipe.title}</Text>
-                <Text style={styles.recipeSubtitle}>{currentRecipe.cuisine_type}</Text>
-                <View style={styles.metaRow}>
-                  <Text style={styles.metaLabel}>⏱️ {currentRecipe.prep_time}m prep</Text>
-                  <Text style={styles.metaLabel}>🔥 {currentRecipe.cook_time}m cook</Text>
-                  <Text style={styles.metaLabel}>👥 {currentRecipe.servings}</Text>
+                <View style={styles.titleRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.recipeTitle} numberOfLines={1}>{currentRecipe.title}</Text>
+                    <Text style={styles.recipeSubtitle}>{currentRecipe.cuisine_type}</Text>
+                  </View>
+                  <View style={styles.badgeRow}>
+                    <Text style={[styles.difficultyBadge, { backgroundColor: getDifficultyColor(currentRecipe.difficulty) }]}>
+                      {currentRecipe.difficulty}
+                    </Text>
+                  </View>
                 </View>
-                <View style={styles.badgeRow}>
-                  <Text style={[styles.difficultyBadge, { backgroundColor: getDifficultyColor(currentRecipe.difficulty) }]}>
-                    {currentRecipe.difficulty}
-                  </Text>
-                  {currentRecipe.is_ai_generated && (
-                    <Text style={[styles.difficultyBadge, { backgroundColor: colors.secondary }]}>AI</Text>
+                <View style={styles.metaRow}>
+                  <Text style={styles.metaLabel}>⏱️ {(currentRecipe.prep_time || 0) + (currentRecipe.cook_time || 0)} min</Text>
+                  <Text style={styles.metaLabel}>👥 {currentRecipe.servings} servings</Text>
+                  {currentRecipe.calories && (
+                    <Text style={styles.metaLabel}>🔥 {currentRecipe.calories} cal</Text>
                   )}
                 </View>
-                {currentRecipe.description ? (
-                  <Text style={styles.description} numberOfLines={2}>{currentRecipe.description}</Text>
-                ) : null}
+              </View>
+
+              {/* Overlaid action buttons */}
+              <View style={styles.actionButtons}>
+                <View style={styles.actionButtonWrapper}>
+                  <TouchableOpacity style={[styles.actionButton, styles.skipButton]} onPress={handleSwipeLeft}>
+                    <Text style={styles.actionButtonText}>✕</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.actionButtonLabel}>Skip</Text>
+                </View>
+                <View style={styles.actionButtonWrapper}>
+                  <TouchableOpacity style={[styles.actionButton, styles.saveButton]} onPress={handleSwipeUp}>
+                    <Text style={styles.actionButtonText}>📌</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.actionButtonLabel}>Save</Text>
+                </View>
+                <View style={styles.actionButtonWrapper}>
+                  <TouchableOpacity style={[styles.actionButton, styles.likeButton]} onPress={handleSwipeRight}>
+                    <Text style={styles.actionButtonText}>❤️</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.actionButtonLabel}>Like</Text>
+                </View>
               </View>
             </TouchableOpacity>
           </Animated.View>
         </PanGestureHandler>
       </View>
 
-      {/* Action Buttons */}
-      <View style={styles.actionButtons}>
-        <TouchableOpacity style={[styles.actionButton, { backgroundColor: colors.error }]} onPress={handleSwipeLeft}>
-          <Text style={styles.actionButtonText}>✕</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.actionButton, { backgroundColor: colors.warning }]} onPress={handleSwipeUp}>
-          <Text style={styles.actionButtonText}>🔖</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.actionButton, { backgroundColor: colors.success }]} onPress={handleSwipeRight}>
-          <Text style={styles.actionButtonText}>❤️</Text>
-        </TouchableOpacity>
-      </View>
-
-      <Text style={styles.hintText}>Swipe right to like, left to skip, up to save</Text>
     </View>
   );
 };
@@ -266,15 +732,24 @@ const DiscoverTab: React.FC<{
 const BrowseTab: React.FC<{
   colors: ThemeColors;
   onViewRecipe: (recipe: Recipe) => void;
-}> = ({ colors, onViewRecipe }) => {
+  dietaryRestrictions: string[];
+  onEditPreferences: () => void;
+  browseState: BrowseState;
+  setBrowseState: React.Dispatch<React.SetStateAction<BrowseState>>;
+}> = ({ colors, onViewRecipe, dietaryRestrictions, onEditPreferences, browseState, setBrowseState }) => {
   const styles = createBrowseStyles(colors);
-  const [recipes, setRecipes] = useState<Recipe[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [recipes, setRecipes] = useState<Recipe[]>(browseState.recipes);
+  const [loading, setLoading] = useState(!browseState.loaded);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeMealType, setActiveMealType] = useState<string | undefined>(undefined);
   const [expiringItems, setExpiringItems] = useState<PantryItem[]>([]);
   const [showExpiringBanner, setShowExpiringBanner] = useState(false);
+  const [browseHasMore, setBrowseHasMore] = useState(browseState.hasMore);
+  const browseOffsetRef = useRef(browseState.offset);
+  const BROWSE_INITIAL_SIZE = 8;
+  const BROWSE_BATCH = 40;
 
   const mealTypes = [
     { key: undefined, label: 'All' },
@@ -284,17 +759,59 @@ const BrowseTab: React.FC<{
     { key: 'Snack', label: 'Snack' },
   ];
 
+  // Sync local state back to parent for caching
+  useEffect(() => {
+    if (recipes.length > 0 && !searchQuery && !activeMealType) {
+      setBrowseState({ recipes, hasMore: browseHasMore, offset: browseOffsetRef.current, loaded: true });
+    }
+  }, [recipes, browseHasMore]);
+
+  const isDefaultView = !searchQuery && !activeMealType && dietaryRestrictions.length === 0;
+
   const loadRecipes = useCallback(async () => {
+    // Skip fetch if we have cached data and no filters active
+    if (browseState.loaded && !searchQuery && !activeMealType && dietaryRestrictions.length === 0 && recipes.length > 0) {
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
-      const result = await recipeService.getAllRecipes(50, 0, searchQuery || undefined, activeMealType);
+      browseOffsetRef.current = 0;
+      const result = await recipeService.getAllRecipes(
+        BROWSE_INITIAL_SIZE, 0, searchQuery || undefined, activeMealType,
+        dietaryRestrictions.length > 0 ? dietaryRestrictions : undefined
+      );
       setRecipes(result);
+      browseOffsetRef.current = result.length;
+      setBrowseHasMore(result.length >= BROWSE_INITIAL_SIZE);
     } catch (error) {
       console.error('Failed to load recipes:', error);
     } finally {
       setLoading(false);
     }
-  }, [searchQuery, activeMealType]);
+  }, [searchQuery, activeMealType, dietaryRestrictions]);
+
+  const loadMoreBrowse = useCallback(async () => {
+    if (loadingMore || !browseHasMore) return;
+    setLoadingMore(true);
+    try {
+      const result = await recipeService.getAllRecipes(
+        BROWSE_BATCH, browseOffsetRef.current, searchQuery || undefined, activeMealType,
+        dietaryRestrictions.length > 0 ? dietaryRestrictions : undefined
+      );
+      if (result.length > 0) {
+        setRecipes(prev => [...prev, ...result]);
+        browseOffsetRef.current += result.length;
+        setBrowseHasMore(result.length >= BROWSE_BATCH);
+      } else {
+        setBrowseHasMore(false);
+      }
+    } catch (error) {
+      console.error('Failed to load more recipes:', error);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, browseHasMore, searchQuery, activeMealType, dietaryRestrictions]);
 
   const loadExpiringItems = async () => {
     try {
@@ -307,7 +824,13 @@ const BrowseTab: React.FC<{
   };
 
   useEffect(() => {
-    const debounce = setTimeout(() => loadRecipes(), 300);
+    const debounce = setTimeout(async () => {
+      await loadRecipes();
+      // Silently load more in the background after initial load
+      if (!browseState.loaded && browseHasMore) {
+        loadMoreBrowse();
+      }
+    }, 300);
     return () => clearTimeout(debounce);
   }, [loadRecipes]);
 
@@ -317,8 +840,24 @@ const BrowseTab: React.FC<{
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([loadRecipes(), loadExpiringItems()]);
-    setRefreshing(false);
+    setBrowseHasMore(true);
+    // Force refresh by temporarily clearing cached state
+    setBrowseState(BROWSE_INITIAL);
+    browseOffsetRef.current = 0;
+    try {
+      const result = await recipeService.getAllRecipes(
+        BROWSE_INITIAL_SIZE, 0, searchQuery || undefined, activeMealType,
+        dietaryRestrictions.length > 0 ? dietaryRestrictions : undefined
+      );
+      setRecipes(result);
+      browseOffsetRef.current = result.length;
+      setBrowseHasMore(result.length >= BROWSE_INITIAL_SIZE);
+      await loadExpiringItems();
+    } catch (error) {
+      console.error('Failed to refresh recipes:', error);
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const renderRecipeCard = ({ item }: { item: Recipe }) => (
@@ -369,7 +908,6 @@ const BrowseTab: React.FC<{
       {/* Search Bar */}
       <View style={styles.searchContainer}>
         <View style={styles.searchInputContainer}>
-          <Text style={styles.searchIcon}>🔍</Text>
           <TextInput
             style={styles.searchInput}
             placeholder="Search recipes..."
@@ -383,34 +921,44 @@ const BrowseTab: React.FC<{
             </TouchableOpacity>
           )}
         </View>
+
+        {/* Meal Type Filter */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterContainer}
+        >
+          {mealTypes.map((type) => (
+            <TouchableOpacity
+              key={type.label}
+              style={[
+                styles.filterChip,
+                activeMealType === type.key && styles.filterChipActive,
+              ]}
+              onPress={() => setActiveMealType(type.key)}
+            >
+              <Text
+                style={[
+                  styles.filterChipText,
+                  activeMealType === type.key && styles.filterChipTextActive,
+                ]}
+              >
+                {type.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
       </View>
 
-      {/* Meal Type Filter */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.filterContainer}
-      >
-        {mealTypes.map((type) => (
-          <TouchableOpacity
-            key={type.label}
-            style={[
-              styles.filterChip,
-              activeMealType === type.key && styles.filterChipActive,
-            ]}
-            onPress={() => setActiveMealType(type.key)}
-          >
-            <Text
-              style={[
-                styles.filterChipText,
-                activeMealType === type.key && styles.filterChipTextActive,
-              ]}
-            >
-              {type.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      {/* Dietary Preferences Indicator */}
+      {dietaryRestrictions.length > 0 && (
+        <TouchableOpacity style={styles.dietaryBanner} onPress={onEditPreferences}>
+          <Text style={styles.dietaryBannerText}>
+            Showing: {dietaryRestrictions.join(', ')}
+          </Text>
+          <Text style={styles.dietaryBannerLink}>Edit</Text>
+        </TouchableOpacity>
+      )}
 
       {/* Expiring Items Banner */}
       {showExpiringBanner && (
@@ -458,6 +1006,11 @@ const BrowseTab: React.FC<{
           contentContainerStyle={styles.recipeGrid}
           columnWrapperStyle={styles.gridRow}
           showsVerticalScrollIndicator={false}
+          onEndReached={loadMoreBrowse}
+          onEndReachedThreshold={0.3}
+          ListFooterComponent={loadingMore ? (
+            <ActivityIndicator size="small" color={colors.primary} style={{ paddingVertical: 16 }} />
+          ) : null}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -477,14 +1030,28 @@ const BrowseTab: React.FC<{
 const MyRecipesTab: React.FC<{
   colors: ThemeColors;
   onViewRecipe: (recipe: Recipe) => void;
-}> = ({ colors, onViewRecipe }) => {
+  myRecipesState: MyRecipesState;
+  setMyRecipesState: React.Dispatch<React.SetStateAction<MyRecipesState>>;
+}> = ({ colors, onViewRecipe, myRecipesState, setMyRecipesState }) => {
   const styles = createMyRecipesStyles(colors);
-  const [subTab, setSubTab] = useState<MyRecipesSubTab>('created');
-  const [recipes, setRecipes] = useState<Recipe[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [subTab, setSubTab] = useState<MyRecipesSubTab>('liked');
+  const [recipes, setRecipes] = useState<Recipe[]>(myRecipesState[subTab] || []);
+  const [loading, setLoading] = useState(!myRecipesState[`${subTab}Loaded` as keyof MyRecipesState]);
   const [refreshing, setRefreshing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
-  const loadRecipes = useCallback(async () => {
+  const loadRecipes = useCallback(async (forceRefresh = false) => {
+    const loadedKey = `${subTab}Loaded` as 'likedLoaded' | 'savedLoaded' | 'createdLoaded';
+    const cached = myRecipesState[subTab] as Recipe[];
+    const isLoaded = myRecipesState[loadedKey] as boolean;
+
+    // Use cache if available and not forcing refresh
+    if (!forceRefresh && isLoaded && cached.length > 0) {
+      setRecipes(cached);
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
       let data: Recipe[];
@@ -501,20 +1068,22 @@ const MyRecipesTab: React.FC<{
           break;
       }
       setRecipes(data);
+      // Cache in parent
+      setMyRecipesState(prev => ({ ...prev, [subTab]: data, [loadedKey]: true }));
     } catch (error) {
       console.error('Failed to load recipes:', error);
     } finally {
       setLoading(false);
     }
-  }, [subTab]);
+  }, [subTab, myRecipesState]);
 
   useEffect(() => {
     loadRecipes();
-  }, [loadRecipes]);
+  }, [subTab]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await loadRecipes();
+    await loadRecipes(true);
     setRefreshing(false);
   };
 
@@ -531,6 +1100,7 @@ const MyRecipesTab: React.FC<{
             try {
               await recipeService.deleteRecipe(recipe.id);
               setRecipes(prev => prev.filter(r => r.id !== recipe.id));
+              setMyRecipesState(prev => ({ ...prev, created: prev.created.filter(r => r.id !== recipe.id) }));
             } catch {
               Alert.alert('Error', 'Failed to delete recipe');
             }
@@ -544,21 +1114,32 @@ const MyRecipesTab: React.FC<{
     try {
       await recipeService.unsaveRecipe(recipe.id);
       setRecipes(prev => prev.filter(r => r.id !== recipe.id));
+      setMyRecipesState(prev => ({ ...prev, saved: prev.saved.filter(r => r.id !== recipe.id) }));
     } catch {
       Alert.alert('Error', 'Failed to remove recipe');
     }
   };
 
   const subTabs: { key: MyRecipesSubTab; label: string; icon: string }[] = [
-    { key: 'created', label: 'Created', icon: '📝' },
-    { key: 'saved', label: 'Saved', icon: '🔖' },
     { key: 'liked', label: 'Liked', icon: '❤️' },
+    { key: 'saved', label: 'Saved', icon: '📌' },
+    { key: 'created', label: 'Created', icon: '📝' },
   ];
+
+  const filteredRecipes = React.useMemo(() => {
+    if (!searchQuery.trim()) return recipes;
+    const q = searchQuery.toLowerCase();
+    return recipes.filter(r =>
+      r.title.toLowerCase().includes(q) ||
+      r.cuisine_type?.toLowerCase().includes(q)
+    );
+  }, [recipes, searchQuery]);
 
   const renderRecipeCard = ({ item }: { item: Recipe }) => (
     <TouchableOpacity
       style={styles.recipeCard}
       onPress={() => onViewRecipe(item)}
+      activeOpacity={0.7}
       onLongPress={() => {
         if (subTab === 'created') {
           Alert.alert(item.title, '', [
@@ -573,38 +1154,63 @@ const MyRecipesTab: React.FC<{
         }
       }}
     >
-      <View style={styles.cardContent}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.recipeTitle} numberOfLines={1}>{item.title}</Text>
-          {item.description ? (
-            <Text style={styles.recipeDescription} numberOfLines={2}>{item.description}</Text>
+      <View style={styles.recipeImageContainer}>
+        {item.image_url ? (
+          <Image source={{ uri: item.image_url }} style={styles.recipeImage} />
+        ) : (
+          <View style={styles.recipeImagePlaceholder}>
+            <Text style={styles.placeholderEmoji}>
+              {item.meal_type?.includes('Breakfast') ? '🍳' :
+               item.meal_type?.includes('Lunch') ? '🥗' :
+               item.meal_type?.includes('Dinner') ? '🍽️' : '🍴'}
+            </Text>
+          </View>
+        )}
+        {item.is_ai_generated && (
+          <View style={styles.aiBadge}>
+            <Text style={styles.aiBadgeText}>AI</Text>
+          </View>
+        )}
+      </View>
+      <View style={styles.recipeInfo}>
+        <Text style={styles.recipeTitle} numberOfLines={2}>{item.title}</Text>
+        <View style={styles.recipeMeta}>
+          {item.prep_time ? (
+            <Text style={styles.recipeMetaText}>
+              {item.prep_time + (item.cook_time || 0)} min
+            </Text>
+          ) : null}
+          {item.difficulty ? (
+            <Text style={styles.recipeMetaText}>{item.difficulty}</Text>
           ) : null}
         </View>
-        <View style={styles.tagsRow}>
-          {item.is_ai_generated && (
-            <View style={[styles.tag, { backgroundColor: colors.primary + '20' }]}>
-              <Text style={[styles.tagText, { color: colors.primary }]}>AI</Text>
-            </View>
-          )}
-          {item.meal_type?.slice(0, 2).map((type, i) => (
-            <View key={i} style={styles.tag}>
-              <Text style={styles.tagText}>{type}</Text>
-            </View>
-          ))}
-        </View>
-        <View style={styles.detailsRow}>
-          {item.prep_time ? <Text style={styles.detailChip}>{item.prep_time} min</Text> : null}
-          {item.difficulty ? <Text style={styles.detailChip}>{item.difficulty}</Text> : null}
-          {item.cuisine_type ? <Text style={styles.detailChip}>{item.cuisine_type}</Text> : null}
-          <View style={{ flex: 1 }} />
-          {item.calories ? <Text style={styles.calorieText}>{item.calories} cal/serving</Text> : null}
-        </View>
+        {item.calories ? (
+          <Text style={styles.calorieText}>{item.calories} cal/serving</Text>
+        ) : null}
       </View>
     </TouchableOpacity>
   );
 
   return (
     <View style={styles.container}>
+      {/* Search Bar */}
+      <View style={styles.searchContainer}>
+        <View style={styles.searchInputContainer}>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search my recipes..."
+            placeholderTextColor={colors.textMuted}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <Text style={styles.clearButton}>✕</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
       {/* Sub-tabs */}
       <View style={styles.subTabContainer}>
         {subTabs.map((tab) => (
@@ -621,32 +1227,45 @@ const MyRecipesTab: React.FC<{
         ))}
       </View>
 
-      {/* Recipe List */}
+      {/* Recipe Grid */}
       {loading && recipes.length === 0 ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
-      ) : recipes.length === 0 ? (
+      ) : filteredRecipes.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Text style={styles.emptyIcon}>
-            {subTab === 'created' ? '📖' : subTab === 'saved' ? '🔖' : '❤️'}
-          </Text>
-          <Text style={styles.emptyTitle}>
-            {subTab === 'created' ? 'No Recipes Created' :
-             subTab === 'saved' ? 'No Saved Recipes' : 'No Liked Recipes'}
-          </Text>
-          <Text style={styles.emptySubtitle}>
-            {subTab === 'created' ? 'Tap the + button to create your first recipe!' :
-             subTab === 'saved' ? 'Save recipes from Discover to find them here' :
-             'Like recipes from Discover to see them here'}
-          </Text>
+          {searchQuery.trim() ? (
+            <>
+              <Text style={styles.emptyIcon}>🔍</Text>
+              <Text style={styles.emptyTitle}>No results found</Text>
+              <Text style={styles.emptySubtitle}>Try a different search term</Text>
+            </>
+          ) : (
+            <>
+              <Text style={styles.emptyIcon}>
+                {subTab === 'liked' ? '❤️' : subTab === 'saved' ? '📌' : '📖'}
+              </Text>
+              <Text style={styles.emptyTitle}>
+                {subTab === 'liked' ? 'No Liked Recipes' :
+                 subTab === 'saved' ? 'No Saved Recipes' : 'No Recipes Created'}
+              </Text>
+              <Text style={styles.emptySubtitle}>
+                {subTab === 'liked' ? 'Like recipes from Discover to see them here' :
+                 subTab === 'saved' ? 'Save recipes from Discover to find them here' :
+                 'Tap the + button to create your first recipe!'}
+              </Text>
+            </>
+          )}
         </View>
       ) : (
         <FlatList
-          data={recipes}
+          data={filteredRecipes}
           renderItem={renderRecipeCard}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContainer}
+          numColumns={2}
+          contentContainerStyle={styles.recipeGrid}
+          columnWrapperStyle={styles.gridRow}
+          showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -665,9 +1284,15 @@ const MyRecipesTab: React.FC<{
 // ============================================================
 export const RecipeHubScreen: React.FC = () => {
   const { colors } = useThemeStore();
+  const { user } = useAuthStore();
   const navigation = useNavigation<any>();
   const styles = createHubStyles(colors);
   const [activeTab, setActiveTab] = useState<TabMode>('discover');
+  const [discoverState, setDiscoverState] = useState<DiscoverState>(DISCOVER_INITIAL);
+  const [browseState, setBrowseState] = useState<BrowseState>(BROWSE_INITIAL);
+  const [myRecipesState, setMyRecipesState] = useState<MyRecipesState>(MY_RECIPES_INITIAL);
+
+  const dietaryRestrictions = user?.profile_data?.preferences?.dietary_restrictions || [];
 
   const tabs: { key: TabMode; label: string }[] = [
     { key: 'discover', label: 'Discover' },
@@ -681,6 +1306,10 @@ export const RecipeHubScreen: React.FC = () => {
 
   const handleCreateRecipe = () => {
     navigation.navigate('CreateRecipe');
+  };
+
+  const handleEditPreferences = () => {
+    navigation.navigate('Profile', { screen: 'EditPreferences' });
   };
 
   return (
@@ -712,13 +1341,13 @@ export const RecipeHubScreen: React.FC = () => {
         {/* Content */}
         <View style={styles.content}>
           {activeTab === 'discover' && (
-            <DiscoverTab colors={colors} onViewRecipe={handleViewRecipe} />
+            <DiscoverTab colors={colors} onViewRecipe={handleViewRecipe} dietaryRestrictions={dietaryRestrictions} discoverState={discoverState} setDiscoverState={setDiscoverState} />
           )}
           {activeTab === 'browse' && (
-            <BrowseTab colors={colors} onViewRecipe={handleViewRecipe} />
+            <BrowseTab colors={colors} onViewRecipe={handleViewRecipe} dietaryRestrictions={dietaryRestrictions} onEditPreferences={handleEditPreferences} browseState={browseState} setBrowseState={setBrowseState} />
           )}
           {activeTab === 'myrecipes' && (
-            <MyRecipesTab colors={colors} onViewRecipe={handleViewRecipe} />
+            <MyRecipesTab colors={colors} onViewRecipe={handleViewRecipe} myRecipesState={myRecipesState} setMyRecipesState={setMyRecipesState} />
           )}
         </View>
 
@@ -802,6 +1431,32 @@ const createDiscoverStyles = (colors: ThemeColors) =>
     container: {
       flex: 1,
     },
+    pantryToggleRow: {
+      position: 'absolute',
+      top: 10,
+      right: 10,
+      flexDirection: 'row',
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      borderRadius: 16,
+      padding: 2,
+      zIndex: 10,
+    },
+    pantryToggle: {
+      paddingVertical: 5,
+      paddingHorizontal: 12,
+      borderRadius: 14,
+    },
+    pantryToggleActive: {
+      backgroundColor: colors.primary,
+    },
+    pantryToggleText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: 'rgba(255,255,255,0.7)',
+    },
+    pantryToggleTextActive: {
+      color: '#FFFFFF',
+    },
     centerContainer: {
       flex: 1,
       justifyContent: 'center',
@@ -842,66 +1497,76 @@ const createDiscoverStyles = (colors: ThemeColors) =>
     },
     cardContainer: {
       flex: 1,
-      justifyContent: 'center',
       alignItems: 'center',
-      paddingHorizontal: 16,
+      paddingHorizontal: 10,
+      paddingTop: 4,
+      paddingBottom: 4,
     },
     card: {
-      width: screenWidth - 32,
-      height: screenHeight * 0.50,
-      borderRadius: 16,
+      width: screenWidth - 20,
+      flex: 1,
+      borderRadius: 20,
       backgroundColor: colors.card,
+      overflow: 'hidden',
       ...Platform.select({
         ios: {
           shadowColor: '#000',
           shadowOffset: { width: 0, height: 8 },
-          shadowOpacity: 0.1,
-          shadowRadius: 16,
+          shadowOpacity: 0.15,
+          shadowRadius: 20,
         },
-        android: { elevation: 8 },
+        android: { elevation: 10 },
       }),
     },
     imageContainer: {
       flex: 1,
-      borderRadius: 16,
+      borderRadius: 20,
       overflow: 'hidden',
     },
     recipeImage: {
       width: '100%',
       height: '100%',
+      resizeMode: 'cover',
     },
     imageOverlay: {
       position: 'absolute',
       bottom: 0,
       left: 0,
       right: 0,
-      backgroundColor: 'rgba(0,0,0,0.6)',
-      padding: 20,
+      paddingHorizontal: 20,
+      paddingTop: 14,
+      paddingBottom: 100,
+      backgroundColor: 'rgba(0,0,0,0.45)',
+    },
+    titleRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      justifyContent: 'space-between',
+      marginBottom: 6,
     },
     recipeTitle: {
-      fontSize: 24,
+      fontSize: 22,
       fontWeight: 'bold',
       color: '#FFFFFF',
-      marginBottom: 4,
     },
     recipeSubtitle: {
-      fontSize: 16,
-      color: '#F8F9FA',
-      marginBottom: 12,
+      fontSize: 14,
+      color: 'rgba(255,255,255,0.8)',
+      marginTop: 2,
     },
     metaRow: {
       flexDirection: 'row',
-      gap: 16,
-      marginBottom: 8,
+      gap: 14,
     },
     metaLabel: {
       fontSize: 13,
-      color: '#F8F9FA',
+      color: 'rgba(255,255,255,0.9)',
     },
     badgeRow: {
       flexDirection: 'row',
       gap: 8,
-      marginBottom: 8,
+      marginLeft: 8,
+      marginTop: 2,
     },
     difficultyBadge: {
       paddingHorizontal: 10,
@@ -912,76 +1577,83 @@ const createDiscoverStyles = (colors: ThemeColors) =>
       fontWeight: '600',
       overflow: 'hidden',
     },
-    description: {
-      fontSize: 14,
-      color: '#F8F9FA',
-      lineHeight: 20,
-    },
     actionButtons: {
+      position: 'absolute',
+      bottom: 0,
+      left: 0,
+      right: 0,
       flexDirection: 'row',
       justifyContent: 'center',
       alignItems: 'center',
-      paddingVertical: 16,
-      gap: 24,
+      paddingVertical: 14,
+      gap: 32,
+    },
+    actionButtonWrapper: {
+      alignItems: 'center',
+      gap: 4,
     },
     actionButton: {
-      width: 56,
-      height: 56,
-      borderRadius: 28,
+      width: 52,
+      height: 52,
+      borderRadius: 26,
       justifyContent: 'center',
       alignItems: 'center',
-      ...Platform.select({
-        ios: {
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: 0.2,
-          shadowRadius: 8,
-        },
-        android: { elevation: 4 },
-      }),
+      borderWidth: 2,
+      borderColor: 'rgba(255,255,255,0.3)',
+    },
+    actionButtonLabel: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: 'rgba(255,255,255,0.9)',
+      textShadowColor: 'rgba(0,0,0,0.5)',
+      textShadowOffset: { width: 0, height: 1 },
+      textShadowRadius: 2,
+    },
+    skipButton: {
+      backgroundColor: 'rgba(231, 76, 60, 0.85)',
+    },
+    saveButton: {
+      backgroundColor: 'rgba(247, 179, 43, 0.85)',
+    },
+    likeButton: {
+      backgroundColor: 'rgba(46, 204, 113, 0.85)',
     },
     actionButtonText: {
-      fontSize: 22,
-    },
-    hintText: {
-      textAlign: 'center',
-      fontSize: 12,
-      color: colors.textMuted,
-      paddingBottom: 8,
+      fontSize: 20,
     },
     overlayLabel: {
       position: 'absolute',
-      paddingVertical: 12,
-      paddingHorizontal: 24,
-      borderRadius: 16,
-      borderWidth: 5,
+      paddingVertical: 10,
+      paddingHorizontal: 20,
+      borderRadius: 12,
+      borderWidth: 4,
       zIndex: 100,
     },
     likeLabel: {
-      top: 50,
-      right: 24,
+      top: '35%',
+      right: 30,
       borderColor: '#2ECC71',
-      backgroundColor: 'rgba(46, 204, 113, 0.5)',
-      transform: [{ rotate: '20deg' }],
+      backgroundColor: 'rgba(46, 204, 113, 0.6)',
+      transform: [{ rotate: '15deg' }],
     },
     nopeLabel: {
-      top: 50,
-      left: 24,
+      top: '35%',
+      left: 30,
       borderColor: '#E74C3C',
-      backgroundColor: 'rgba(231, 76, 60, 0.5)',
-      transform: [{ rotate: '-20deg' }],
+      backgroundColor: 'rgba(231, 76, 60, 0.6)',
+      transform: [{ rotate: '-15deg' }],
     },
     saveLabel: {
-      top: 50,
+      top: '25%',
       alignSelf: 'center',
       borderColor: '#F7B32B',
-      backgroundColor: 'rgba(247, 179, 43, 0.5)',
+      backgroundColor: 'rgba(247, 179, 43, 0.6)',
     },
     overlayText: {
-      fontSize: 40,
+      fontSize: 32,
       fontWeight: '900',
       color: '#FFFFFF',
-      letterSpacing: 6,
+      letterSpacing: 4,
       textShadowColor: 'rgba(0, 0, 0, 0.9)',
       textShadowOffset: { width: 2, height: 2 },
       textShadowRadius: 4,
@@ -997,25 +1669,23 @@ const createBrowseStyles = (colors: ThemeColors) =>
       paddingHorizontal: 16,
       paddingTop: 12,
       paddingBottom: 8,
+      gap: 10,
     },
     searchInputContainer: {
       flexDirection: 'row',
       alignItems: 'center',
-      backgroundColor: colors.inputBackground || colors.backgroundSecondary,
-      borderRadius: 12,
-      paddingHorizontal: 12,
-      borderWidth: 1,
-      borderColor: colors.border,
-    },
-    searchIcon: {
-      fontSize: 16,
-      marginRight: 8,
+      backgroundColor: colors.backgroundSecondary,
+      borderRadius: 10,
+      paddingHorizontal: 10,
+      borderWidth: 1.5,
+      borderColor: colors.primary + '40',
+      height: 40,
     },
     searchInput: {
       flex: 1,
-      paddingVertical: 10,
-      fontSize: 15,
+      fontSize: 14,
       color: colors.text,
+      paddingVertical: 0,
     },
     clearButton: {
       fontSize: 16,
@@ -1023,8 +1693,6 @@ const createBrowseStyles = (colors: ThemeColors) =>
       padding: 4,
     },
     filterContainer: {
-      paddingHorizontal: 16,
-      paddingBottom: 12,
       gap: 8,
     },
     filterChip: {
@@ -1047,6 +1715,31 @@ const createBrowseStyles = (colors: ThemeColors) =>
     },
     filterChipTextActive: {
       color: colors.primary,
+    },
+    dietaryBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: colors.primary + '12',
+      marginHorizontal: 16,
+      marginBottom: 8,
+      paddingVertical: 8,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.primary + '30',
+    },
+    dietaryBannerText: {
+      fontSize: 13,
+      color: colors.textSecondary,
+      fontWeight: '500',
+      flex: 1,
+    },
+    dietaryBannerLink: {
+      fontSize: 13,
+      color: colors.primary,
+      fontWeight: '600',
+      marginLeft: 8,
     },
     expiringBanner: {
       flexDirection: 'row',
@@ -1090,13 +1783,11 @@ const createBrowseStyles = (colors: ThemeColors) =>
       color: '#BF360C',
     },
     loadingContainer: {
-      flex: 1,
-      justifyContent: 'center',
+      paddingTop: 80,
       alignItems: 'center',
     },
     emptyContainer: {
-      flex: 1,
-      justifyContent: 'center',
+      paddingTop: 60,
       alignItems: 'center',
       paddingHorizontal: 32,
     },
@@ -1202,6 +1893,32 @@ const createMyRecipesStyles = (colors: ThemeColors) =>
     container: {
       flex: 1,
     },
+    searchContainer: {
+      paddingHorizontal: 16,
+      paddingTop: 12,
+      paddingBottom: 8,
+    },
+    searchInputContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.backgroundSecondary,
+      borderRadius: 10,
+      paddingHorizontal: 10,
+      borderWidth: 1.5,
+      borderColor: colors.primary + '40',
+      height: 40,
+    },
+    searchInput: {
+      flex: 1,
+      fontSize: 14,
+      color: colors.text,
+      paddingVertical: 0,
+    },
+    clearButton: {
+      fontSize: 16,
+      color: colors.textMuted,
+      padding: 4,
+    },
     subTabContainer: {
       flexDirection: 'row',
       paddingHorizontal: 16,
@@ -1236,25 +1953,23 @@ const createMyRecipesStyles = (colors: ThemeColors) =>
       color: colors.primary,
     },
     loadingContainer: {
-      flex: 1,
-      justifyContent: 'center',
+      paddingTop: 80,
       alignItems: 'center',
     },
     emptyContainer: {
-      flex: 1,
-      justifyContent: 'center',
+      paddingTop: 60,
       alignItems: 'center',
       paddingHorizontal: 32,
     },
     emptyIcon: {
-      fontSize: 56,
-      marginBottom: 16,
+      fontSize: 48,
+      marginBottom: 12,
     },
     emptyTitle: {
-      fontSize: 20,
-      fontWeight: 'bold',
+      fontSize: 18,
+      fontWeight: '600',
       color: colors.text,
-      marginBottom: 8,
+      marginBottom: 6,
     },
     emptySubtitle: {
       fontSize: 14,
@@ -1262,67 +1977,83 @@ const createMyRecipesStyles = (colors: ThemeColors) =>
       textAlign: 'center',
       lineHeight: 20,
     },
-    listContainer: {
-      padding: 16,
+    recipeGrid: {
+      paddingHorizontal: 12,
       paddingBottom: 80,
     },
+    gridRow: {
+      justifyContent: 'space-between',
+      paddingHorizontal: 4,
+    },
     recipeCard: {
+      width: (screenWidth - 40) / 2,
       backgroundColor: colors.backgroundSecondary,
-      borderRadius: 16,
-      marginBottom: 14,
+      borderRadius: 14,
+      marginBottom: 12,
+      overflow: 'hidden',
       ...Platform.select({
         ios: {
           shadowColor: '#000',
           shadowOffset: { width: 0, height: 1 },
           shadowOpacity: 0.06,
-          shadowRadius: 8,
+          shadowRadius: 6,
         },
         android: { elevation: 2 },
       }),
     },
-    cardContent: {
-      padding: 16,
+    recipeImageContainer: {
+      height: 120,
+      backgroundColor: colors.border,
+    },
+    recipeImage: {
+      width: '100%',
+      height: '100%',
+      resizeMode: 'cover',
+    },
+    recipeImagePlaceholder: {
+      width: '100%',
+      height: '100%',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    placeholderEmoji: {
+      fontSize: 40,
+    },
+    aiBadge: {
+      position: 'absolute',
+      top: 8,
+      right: 8,
+      backgroundColor: colors.secondary,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 8,
+    },
+    aiBadgeText: {
+      color: '#FFF',
+      fontSize: 10,
+      fontWeight: '700',
+    },
+    recipeInfo: {
+      padding: 10,
     },
     recipeTitle: {
-      fontSize: 17,
-      fontWeight: '700',
+      fontSize: 14,
+      fontWeight: '600',
       color: colors.text,
       marginBottom: 4,
+      lineHeight: 19,
     },
-    recipeDescription: {
-      fontSize: 14,
-      color: colors.textMuted,
-      lineHeight: 20,
-      marginBottom: 8,
-    },
-    tagsRow: {
+    recipeMeta: {
       flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 6,
-      marginBottom: 10,
+      gap: 8,
+      marginBottom: 2,
     },
-    tag: {
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 12,
-      backgroundColor: colors.background,
-    },
-    tagText: {
+    recipeMetaText: {
       fontSize: 12,
-      fontWeight: '500',
-      color: colors.textMuted,
-    },
-    detailsRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-    },
-    detailChip: {
-      fontSize: 13,
       color: colors.textMuted,
     },
     calorieText: {
-      fontSize: 13,
+      fontSize: 12,
       fontWeight: '600',
       color: colors.primary,
     },

@@ -117,7 +117,7 @@ class RecipeFeedFilter(BaseModel):
     dietary_tags: Optional[List[str]] = None
     search: Optional[str] = None
     use_pantry_items: bool = False
-    limit: int = Field(20, ge=1, le=100)
+    limit: int = Field(20, ge=1, le=500)
     offset: int = Field(0, ge=0)
 
 

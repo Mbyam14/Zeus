@@ -49,26 +49,23 @@ class MealAssignmentService:
         self,
         recipes: List[Dict[str, Any]],
         cooking_sessions: int = 6,
-        leftover_tolerance: str = "moderate"
+        leftover_tolerance: str = "moderate",
+        selected_days: Optional[List[str]] = None
     ) -> Dict[str, Dict[str, Dict[str, Any]]]:
         """
-        Assign recipes to all 21 meal slots with intelligent repeating.
+        Assign recipes to meal slots with intelligent repeating.
 
         Args:
             recipes: List of recipe dicts (each must have 'id', 'title', 'meal_type')
             cooking_sessions: Number of actual cooking events (unique recipes to use)
             leftover_tolerance: How much repetition is acceptable (low/moderate/high)
+            selected_days: Which days to assign meals to (defaults to all 7)
 
         Returns:
             Dict mapping day -> meal_type -> MealSlotData
-            Example: {
-                "monday": {
-                    "breakfast": {"recipe_id": "xxx", "is_repeat": False, "original_day": None, "order": 1},
-                    "lunch": {"recipe_id": "yyy", "is_repeat": True, "original_day": "sunday", "order": 2},
-                    "dinner": {"recipe_id": "zzz", "is_repeat": False, "original_day": None, "order": 3}
-                }
-            }
         """
+        target_days = selected_days if selected_days else DAYS
+        num_days = len(target_days)
         max_repeats = self.LEFTOVER_MAX.get(leftover_tolerance, 3)
 
         # Categorize recipes by meal type
@@ -85,15 +82,16 @@ class MealAssignmentService:
             # Lunches can share with dinners (leftover concept)
             lunch_recipes = dinner_recipes
 
-        logger.info(f"Assigning {len(recipes)} recipes to 21 slots (max {max_repeats} repeats)")
+        total_slots = num_days * 3
+        logger.info(f"Assigning {len(recipes)} recipes to {total_slots} slots across {num_days} days (max {max_repeats} repeats)")
         logger.info(f"Breakfast: {len(breakfast_recipes)}, Lunch: {len(lunch_recipes)}, Dinner: {len(dinner_recipes)}")
 
-        assignments: Dict[str, Dict[str, Dict[str, Any]]] = {day: {} for day in DAYS}
+        assignments: Dict[str, Dict[str, Dict[str, Any]]] = {day: {} for day in target_days}
         recipe_usage: Dict[str, int] = {}  # Track usage count per recipe
 
         # Strategy 1: Assign dinners first (they generate lunch leftovers)
-        dinner_rotation = self._create_rotation(dinner_recipes, 7, max_repeats)
-        for i, day in enumerate(DAYS):
+        dinner_rotation = self._create_rotation(dinner_recipes, num_days, max_repeats)
+        for i, day in enumerate(target_days):
             recipe = dinner_rotation[i]
             recipe_id = recipe.get("id", f"temp_{i}")
             is_repeat = recipe_usage.get(recipe_id, 0) > 0
@@ -107,16 +105,16 @@ class MealAssignmentService:
             recipe_usage[recipe_id] = recipe_usage.get(recipe_id, 0) + 1
 
         # Strategy 2: Lunches = yesterday's dinner (leftover concept)
-        for i, day in enumerate(DAYS):
+        for i, day in enumerate(target_days):
             if i == 0:
-                # Monday - use a lunch recipe or first available
+                # First day - use a lunch recipe or first available
                 recipe = lunch_recipes[0] if lunch_recipes else dinner_recipes[0]
                 recipe_id = recipe.get("id", "temp_lunch_0")
                 is_repeat = recipe_usage.get(recipe_id, 0) > 0
                 original_day = None
             else:
-                # Other days - yesterday's dinner becomes today's lunch
-                yesterday = DAYS[i - 1]
+                # Other days - previous day's dinner becomes today's lunch
+                yesterday = target_days[i - 1]
                 recipe_id = assignments[yesterday]["dinner"]["recipe_id"]
                 is_repeat = True
                 original_day = yesterday
@@ -130,8 +128,8 @@ class MealAssignmentService:
             recipe_usage[recipe_id] = recipe_usage.get(recipe_id, 0) + 1
 
         # Strategy 3: Breakfasts - high repetition is normal (people eat same breakfast)
-        breakfast_rotation = self._create_rotation(breakfast_recipes, 7, max_repeats + 1)
-        for i, day in enumerate(DAYS):
+        breakfast_rotation = self._create_rotation(breakfast_recipes, num_days, max_repeats + 1)
+        for i, day in enumerate(target_days):
             recipe = breakfast_rotation[i]
             recipe_id = recipe.get("id", f"temp_breakfast_{i}")
             is_repeat = recipe_usage.get(recipe_id, 0) > 0

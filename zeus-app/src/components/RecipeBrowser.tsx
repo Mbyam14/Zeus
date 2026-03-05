@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -10,50 +10,87 @@ import {
   Image,
 } from 'react-native';
 import { useThemeStore, ThemeColors } from '../store/themeStore';
+import { useAuthStore } from '../store/authStore';
 import { recipeService } from '../services/recipeService';
 import { Recipe } from '../types/recipe';
 
 interface RecipeBrowserProps {
-  onSelectRecipe: (recipe: Recipe) => void;
+  onSelectRecipe: (recipe: Recipe | null) => void;
   selectedRecipe: Recipe | null;
   filterMealType?: 'breakfast' | 'lunch' | 'dinner';
+  /** Pre-loaded recipes to filter client-side (avoids API calls on filter change) */
+  recipes?: Recipe[];
+  onSearchChange?: (query: string) => void;
 }
 
 export const RecipeBrowser: React.FC<RecipeBrowserProps> = ({
   onSelectRecipe,
   selectedRecipe,
   filterMealType,
+  recipes: preloadedRecipes,
+  onSearchChange,
 }) => {
-  const [recipes, setRecipes] = useState<Recipe[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [apiRecipes, setApiRecipes] = useState<Recipe[]>([]);
+  const [loading, setLoading] = useState(!preloadedRecipes);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeMealType, setActiveMealType] = useState<string | undefined>(filterMealType);
   const { colors } = useThemeStore();
+  const { user } = useAuthStore();
   const styles = createStyles(colors);
 
+  const dietaryRestrictions = user?.profile_data?.preferences?.dietary_restrictions || [];
+  const isClientSide = !!preloadedRecipes;
+
+  // Only fetch from API if no pre-loaded recipes
   const loadRecipes = useCallback(async () => {
+    if (isClientSide) return;
     try {
       setLoading(true);
       const result = await recipeService.getAllRecipes(
         50,
         0,
         searchQuery || undefined,
-        activeMealType
+        activeMealType,
+        dietaryRestrictions.length > 0 ? dietaryRestrictions : undefined
       );
-      setRecipes(result);
+      setApiRecipes(result);
     } catch (error) {
       console.error('Failed to load recipes:', error);
     } finally {
       setLoading(false);
     }
-  }, [searchQuery, activeMealType]);
+  }, [searchQuery, activeMealType, isClientSide]);
 
   useEffect(() => {
+    if (isClientSide) return;
     const debounce = setTimeout(() => {
       loadRecipes();
     }, 300);
     return () => clearTimeout(debounce);
-  }, [loadRecipes]);
+  }, [loadRecipes, isClientSide]);
+
+  // Client-side filtering (instant, no API calls)
+  const filteredRecipes = useMemo(() => {
+    if (!isClientSide) return apiRecipes;
+
+    let filtered = preloadedRecipes!;
+
+    if (activeMealType) {
+      filtered = filtered.filter(r =>
+        r.meal_type?.some(mt => mt.toLowerCase() === activeMealType.toLowerCase())
+      );
+    }
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      filtered = filtered.filter(r =>
+        r.title.toLowerCase().includes(q) ||
+        r.cuisine_type?.toLowerCase().includes(q)
+      );
+    }
+
+    return filtered;
+  }, [isClientSide, preloadedRecipes, apiRecipes, activeMealType, searchQuery]);
 
   const mealTypes = [
     { key: undefined, label: 'All' },
@@ -62,13 +99,18 @@ export const RecipeBrowser: React.FC<RecipeBrowserProps> = ({
     { key: 'Dinner', label: 'Dinner' },
   ];
 
+  const handleSearchChange = (text: string) => {
+    setSearchQuery(text);
+    onSearchChange?.(text);
+  };
+
   const renderRecipeCard = ({ item }: { item: Recipe }) => {
     const isSelected = selectedRecipe?.id === item.id;
 
     return (
       <TouchableOpacity
         style={[styles.recipeCard, isSelected && styles.recipeCardSelected]}
-        onPress={() => onSelectRecipe(item)}
+        onPress={() => isSelected ? onSelectRecipe(null) : onSelectRecipe(item)}
         activeOpacity={0.7}
       >
         {isSelected && (
@@ -91,16 +133,8 @@ export const RecipeBrowser: React.FC<RecipeBrowserProps> = ({
         </View>
         <View style={styles.recipeInfo}>
           <Text style={styles.recipeTitle} numberOfLines={2}>{item.title}</Text>
-          <View style={styles.recipeMetaRow}>
-            {item.calories && (
-              <Text style={styles.recipeMeta}>{item.calories} cal/serving</Text>
-            )}
-            {item.protein_grams && (
-              <Text style={styles.recipeMeta}>{item.protein_grams}g protein</Text>
-            )}
-          </View>
-          {item.prep_time && (
-            <Text style={styles.recipeTime}>{item.prep_time + (item.cook_time || 0)} min</Text>
+          {item.calories && (
+            <Text style={styles.recipeMeta}>{item.calories} cal/serving</Text>
           )}
         </View>
       </TouchableOpacity>
@@ -109,27 +143,22 @@ export const RecipeBrowser: React.FC<RecipeBrowserProps> = ({
 
   return (
     <View style={styles.container}>
-      {/* Search Bar */}
-      <View style={styles.searchContainer}>
+      {/* Search + Filters in one row */}
+      <View style={styles.controlsRow}>
         <View style={styles.searchInputContainer}>
-          <Text style={styles.searchIcon}>🔍</Text>
           <TextInput
             style={styles.searchInput}
             placeholder="Search recipes..."
             placeholderTextColor={colors.textMuted}
             value={searchQuery}
-            onChangeText={setSearchQuery}
+            onChangeText={handleSearchChange}
           />
           {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
+            <TouchableOpacity onPress={() => handleSearchChange('')}>
               <Text style={styles.clearButton}>✕</Text>
             </TouchableOpacity>
           )}
         </View>
-      </View>
-
-      {/* Meal Type Filter */}
-      <View style={styles.filterContainer}>
         {mealTypes.map((type) => (
           <TouchableOpacity
             key={type.label}
@@ -156,17 +185,13 @@ export const RecipeBrowser: React.FC<RecipeBrowserProps> = ({
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="small" color={colors.primary} />
         </View>
-      ) : recipes.length === 0 ? (
+      ) : filteredRecipes.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Text style={styles.emptyIcon}>📭</Text>
           <Text style={styles.emptyText}>No recipes found</Text>
-          <Text style={styles.emptySubtext}>
-            {searchQuery ? 'Try a different search term' : 'Create some recipes first!'}
-          </Text>
         </View>
       ) : (
         <FlatList
-          data={recipes}
+          data={filteredRecipes}
           renderItem={renderRecipeCard}
           keyExtractor={(item) => item.id}
           horizontal
@@ -181,47 +206,41 @@ export const RecipeBrowser: React.FC<RecipeBrowserProps> = ({
 const createStyles = (colors: ThemeColors) => StyleSheet.create({
   container: {
     backgroundColor: colors.card,
-    borderRadius: 16,
     overflow: 'hidden',
   },
-  searchContainer: {
-    padding: 12,
-    paddingBottom: 8,
-  },
-  searchInputContainer: {
+  controlsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.inputBackground,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 6,
   },
-  searchIcon: {
-    fontSize: 16,
-    marginRight: 8,
+  searchInputContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    borderWidth: 1.5,
+    borderColor: colors.primary + '40',
+    height: 36,
   },
   searchInput: {
     flex: 1,
-    paddingVertical: 10,
-    fontSize: 15,
+    fontSize: 14,
     color: colors.text,
+    paddingVertical: 0,
   },
   clearButton: {
-    fontSize: 16,
+    fontSize: 14,
     color: colors.textMuted,
-    padding: 4,
-  },
-  filterContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: 12,
-    paddingBottom: 12,
-    gap: 8,
+    padding: 2,
   },
   filterChip: {
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    borderRadius: 16,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 14,
     backgroundColor: colors.background,
     borderWidth: 1,
     borderColor: colors.border,
@@ -231,7 +250,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     borderColor: colors.primary,
   },
   filterChipText: {
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: '500',
     color: colors.textSecondary,
   },
@@ -239,40 +258,28 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     color: colors.primary,
   },
   loadingContainer: {
-    height: 160,
+    height: 100,
     justifyContent: 'center',
     alignItems: 'center',
   },
   emptyContainer: {
-    height: 160,
+    height: 80,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  emptyIcon: {
-    fontSize: 32,
-    marginBottom: 8,
   },
   emptyText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.text,
-    marginBottom: 4,
-  },
-  emptySubtext: {
     fontSize: 14,
     color: colors.textMuted,
-    textAlign: 'center',
   },
   recipeList: {
-    paddingHorizontal: 12,
-    paddingBottom: 12,
+    paddingHorizontal: 10,
+    paddingBottom: 14,
   },
   recipeCard: {
-    width: 140,
-    marginRight: 12,
+    width: 120,
+    marginRight: 10,
     backgroundColor: colors.background,
-    borderRadius: 12,
+    borderRadius: 10,
     overflow: 'hidden',
     borderWidth: 2,
     borderColor: 'transparent',
@@ -283,11 +290,11 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   },
   selectedBadge: {
     position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    top: 6,
+    right: 6,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     backgroundColor: colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
@@ -295,11 +302,11 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   },
   selectedBadgeText: {
     color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: '700',
   },
   recipeImageContainer: {
-    height: 90,
+    height: 70,
     backgroundColor: colors.borderLight,
   },
   recipeImage: {
@@ -315,30 +322,22 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     backgroundColor: colors.borderLight,
   },
   recipeImagePlaceholderText: {
-    fontSize: 32,
+    fontSize: 24,
   },
   recipeInfo: {
-    padding: 10,
+    paddingHorizontal: 6,
+    paddingTop: 8,
+    paddingBottom: 6,
   },
   recipeTitle: {
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: '600',
     color: colors.text,
-    marginBottom: 4,
-    lineHeight: 18,
-  },
-  recipeMetaRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
+    marginBottom: 2,
+    lineHeight: 14,
   },
   recipeMeta: {
-    fontSize: 11,
+    fontSize: 10,
     color: colors.textMuted,
-  },
-  recipeTime: {
-    fontSize: 11,
-    color: colors.textSecondary,
-    marginTop: 2,
   },
 });

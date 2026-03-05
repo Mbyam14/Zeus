@@ -207,27 +207,46 @@ class RecipeService:
         if filters.meal_type:
             query = query.contains("meal_type", [filters.meal_type.value])
         if filters.dietary_tags:
-            query = query.overlaps("dietary_tags", filters.dietary_tags)
+            # Use contains (ALL tags must match) for dietary restriction filtering
+            query = query.contains("dietary_tags", filters.dietary_tags)
         if filters.search:
             query = query.ilike("title", f"%{filters.search}%")
 
-        # Order by creation date (newest first) and apply pagination
-        query = query.order("created_at", desc=True)
-        query = query.range(filters.offset, filters.offset + filters.limit - 1)
-        
-        result = query.execute()
-        
+        # Fetch a larger pool and shuffle for variety
+        # When paginating (offset > 0), use deterministic order so pages don't overlap
+        if filters.offset == 0:
+            # First page: grab a big pool, shuffle, return requested amount
+            pool_size = min(filters.limit * 4, 500)
+            query = query.order("likes_count", desc=True)
+            query = query.range(0, pool_size - 1)
+            result = query.execute()
+
+            import random
+            data = result.data or []
+            random.shuffle(data)
+            data = data[:filters.limit]
+        else:
+            query = query.order("id")
+            query = query.range(filters.offset, filters.offset + filters.limit - 1)
+            result = query.execute()
+            data = result.data or []
+
         recipes = []
-        for recipe_data in result.data:
+        for recipe_data in data:
             recipe_response = await self._format_recipe_response(recipe_data)
-            
-            # Add user context if provided
-            if user_id:
-                recipe_response.is_liked = await self._is_recipe_liked(recipe_response.id, user_id)
-                recipe_response.is_saved = await self._is_recipe_saved(recipe_response.id, user_id)
-            
             recipes.append(recipe_response)
-        
+
+        # Batch fetch liked/saved status instead of N+1 queries
+        if user_id and recipes:
+            recipe_ids = [r.id for r in recipes]
+            liked_result = self.db.table("recipe_likes").select("recipe_id").eq("user_id", user_id).in_("recipe_id", recipe_ids).execute()
+            saved_result = self.db.table("recipe_saves").select("recipe_id").eq("user_id", user_id).in_("recipe_id", recipe_ids).execute()
+            liked_ids = {r["recipe_id"] for r in liked_result.data}
+            saved_ids = {r["recipe_id"] for r in saved_result.data}
+            for recipe in recipes:
+                recipe.is_liked = recipe.id in liked_ids
+                recipe.is_saved = recipe.id in saved_ids
+
         return recipes
     
     async def like_recipe(self, recipe_id: str, user_id: str) -> bool:

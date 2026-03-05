@@ -74,7 +74,7 @@ export const CreateMealPlanScreen: React.FC<CreateMealPlanScreenProps> = ({
   };
 
   const handleBuildManually = () => {
-    navigation.navigate('ManualMealPlanBuilder', {
+    navigation.navigate('MealPlanEdit', {
       selectedDays,
     });
   };
@@ -140,9 +140,6 @@ export const CreateMealPlanScreen: React.FC<CreateMealPlanScreenProps> = ({
             <Text style={styles.optionDescription}>
               Automatically create a complete meal plan based on your preferences, pantry items, and nutrition goals
             </Text>
-          </View>
-          <View style={styles.optionBadge}>
-            <Text style={styles.optionBadgeText}>Recommended</Text>
           </View>
           <Text style={styles.optionArrow}>→</Text>
         </TouchableOpacity>

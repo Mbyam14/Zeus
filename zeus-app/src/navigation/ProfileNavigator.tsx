@@ -1,7 +1,6 @@
 import React from 'react';
 import { createStackNavigator } from '@react-navigation/stack';
 import { ProfileScreen } from '../screens/profile/ProfileScreen';
-import { MyRecipesScreen } from '../screens/profile/MyRecipesScreen';
 import { SettingsScreen } from '../screens/profile/SettingsScreen';
 import { EditPreferencesScreen } from '../screens/profile/EditPreferencesScreen';
 import { ThemeScreen } from '../screens/profile/ThemeScreen';
@@ -12,14 +11,9 @@ import { PrivacyPolicyScreen } from '../screens/profile/PrivacyPolicyScreen';
 import { NotificationsScreen } from '../screens/profile/NotificationsScreen';
 import { PrivacySecurityScreen } from '../screens/profile/PrivacySecurityScreen';
 import { DataStorageScreen } from '../screens/profile/DataStorageScreen';
-import { RecipeDetailScreen } from '../screens/recipe/RecipeDetailScreen';
-import { EditRecipeScreen } from '../screens/profile/EditRecipeScreen';
 
 export type ProfileStackParamList = {
   ProfileMain: undefined;
-  MyRecipes: undefined;
-  RecipeDetail: { recipe: any };
-  EditRecipe: { recipe: any };
   Settings: undefined;
   EditPreferences: undefined;
   Theme: undefined;
@@ -38,7 +32,6 @@ export const ProfileNavigator: React.FC = () => {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="ProfileMain" component={ProfileScreen} />
-      <Stack.Screen name="MyRecipes" component={MyRecipesScreen} />
       <Stack.Screen name="Settings" component={SettingsScreen} />
       <Stack.Screen name="EditPreferences" component={EditPreferencesScreen} />
       <Stack.Screen name="Theme" component={ThemeScreen} />
@@ -49,8 +42,6 @@ export const ProfileNavigator: React.FC = () => {
       <Stack.Screen name="Notifications" component={NotificationsScreen} />
       <Stack.Screen name="PrivacySecurity" component={PrivacySecurityScreen} />
       <Stack.Screen name="DataStorage" component={DataStorageScreen} />
-      <Stack.Screen name="RecipeDetail" component={RecipeDetailScreen} />
-      <Stack.Screen name="EditRecipe" component={EditRecipeScreen} />
     </Stack.Navigator>
   );
 };

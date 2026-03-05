@@ -34,7 +34,7 @@ async def get_recipe_feed(
     dietary_tags: Optional[List[str]] = Query(None, description="Filter by dietary tags"),
     search: Optional[str] = Query(None, description="Search by recipe title"),
     use_pantry_items: bool = Query(False, description="Prioritize recipes using pantry items"),
-    limit: int = Query(20, ge=1, le=100, description="Number of recipes to return"),
+    limit: int = Query(20, ge=1, le=500, description="Number of recipes to return"),
     offset: int = Query(0, ge=0, description="Number of recipes to skip"),
     current_user: Optional[UserResponse] = Depends(get_current_user_optional)
 ):

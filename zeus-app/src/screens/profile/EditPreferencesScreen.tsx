@@ -16,6 +16,7 @@ import {
 import { UserPreferences } from '../../types/user';
 import { userService } from '../../services/userService';
 import { useThemeStore } from '../../store/themeStore';
+import { useAuthStore } from '../../store/authStore';
 
 const DIETARY_OPTIONS = ['Vegetarian', 'Vegan', 'Gluten-Free', 'Dairy-Free', 'Keto', 'Paleo', 'Pescatarian'];
 const CUISINE_OPTIONS = ['Italian', 'Mexican', 'Asian', 'Mediterranean', 'American', 'Indian', 'French', 'Thai'];
@@ -101,6 +102,8 @@ export const EditPreferencesScreen: React.FC<EditPreferencesScreenProps> = ({ na
         household_size: preferences.household_size || 1
       };
       await userService.updatePreferences(prefsToSave);
+      // Refresh auth store so all screens pick up new preferences
+      await useAuthStore.getState().loadUser();
 
       setShowSuccess(true);
       Animated.parallel([

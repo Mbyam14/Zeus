@@ -10,7 +10,7 @@
  * - Summary statistics
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -21,9 +21,9 @@ import {
   Alert,
   RefreshControl,
   SectionList,
+  Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -56,10 +56,12 @@ export const GroceryListScreen: React.FC = () => {
   const [showWarnings, setShowWarnings] = useState<boolean>(false);
   const [showInstacartModal, setShowInstacartModal] = useState<boolean>(false);
 
-  // Load grocery list on mount
-  useEffect(() => {
-    loadGroceryList();
-  }, []);
+  // Load grocery list on focus (re-fetches when navigating to this tab)
+  useFocusEffect(
+    useCallback(() => {
+      loadGroceryList();
+    }, [])
+  );
 
   /**
    * Load grocery list from API
@@ -283,12 +285,16 @@ export const GroceryListScreen: React.FC = () => {
           </Text>
 
           <View style={styles.itemMeta}>
-            {/* Quantity */}
-            {item.needed_quantity !== undefined && item.needed_quantity > 0 && (
+            {/* Quantity - handle combined units like "2 cups + 3 tablespoons" */}
+            {item.unit && item.unit.includes('+') ? (
+              <Text style={styles.itemQuantity}>
+                {item.unit}
+              </Text>
+            ) : item.needed_quantity !== undefined && item.needed_quantity > 0 ? (
               <Text style={styles.itemQuantity}>
                 {item.needed_quantity} {item.unit || ''}
               </Text>
-            )}
+            ) : null}
 
             {/* Pantry indicator */}
             {item.have_in_pantry && (
@@ -407,20 +413,20 @@ export const GroceryListScreen: React.FC = () => {
    */
   if (loading && !groceryList) {
     return (
-      <SafeAreaView style={styles.container}>
+      <View style={styles.container}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Grocery List</Text>
         </View>
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color="#FF6B35" />
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   if (!groceryList && !loading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <View style={styles.container}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Grocery List</Text>
         </View>
@@ -450,7 +456,7 @@ export const GroceryListScreen: React.FC = () => {
             </>
           )}
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
@@ -461,7 +467,7 @@ export const GroceryListScreen: React.FC = () => {
     : 0;
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Grocery List</Text>
         <TouchableOpacity style={styles.moreButton} onPress={handleMarkAllPurchased}>
@@ -581,7 +587,7 @@ export const GroceryListScreen: React.FC = () => {
         groceryList={groceryList}
         onClose={() => setShowInstacartModal(false)}
       />
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -596,7 +602,8 @@ const createStyles = (colors: any) =>
       justifyContent: 'space-between',
       alignItems: 'center',
       paddingHorizontal: 24,
-      paddingVertical: 16,
+      paddingTop: Platform.OS === 'ios' ? 60 : 16,
+      paddingBottom: 16,
       backgroundColor: colors.backgroundSecondary,
       borderBottomWidth: 1,
       borderBottomColor: colors.border,

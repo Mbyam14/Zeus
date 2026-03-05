@@ -10,7 +10,8 @@ class RecipeService {
       Object.entries(filters).forEach(([key, value]) => {
         if (value !== undefined && value !== null) {
           if (Array.isArray(value)) {
-            params.append(key, value.join(','));
+            // Append each array item separately for proper query param handling
+            value.forEach(v => params.append(key, v.toString()));
           } else {
             params.append(key, value.toString());
           }
@@ -70,13 +71,17 @@ class RecipeService {
     limit = 50,
     offset = 0,
     search?: string,
-    mealType?: string
+    mealType?: string,
+    dietaryTags?: string[]
   ): Promise<Recipe[]> {
     const params = new URLSearchParams();
     params.append('limit', limit.toString());
     params.append('offset', offset.toString());
     if (search) params.append('search', search);
     if (mealType) params.append('meal_type', mealType);
+    if (dietaryTags) {
+      dietaryTags.forEach(tag => params.append('dietary_tags', tag));
+    }
 
     const response = await api.get<Recipe[]>(`/api/recipes/feed?${params.toString()}`);
     return response.data;

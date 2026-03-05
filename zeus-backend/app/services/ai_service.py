@@ -534,6 +534,174 @@ class AIService:
             logger.error(f"Failed to parse meal plan response: {e}")
             raise ValueError("Failed to parse meal plan response")
 
+    # =========================================================
+    # HYBRID MEAL PLAN: Claude selects from existing recipes
+    # =========================================================
+
+    async def select_meal_plan_recipes(
+        self,
+        candidates: Dict[str, List[Dict[str, Any]]],
+        preferences: dict,
+        selected_days: List[str],
+        unique_recipe_counts: Dict[str, int],
+    ) -> Dict[str, List[str]]:
+        """
+        Ask Claude to select the best recipe combination from shortlisted candidates.
+
+        Returns dict of meal_type -> list of recipe IDs.
+        Falls back to algorithmic selection if Claude fails.
+        """
+        if not self.client:
+            logger.warning("Claude not configured, using algorithmic fallback")
+            return self._algorithmic_selection(candidates, unique_recipe_counts)
+
+        prompt = self._build_selection_prompt(
+            candidates, preferences, selected_days, unique_recipe_counts
+        )
+
+        try:
+            loop = asyncio.get_event_loop()
+            response_text = await asyncio.wait_for(
+                loop.run_in_executor(
+                    self.executor,
+                    self._call_claude_sync,
+                    "claude-sonnet-4-5-20250929",
+                    500,
+                    0.4,
+                    [{"role": "user", "content": prompt}]
+                ),
+                timeout=15
+            )
+
+            return self._parse_selection_response(response_text, candidates)
+
+        except asyncio.TimeoutError:
+            logger.warning("Claude selection timed out, using algorithmic fallback")
+            return self._algorithmic_selection(candidates, unique_recipe_counts)
+        except Exception as e:
+            logger.warning(f"Claude selection failed: {e}, using algorithmic fallback")
+            return self._algorithmic_selection(candidates, unique_recipe_counts)
+
+    def _build_selection_prompt(
+        self,
+        candidates: Dict[str, List[Dict[str, Any]]],
+        preferences: dict,
+        selected_days: List[str],
+        unique_recipe_counts: Dict[str, int],
+    ) -> str:
+        """Build compact prompt for Claude recipe selection."""
+        calorie_target = preferences.get("calorie_target") or 2000
+        protein_target = preferences.get("protein_target_grams") or 150
+        distribution = preferences.get("meal_calorie_distribution", {
+            "breakfast": 25, "lunch": 35, "dinner": 40
+        })
+        budget = preferences.get("budget_friendly", False)
+        num_days = len(selected_days)
+
+        sections = []
+        for meal_type in ["breakfast", "dinner", "lunch"]:
+            items = candidates.get(meal_type, [])
+            if not items:
+                continue
+            count_needed = unique_recipe_counts.get(meal_type, 1)
+            lines = []
+            for i, r in enumerate(items):
+                cal = r.get("calories", "?")
+                prot = r.get("protein_grams", "?")
+                cuisine = r.get("cuisine_type", "?")
+                has_img = "IMG" if r.get("image_url") else "no-img"
+                lines.append(f"  {i+1}. {r['title']} | {cal}cal {prot}g protein | {cuisine} | {has_img}")
+
+            sections.append(
+                f"=== {meal_type.upper()} (pick {count_needed}) ===\n" + "\n".join(lines)
+            )
+
+        candidate_text = "\n\n".join(sections)
+
+        return f"""Select recipes for a {num_days}-day meal plan.
+
+DAILY TARGETS: {calorie_target} cal, {protein_target}g protein
+DISTRIBUTION: Breakfast {distribution.get('breakfast', 25)}%, Lunch {distribution.get('lunch', 35)}%, Dinner {distribution.get('dinner', 40)}%
+{"BUDGET MODE: prefer simpler/cheaper recipes" if budget else ""}
+
+{candidate_text}
+
+RULES:
+1. Pick EXACTLY the number requested for each meal type
+2. Maximize cuisine variety (avoid same cuisine within a type)
+3. Dinners become next-day lunches, so pick dinners that reheat well
+4. Balance daily nutrition across the combinations
+5. Prefer recipes with images (IMG)
+6. Pick recipes whose calories are closest to the per-meal target
+
+Respond with ONLY a JSON object mapping meal type to list of 1-based indices:
+{{"breakfast": [3], "dinner": [2, 5], "lunch": [1]}}"""
+
+    def _parse_selection_response(
+        self,
+        response_text: str,
+        candidates: Dict[str, List[Dict[str, Any]]],
+    ) -> Dict[str, List[str]]:
+        """Parse Claude's selection into recipe IDs."""
+        # Extract JSON from response
+        start = response_text.find('{')
+        end = response_text.rfind('}') + 1
+        if start == -1 or end == 0:
+            raise ValueError("No JSON found in response")
+
+        selection = json.loads(response_text[start:end])
+
+        result = {}
+        for meal_type, indices in selection.items():
+            meal_candidates = candidates.get(meal_type, [])
+            recipe_ids = []
+            for idx in indices:
+                i = idx - 1  # Convert 1-based to 0-based
+                if 0 <= i < len(meal_candidates):
+                    recipe_ids.append(meal_candidates[i]["id"])
+                else:
+                    logger.warning(f"Invalid index {idx} for {meal_type}")
+            result[meal_type] = recipe_ids
+
+        return result
+
+    def _algorithmic_selection(
+        self,
+        candidates: Dict[str, List[Dict[str, Any]]],
+        unique_recipe_counts: Dict[str, int],
+    ) -> Dict[str, List[str]]:
+        """Pure algorithmic selection as fallback. Picks top-scored with cuisine diversity."""
+        import random
+
+        result = {}
+        for meal_type, count in unique_recipe_counts.items():
+            meal_candidates = candidates.get(meal_type, [])
+            # Already sorted by score from shortlist service
+            selected = []
+            used_cuisines = set()
+
+            for r in meal_candidates:
+                if len(selected) >= count:
+                    break
+                cuisine = (r.get("cuisine_type") or "").lower()
+                # Prefer diverse cuisines, but fill slots regardless
+                if cuisine not in used_cuisines or len(selected) < count:
+                    selected.append(r["id"])
+                    if cuisine:
+                        used_cuisines.add(cuisine)
+
+            # If still not enough, just grab whatever's left
+            if len(selected) < count:
+                for r in meal_candidates:
+                    if r["id"] not in selected:
+                        selected.append(r["id"])
+                    if len(selected) >= count:
+                        break
+
+            result[meal_type] = selected
+
+        return result
+
 
 # Global AI service instance
 ai_service = AIService()

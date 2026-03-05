@@ -14,7 +14,6 @@ import {
   Platform,
   Keyboard,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
@@ -178,6 +177,9 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
     useCallback(() => {
       loadPantryItems();
       loadExpiringItems();
+      return () => {
+        setShowAddDropdown(false);
+      };
     }, [selectedCategory, searchQuery])
   );
 
@@ -671,7 +673,7 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
   );
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       {selectionMode ? (
         <View style={styles.header}>
           <TouchableOpacity onPress={exitSelectionMode}>
@@ -891,6 +893,8 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
           keyExtractor={item => item.id}
           contentContainerStyle={[styles.listContent, selectionMode && { paddingBottom: 100 }]}
           stickySectionHeadersEnabled={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
         />
       )}
 
@@ -1268,13 +1272,13 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
 
         </KeyboardAvoidingView>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 };
 
 const createStyles = (colors: any) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, paddingVertical: 16, backgroundColor: colors.backgroundSecondary, borderBottomWidth: 1, borderBottomColor: colors.border, zIndex: 100 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, paddingTop: Platform.OS === 'ios' ? 60 : 16, paddingBottom: 16, backgroundColor: colors.backgroundSecondary, borderBottomWidth: 1, borderBottomColor: colors.border, zIndex: 100 },
   headerTitle: { fontSize: 28, fontWeight: 'bold', color: colors.primary },
   headerButtons: { flexDirection: 'row', gap: 12 },
   addButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center' },
@@ -1310,7 +1314,7 @@ const createStyles = (colors: any) => StyleSheet.create({
   filterPillText: { fontSize: 14, fontWeight: '600', color: colors.textMuted },
   filterPillTextActive: { color: colors.backgroundSecondary },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  listContent: { padding: 20 },
+  listContent: { padding: 20, paddingBottom: 200 },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: colors.background, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 8, marginBottom: 12 },
   sectionTitle: { fontSize: 18, fontWeight: 'bold', color: colors.text },
   sectionCount: { fontSize: 14, color: colors.textMuted },
