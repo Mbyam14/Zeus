@@ -11,6 +11,12 @@ import logging
 from typing import Dict, List, Optional, Any
 
 from app.database import get_database
+from app.utils.ingredient_matching import (
+    calculate_pantry_coverage,
+    is_trivial_ingredient,
+    normalize_ingredient_name,
+    prepare_pantry_lookup,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +32,7 @@ class RecipeShortlistService:
         meal_types: List[str] = None,
         exclude_recipe_ids: Optional[List[str]] = None,
         target_per_meal_type: int = 25,
+        pantry_items: Optional[List[dict]] = None,
     ) -> Dict[str, List[Dict[str, Any]]]:
         """
         Shortlist recipe candidates for meal plan generation.
@@ -44,6 +51,11 @@ class RecipeShortlistService:
 
         allergies = preferences.get("allergies", [])
         disliked = preferences.get("disliked_ingredients", [])
+
+        # Pre-normalize pantry items once for all candidates
+        pantry_lookup = prepare_pantry_lookup(pantry_items) if pantry_items else {}
+        if pantry_lookup:
+            logger.info(f"Pantry-aware scoring enabled with {len(pantry_lookup)} pantry items")
 
         result = {}
 
@@ -87,7 +99,7 @@ class RecipeShortlistService:
 
             # Score and rank
             scored = self._score_candidates(
-                filtered, meal_cal_target, meal_protein_target
+                filtered, meal_cal_target, meal_protein_target, pantry_lookup
             )
 
             result[meal_type] = scored[:target_per_meal_type]
@@ -181,43 +193,89 @@ class RecipeShortlistService:
         candidates: List[Dict[str, Any]],
         target_calories: int,
         target_protein: float,
+        pantry_lookup: Optional[Dict[str, dict]] = None,
     ) -> List[Dict[str, Any]]:
-        """Score and rank candidates. Higher score = better match."""
+        """Score and rank candidates. Higher score = better match.
+
+        Scoring breakdown (max ~120 with pantry, ~70 without):
+        - Calorie proximity: 0-20
+        - Protein proximity: 0-20
+        - Has image: 0 or 10
+        - Popularity: 0-10
+        - Not AI-generated: 0 or 5
+        - Cook time: 0-5
+        - Pantry coverage: 0-40 (when pantry items available)
+        - Simplicity bonus: 0-10
+        """
         for recipe in candidates:
             score = 0.0
 
-            # Calorie proximity (0-30 points)
+            # Calorie proximity (0-20 points)
             cal = recipe.get("calories") or 0
             if cal > 0 and target_calories > 0:
                 cal_diff_pct = abs(cal - target_calories) / target_calories
-                score += max(0, 30 * (1 - cal_diff_pct))
+                score += max(0, 20 * (1 - cal_diff_pct))
 
-            # Protein proximity (0-25 points)
+            # Protein proximity (0-20 points)
             prot = float(recipe.get("protein_grams") or 0)
             if prot > 0 and target_protein > 0:
                 prot_diff_pct = abs(prot - target_protein) / target_protein
-                score += max(0, 25 * (1 - prot_diff_pct))
+                score += max(0, 20 * (1 - prot_diff_pct))
 
-            # Has image (0 or 15 points)
+            # Has image (0 or 10 points)
             if recipe.get("image_url"):
-                score += 15
-
-            # Popularity (0-15 points, logarithmic)
-            likes = recipe.get("likes_count", 0) or 0
-            score += min(15, math.log2(likes + 1) * 3)
-
-            # Not AI-generated bonus (0 or 10 points)
-            if not recipe.get("is_ai_generated", False):
                 score += 10
+
+            # Popularity (0-10 points, logarithmic)
+            likes = recipe.get("likes_count", 0) or 0
+            score += min(10, math.log2(likes + 1) * 2)
+
+            # Not AI-generated bonus (0 or 5 points)
+            if not recipe.get("is_ai_generated", False):
+                score += 5
 
             # Shorter cook time bonus (0-5 points)
             total_time = (recipe.get("prep_time") or 0) + (recipe.get("cook_time") or 0)
             if total_time > 0:
                 score += max(0, 5 * (1 - total_time / 120))
 
+            # Pantry coverage (0-40 points)
+            ingredients = recipe.get("ingredients") or []
+            if pantry_lookup and ingredients:
+                coverage, matched, total = calculate_pantry_coverage(
+                    ingredients, pantry_lookup
+                )
+                score += coverage * 40
+                # Store metadata for Claude prompt
+                recipe["_pantry_coverage"] = round(coverage * 100)
+                recipe["_pantry_matched"] = matched
+                recipe["_pantry_total"] = total
+
+            # Simplicity bonus (0-10 points): fewer non-trivial ingredients = bonus
+            if ingredients:
+                non_trivial = sum(
+                    1 for ing in ingredients
+                    if isinstance(ing, dict) and ing.get("name")
+                    and not is_trivial_ingredient(ing["name"])
+                )
+                if non_trivial > 0:
+                    score += max(0, 10 * (1 - non_trivial / 15))
+
             recipe["_score"] = round(score, 2)
 
         candidates.sort(key=lambda r: r.get("_score", 0), reverse=True)
+
+        # Log top candidates for debugging
+        if pantry_lookup and candidates:
+            top3 = candidates[:3]
+            for r in top3:
+                logger.info(
+                    f"  Top candidate: {r.get('title', '?')} "
+                    f"score={r.get('_score', 0)} "
+                    f"pantry={r.get('_pantry_coverage', 0)}% "
+                    f"({r.get('_pantry_matched', 0)}/{r.get('_pantry_total', 0)} ingredients)"
+                )
+
         return candidates
 
     async def pick_top_for_slot(

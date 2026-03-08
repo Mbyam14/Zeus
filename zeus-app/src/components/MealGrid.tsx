@@ -257,7 +257,7 @@ const createStyles = (colors: ThemeColors, numDays: number) => {
     },
     repeatBadgeText: {
       fontSize: 10,
-      color: '#FFFFFF',
+      color: colors.buttonText,
     },
     emptySlot: {
       flex: 1,

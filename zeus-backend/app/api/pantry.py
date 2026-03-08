@@ -122,7 +122,7 @@ async def bulk_add_pantry_items(
 
 @router.get("/ingredients/search", response_model=List[dict])
 async def search_ingredients(
-    query: str = Query(..., min_length=1, description="Search term"),
+    query: str = Query("", description="Search term (empty returns all)"),
     category: Optional[PantryCategory] = Query(None, description="Filter by category"),
     limit: int = Query(20, ge=1, le=50, description="Max results to return"),
     current_user: UserResponse = Depends(get_current_active_user)

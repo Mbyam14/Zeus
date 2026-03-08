@@ -263,12 +263,12 @@ export const GroceryListScreen: React.FC = () => {
         {/* Checkbox */}
         <View style={styles.checkbox}>
           {isToggling ? (
-            <ActivityIndicator size="small" color="#FF6B35" />
+            <ActivityIndicator size="small" color={colors.primary} />
           ) : (
             <Ionicons
               name={item.is_purchased ? 'checkbox' : 'square-outline'}
               size={24}
-              color={item.is_purchased ? '#4CAF50' : '#666'}
+              color={item.is_purchased ? colors.success : colors.textMuted}
             />
           )}
         </View>
@@ -299,7 +299,7 @@ export const GroceryListScreen: React.FC = () => {
             {/* Pantry indicator */}
             {item.have_in_pantry && (
               <View style={styles.pantryBadge}>
-                <Ionicons name="home" size={12} color="#4CAF50" />
+                <Ionicons name="home" size={12} color={colors.success} />
                 <Text style={styles.pantryBadgeText}>In Pantry</Text>
               </View>
             )}
@@ -418,7 +418,7 @@ export const GroceryListScreen: React.FC = () => {
           <Text style={styles.headerTitle}>Grocery List</Text>
         </View>
         <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color="#FF6B35" />
+          <ActivityIndicator size="large" color={colors.primary} />
         </View>
       </View>
     );
@@ -432,7 +432,7 @@ export const GroceryListScreen: React.FC = () => {
         </View>
 
         <View style={styles.emptyContainer}>
-          <Ionicons name="cart-outline" size={80} color="#CCC" />
+          <Ionicons name="cart-outline" size={80} color={colors.border} />
           {!mealPlanId ? (
             <>
               <Text style={styles.emptyTitle}>No Meal Plan Found</Text>
@@ -450,7 +450,7 @@ export const GroceryListScreen: React.FC = () => {
                 style={styles.generateButton}
                 onPress={handleGenerateList}
               >
-                <Ionicons name="list" size={20} color="#FFF" />
+                <Ionicons name="list" size={20} color={colors.buttonText} />
                 <Text style={styles.generateButtonText}>Generate Grocery List</Text>
               </TouchableOpacity>
             </>
@@ -517,14 +517,14 @@ export const GroceryListScreen: React.FC = () => {
           onPress={() => setShowWarnings(!showWarnings)}
         >
           <View style={styles.warningHeader}>
-            <Ionicons name="warning" size={20} color="#F57C00" />
+            <Ionicons name="warning" size={20} color={colors.warning} />
             <Text style={styles.warningTitle}>
               {groceryList.warnings.length} recipe{groceryList.warnings.length > 1 ? 's' : ''} without ingredients
             </Text>
             <Ionicons
               name={showWarnings ? 'chevron-up' : 'chevron-down'}
               size={20}
-              color="#F57C00"
+              color={colors.warning}
             />
           </View>
           {showWarnings && (
@@ -568,7 +568,7 @@ export const GroceryListScreen: React.FC = () => {
           style={[styles.actionButton, styles.actionButtonSecondary]}
           onPress={handleRefresh}
         >
-          <Ionicons name="refresh" size={20} color="#FF6B35" />
+          <Ionicons name="refresh" size={20} color={colors.primary} />
           <Text style={styles.actionButtonTextSecondary}>Regenerate</Text>
         </TouchableOpacity>
 
@@ -576,7 +576,7 @@ export const GroceryListScreen: React.FC = () => {
           style={[styles.actionButton, styles.actionButtonPrimary]}
           onPress={() => setShowInstacartModal(true)}
         >
-          <Ionicons name="cart" size={20} color="#FFF" />
+          <Ionicons name="cart" size={20} color={colors.buttonText} />
           <Text style={styles.actionButtonText}>Order with Instacart</Text>
         </TouchableOpacity>
       </View>
@@ -651,7 +651,7 @@ const createStyles = (colors: any) =>
       marginTop: 24,
     },
     generateButtonText: {
-      color: '#FFF',
+      color: colors.buttonText,
       fontSize: 16,
       fontWeight: '600',
       marginLeft: 8,
@@ -662,7 +662,7 @@ const createStyles = (colors: any) =>
       marginHorizontal: 16,
       marginTop: 16,
       borderRadius: 12,
-      shadowColor: '#000',
+      shadowColor: colors.shadow,
       shadowOffset: { width: 0, height: 2 },
       shadowOpacity: 0.1,
       shadowRadius: 4,
@@ -721,7 +721,7 @@ const createStyles = (colors: any) =>
       fontWeight: '500',
     },
     filterButtonTextActive: {
-      color: '#FFF',
+      color: colors.buttonText,
     },
     listContent: {
       paddingHorizontal: 16,
@@ -752,7 +752,7 @@ const createStyles = (colors: any) =>
       padding: 12,
       marginVertical: 4,
       borderRadius: 8,
-      shadowColor: '#000',
+      shadowColor: colors.shadow,
       shadowOffset: { width: 0, height: 1 },
       shadowOpacity: 0.05,
       shadowRadius: 2,
@@ -788,20 +788,20 @@ const createStyles = (colors: any) =>
     pantryBadge: {
       flexDirection: 'row',
       alignItems: 'center',
-      backgroundColor: '#E8F5E9',
+      backgroundColor: colors.successLight,
       paddingVertical: 2,
       paddingHorizontal: 8,
       borderRadius: 12,
     },
     pantryBadgeText: {
       fontSize: 12,
-      color: '#4CAF50',
+      color: colors.success,
       marginLeft: 4,
       fontWeight: '500',
     },
     pantryInfo: {
       fontSize: 12,
-      color: '#4CAF50',
+      color: colors.success,
       marginTop: 2,
     },
     emptyFilterContainer: {
@@ -824,7 +824,7 @@ const createStyles = (colors: any) =>
       paddingHorizontal: 16,
       borderTopWidth: 1,
       borderTopColor: colors.border,
-      shadowColor: '#000',
+      shadowColor: colors.shadow,
       shadowOffset: { width: 0, height: -2 },
       shadowOpacity: 0.1,
       shadowRadius: 4,
@@ -847,7 +847,7 @@ const createStyles = (colors: any) =>
       borderColor: colors.primary,
     },
     actionButtonText: {
-      color: '#FFF',
+      color: colors.buttonText,
       fontSize: 16,
       fontWeight: '600',
       marginLeft: 8,
@@ -859,13 +859,13 @@ const createStyles = (colors: any) =>
       marginLeft: 8,
     },
     warningBanner: {
-      backgroundColor: '#FFF3E0',
+      backgroundColor: colors.warningLight,
       marginHorizontal: 16,
       marginTop: 12,
       borderRadius: 12,
       padding: 12,
       borderWidth: 1,
-      borderColor: '#FFE0B2',
+      borderColor: colors.warning,
     },
     warningHeader: {
       flexDirection: 'row',
@@ -875,13 +875,13 @@ const createStyles = (colors: any) =>
       flex: 1,
       fontSize: 14,
       fontWeight: '600',
-      color: '#F57C00',
+      color: colors.warningDark,
       marginLeft: 8,
     },
     warningList: {
       marginTop: 12,
       borderTopWidth: 1,
-      borderTopColor: '#FFE0B2',
+      borderTopColor: colors.warning,
       paddingTop: 12,
     },
     warningItem: {

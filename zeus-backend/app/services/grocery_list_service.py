@@ -15,6 +15,7 @@ import re
 import logging
 
 from app.database import get_database
+from app.utils.ingredient_matching import normalize_ingredient_name as shared_normalize
 
 logger = logging.getLogger(__name__)
 from app.schemas.grocery_list import (
@@ -659,37 +660,8 @@ class GroceryListService:
         return False
 
     def _normalize_ingredient_name(self, name: str) -> str:
-        """
-        Normalize ingredient name for matching.
-
-        Strategy:
-        - Lowercase
-        - Trim whitespace
-        - Remove trailing 's' (simple pluralization)
-        - Remove common modifiers in parentheses
-
-        Args:
-            name: Original ingredient name
-
-        Returns:
-            Normalized name
-        """
-        if not name:
-            return ""
-
-        # Lowercase and trim
-        normalized = name.lower().strip()
-
-        # Remove content in parentheses (e.g., "tomatoes (diced)" -> "tomatoes")
-        normalized = re.sub(r'\([^)]*\)', '', normalized).strip()
-
-        # Remove trailing 's' for simple pluralization
-        if normalized.endswith('s') and len(normalized) > 3:
-            # Don't remove 's' from words like "peas", "lentils"
-            if not normalized.endswith(('ss', 'us')):
-                normalized = normalized[:-1]
-
-        return normalized
+        """Normalize ingredient name for matching. Delegates to shared utility."""
+        return shared_normalize(name)
 
     def _match_pantry_items(
         self,

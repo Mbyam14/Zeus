@@ -69,11 +69,14 @@ class PantryService {
 
   // Search ingredient library for autocomplete
   async searchIngredients(
-    query: string,
+    query: string = '',
     category?: string,
     limit: number = 20
   ): Promise<IngredientLibraryItem[]> {
-    const params = new URLSearchParams({ query, limit: limit.toString() });
+    const params = new URLSearchParams({ limit: limit.toString() });
+    if (query) {
+      params.append('query', query);
+    }
     if (category) {
       params.append('category', category);
     }

@@ -131,7 +131,6 @@ export const FeedScreen: React.FC = () => {
 
   const currentRecipe = recipes[currentIndex];
 
-  // Load recipes from API on mount
   useEffect(() => {
     loadRecipes();
   }, []);
@@ -140,21 +139,26 @@ export const FeedScreen: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
+      const filters: any = {};
+      if (dietaryRestrictions.length > 0) {
+        filters.dietary_tags = dietaryRestrictions;
+      }
       const fetchedRecipes = await recipeService.getRecipeFeed(
-        dietaryRestrictions.length > 0 ? { dietary_tags: dietaryRestrictions } : undefined
+        Object.keys(filters).length > 0 ? filters : undefined
       );
 
       if (fetchedRecipes.length > 0) {
         setRecipes(fetchedRecipes);
+        setCurrentIndex(0);
       } else {
-        // If no recipes from API, use mock data as fallback
         setRecipes(mockRecipes);
+        setCurrentIndex(0);
       }
     } catch (err: any) {
       console.error('Error loading recipes:', err);
       setError(err.message);
-      // Fallback to mock recipes if API fails
       setRecipes(mockRecipes);
+      setCurrentIndex(0);
     } finally {
       setLoading(false);
     }
@@ -313,7 +317,7 @@ export const FeedScreen: React.FC = () => {
             <Text style={styles.headerTitle}>Zeus</Text>
           </View>
           <View style={styles.emptyContainer}>
-            <ActivityIndicator size="large" color="#FF6B35" />
+            <ActivityIndicator size="large" color={colors.primary} />
             <Text style={[styles.emptySubtitle, { marginTop: 16 }]}>
               Loading delicious recipes...
             </Text>
@@ -345,9 +349,6 @@ export const FeedScreen: React.FC = () => {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Zeus</Text>
-        <TouchableOpacity style={styles.filterButton}>
-          <Text style={styles.filterButtonText}>⚙️</Text>
-        </TouchableOpacity>
       </View>
 
       {/* Recipe Card */}
@@ -402,7 +403,7 @@ export const FeedScreen: React.FC = () => {
                 </View>
 
                 <View style={styles.difficultyContainer}>
-                  <Text style={[styles.difficultyBadge, getDifficultyColor(currentRecipe.difficulty)]}>
+                  <Text style={[styles.difficultyBadge, getDifficultyColor(currentRecipe.difficulty, colors)]}>
                     {currentRecipe.difficulty}
                   </Text>
                   {currentRecipe.is_ai_generated && (
@@ -446,16 +447,16 @@ export const FeedScreen: React.FC = () => {
   );
 };
 
-const getDifficultyColor = (difficulty: string) => {
+const getDifficultyColor = (difficulty: string, colors: any) => {
   switch (difficulty) {
     case 'Easy':
-      return { backgroundColor: '#2ECC71' };
+      return { backgroundColor: colors.success };
     case 'Medium':
-      return { backgroundColor: '#F7B32B' };
+      return { backgroundColor: colors.warning };
     case 'Hard':
-      return { backgroundColor: '#E74C3C' };
+      return { backgroundColor: colors.error };
     default:
-      return { backgroundColor: '#7F8C8D' };
+      return { backgroundColor: colors.textMuted };
   }
 };
 
@@ -479,17 +480,6 @@ const createStyles = (colors: any) =>
       fontSize: 28,
       fontWeight: 'bold',
       color: colors.primary,
-    },
-    filterButton: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      backgroundColor: colors.background,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    filterButtonText: {
-      fontSize: 18,
     },
     cardContainer: {
       flex: 1,
@@ -526,7 +516,7 @@ const createStyles = (colors: any) =>
       bottom: 0,
       left: 0,
       right: 0,
-      backgroundColor: 'rgba(0,0,0,0.6)',
+      backgroundColor: colors.overlay,
       padding: 24,
     },
     recipeInfo: {
@@ -563,7 +553,7 @@ const createStyles = (colors: any) =>
       paddingHorizontal: 12,
       paddingVertical: 4,
       borderRadius: 12,
-      color: '#FFFFFF',
+      color: colors.buttonText,
       fontSize: 12,
       fontWeight: '600',
       marginRight: 8,
@@ -573,7 +563,7 @@ const createStyles = (colors: any) =>
       paddingVertical: 4,
       borderRadius: 12,
       backgroundColor: colors.secondary,
-      color: '#FFFFFF',
+      color: colors.buttonText,
       fontSize: 12,
       fontWeight: '600',
     },
@@ -653,27 +643,27 @@ const createStyles = (colors: any) =>
     likeLabel: {
       top: 60,
       right: 30,
-      borderColor: '#2ECC71',
-      backgroundColor: 'rgba(46, 204, 113, 0.5)',
+      borderColor: colors.success,
+      backgroundColor: colors.success + '80',
       transform: [{ rotate: '20deg' }],
     },
     nopeLabel: {
       top: 60,
       left: 30,
-      borderColor: '#E74C3C',
-      backgroundColor: 'rgba(231, 76, 60, 0.5)',
+      borderColor: colors.error,
+      backgroundColor: colors.error + '80',
       transform: [{ rotate: '-20deg' }],
     },
     saveLabel: {
       top: 60,
       alignSelf: 'center',
-      borderColor: '#F7B32B',
-      backgroundColor: 'rgba(247, 179, 43, 0.5)',
+      borderColor: colors.warning,
+      backgroundColor: colors.warning + '80',
     },
     overlayText: {
       fontSize: 48,
       fontWeight: '900',
-      color: '#FFFFFF',
+      color: colors.buttonText,
       letterSpacing: 8,
       textShadowColor: 'rgba(0, 0, 0, 0.9)',
       textShadowOffset: { width: 3, height: 3 },

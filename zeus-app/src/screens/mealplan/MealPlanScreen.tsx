@@ -634,7 +634,7 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
                 <View style={styles.dropdownMenuIcon}>
                   <Text style={styles.dropdownMenuIconText}>🗑️</Text>
                 </View>
-                <Text style={[styles.dropdownMenuText, { color: colors.error || '#E53E3E' }]}>Clear Meal Plan</Text>
+                <Text style={[styles.dropdownMenuText, { color: colors.error }]}>Clear Meal Plan</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -1030,7 +1030,7 @@ const createStyles = (colors: any) => StyleSheet.create({
     marginTop: 16,
     backgroundColor: colors.card,
     borderRadius: 12,
-    shadowColor: '#000',
+    shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
     shadowRadius: 12,
@@ -1083,7 +1083,7 @@ const createStyles = (colors: any) => StyleSheet.create({
     marginHorizontal: 16,
     marginTop: 12,
     borderRadius: 16,
-    shadowColor: '#000',
+    shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.06,
     shadowRadius: 8,
@@ -1136,7 +1136,7 @@ const createStyles = (colors: any) => StyleSheet.create({
     borderRadius: 16,
     backgroundColor: colors.card,
     minWidth: 64,
-    shadowColor: '#000',
+    shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.04,
     shadowRadius: 4,
@@ -1192,16 +1192,16 @@ const createStyles = (colors: any) => StyleSheet.create({
     paddingBottom: 24,
   },
   errorBanner: {
-    backgroundColor: '#FFF3E0',
+    backgroundColor: colors.warningLight,
     marginHorizontal: 16,
     marginBottom: 12,
     padding: 12,
     borderRadius: 8,
     borderLeftWidth: 4,
-    borderLeftColor: '#FF9800',
+    borderLeftColor: colors.warning,
   },
   errorBannerText: {
-    color: '#E65100',
+    color: colors.warningDark,
     fontSize: 14,
     fontWeight: '500',
   },
@@ -1210,7 +1210,7 @@ const createStyles = (colors: any) => StyleSheet.create({
     borderRadius: 20,
     padding: 18,
     marginBottom: 14,
-    shadowColor: '#000',
+    shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.08,
     shadowRadius: 12,
@@ -1241,7 +1241,7 @@ const createStyles = (colors: any) => StyleSheet.create({
     borderRadius: 12,
   },
   leftoverBadge: {
-    backgroundColor: '#FFF3E0',
+    backgroundColor: colors.warningLight,
   },
   repeatBadgeText: {
     fontSize: 11,
@@ -1340,7 +1340,7 @@ const createStyles = (colors: any) => StyleSheet.create({
     padding: 16,
     backgroundColor: colors.primary,
     borderRadius: 12,
-    shadowColor: '#000',
+    shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.15,
     shadowRadius: 4,

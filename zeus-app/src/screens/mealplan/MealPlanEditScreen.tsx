@@ -453,7 +453,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     opacity: 0.4,
   },
   saveHeaderButtonText: {
-    color: '#FFFFFF',
+    color: colors.buttonText,
     fontSize: 13,
     fontWeight: '600',
   },

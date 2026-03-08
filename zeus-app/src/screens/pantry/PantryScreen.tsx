@@ -589,7 +589,7 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
   };
 
   const renderPantryItem = ({ item }: { item: PantryItem }) => {
-    const expirationColor = item.is_expired ? colors.error : item.is_expiring_soon ? '#F39C12' : colors.text;
+    const expirationColor = item.is_expired ? colors.error : item.is_expiring_soon ? colors.warning : colors.text;
     const isSelected = selectedItems.has(item.id);
 
     return (
@@ -611,7 +611,7 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
               backgroundColor: isSelected ? colors.primary : 'transparent',
               justifyContent: 'center', alignItems: 'center', marginRight: 12,
             }}>
-              {isSelected && <Text style={{ color: '#fff', fontSize: 14, fontWeight: 'bold' }}>✓</Text>}
+              {isSelected && <Text style={{ color: colors.buttonText, fontSize: 14, fontWeight: 'bold' }}>✓</Text>}
             </View>
           )}
           <View style={{ flex: 1 }}>
@@ -707,13 +707,13 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
               style={styles.dropdownMenuItem}
               onPress={() => {
                 setShowAddDropdown(false);
-                setShowQuickAddModal(true);
+                navigation?.navigate('IngredientSearch');
               }}
             >
               <View style={styles.dropdownMenuIcon}>
-                <Text style={styles.dropdownMenuIconText}>⚡</Text>
+                <Text style={styles.dropdownMenuIconText}>🔍</Text>
               </View>
-              <Text style={styles.dropdownMenuText}>Quick Add</Text>
+              <Text style={styles.dropdownMenuText}>Search & Add</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -794,7 +794,7 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
                 <View style={styles.dropdownMenuIcon}>
                   <Text style={styles.dropdownMenuIconText}>🗑️</Text>
                 </View>
-                <Text style={[styles.dropdownMenuText, { color: '#E74C3C' }]}>Clear All</Text>
+                <Text style={[styles.dropdownMenuText, { color: colors.error }]}>Clear All</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -817,7 +817,7 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
           value={searchQuery}
           onChangeText={setSearchQuery}
           placeholder="Search pantry items..."
-          placeholderTextColor="#95A5A6"
+          placeholderTextColor={colors.textMuted}
         />
       </View>
 
@@ -881,7 +881,7 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
 
       {loading ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#FF6B35" />
+          <ActivityIndicator size="large" color={colors.primary} />
         </View>
       ) : pantryItems.length === 0 ? (
         renderEmptyState()
@@ -904,16 +904,16 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
           position: 'absolute', bottom: 0, left: 0, right: 0,
           backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.border,
           paddingHorizontal: 24, paddingVertical: 16, paddingBottom: 32,
-          shadowColor: '#000', shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 8,
+          shadowColor: colors.shadow, shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 8,
         }}>
           <TouchableOpacity
             onPress={handleDeleteSelected}
             style={{
-              backgroundColor: '#E74C3C', borderRadius: 12, paddingVertical: 14,
+              backgroundColor: colors.error, borderRadius: 12, paddingVertical: 14,
               justifyContent: 'center', alignItems: 'center',
             }}
           >
-            <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>
+            <Text style={{ color: colors.buttonText, fontSize: 16, fontWeight: '700' }}>
               Delete {selectedItems.size} Item{selectedItems.size > 1 ? 's' : ''}
             </Text>
           </TouchableOpacity>
@@ -989,7 +989,7 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
                 disabled={addingQuickItems || selectedQuickItems.size === 0}
               >
                 {addingQuickItems ? (
-                  <ActivityIndicator color="#FFFFFF" />
+                  <ActivityIndicator color={colors.buttonText} />
                 ) : (
                   <Text style={styles.quickAddButtonText2}>
                     Add {selectedQuickItems.size} Item{selectedQuickItems.size !== 1 ? 's' : ''} to Pantry
@@ -1028,7 +1028,7 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
                   value={newItem.item_name}
                   onChangeText={handleIngredientSearch}
                   placeholder="Search ingredients..."
-                  placeholderTextColor="#95A5A6"
+                  placeholderTextColor={colors.textMuted}
                 />
 
                 {showSuggestions && (
@@ -1073,7 +1073,7 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
                     value={newItem.quantity?.toString() || ''}
                     onChangeText={text => setNewItem(prev => ({ ...prev, quantity: text ? parseFloat(text) : undefined }))}
                     placeholder="0"
-                    placeholderTextColor="#95A5A6"
+                    placeholderTextColor={colors.textMuted}
                     keyboardType="numeric"
                   />
                 </View>
@@ -1087,7 +1087,7 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
                         value={newItem.unit || ''}
                         onChangeText={text => setNewItem(prev => ({ ...prev, unit: text }))}
                         placeholder="Enter custom unit"
-                        placeholderTextColor="#95A5A6"
+                        placeholderTextColor={colors.textMuted}
                       />
                       <TouchableOpacity
                         style={styles.clearDateButton}
@@ -1120,7 +1120,7 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
                   style={styles.dropdown}
                   onPress={openDatePicker}
                 >
-                  <Text style={[styles.dropdownText, !newItem.expires_at && { color: '#95A5A6' }]}>
+                  <Text style={[styles.dropdownText, !newItem.expires_at && { color: colors.textMuted }]}>
                     {newItem.expires_at || 'Select Date'}
                   </Text>
                   <Text style={styles.dropdownArrow}>📅</Text>
@@ -1283,7 +1283,7 @@ const createStyles = (colors: any) => StyleSheet.create({
   headerButtons: { flexDirection: 'row', gap: 12 },
   addButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center' },
   addButtonText: { fontSize: 28, fontWeight: 'bold', color: colors.backgroundSecondary },
-  dropdownMenu: { position: 'absolute', top: 70, right: 24, backgroundColor: colors.card, borderRadius: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 8, overflow: 'hidden', minWidth: 160, zIndex: 101 },
+  dropdownMenu: { position: 'absolute', top: 70, right: 24, backgroundColor: colors.card, borderRadius: 12, shadowColor: colors.shadow, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 8, overflow: 'hidden', minWidth: 160, zIndex: 101 },
   dropdownMenuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: colors.border },
   dropdownMenuItemDisabled: { opacity: 0.5 },
   dropdownMenuIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
@@ -1299,12 +1299,12 @@ const createStyles = (colors: any) => StyleSheet.create({
   quickAddItem: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 20, backgroundColor: colors.backgroundSecondary, borderWidth: 1, borderColor: colors.border, flexDirection: 'row', alignItems: 'center', gap: 6 },
   quickAddItemSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
   quickAddItemText: { fontSize: 14, color: colors.text },
-  quickAddItemTextSelected: { color: '#FFFFFF', fontWeight: '600' },
-  quickAddCheckmark: { fontSize: 12, color: '#FFFFFF', fontWeight: 'bold' },
+  quickAddItemTextSelected: { color: colors.buttonText, fontWeight: '600' },
+  quickAddCheckmark: { fontSize: 12, color: colors.buttonText, fontWeight: 'bold' },
   quickAddFooter: { padding: 20, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.background },
   quickAddButton2: { backgroundColor: colors.primary, paddingVertical: 16, borderRadius: 12, alignItems: 'center' },
   quickAddButtonDisabled: { backgroundColor: colors.textMuted, opacity: 0.5 },
-  quickAddButtonText2: { fontSize: 18, fontWeight: 'bold', color: '#FFFFFF' },
+  quickAddButtonText2: { fontSize: 18, fontWeight: 'bold', color: colors.buttonText },
   searchContainer: { paddingHorizontal: 20, paddingVertical: 12, backgroundColor: colors.backgroundSecondary },
   searchInput: { backgroundColor: colors.background, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16, color: colors.text, borderWidth: 1, borderColor: colors.border },
   filterContainer: { backgroundColor: colors.backgroundSecondary, borderBottomWidth: 1, borderBottomColor: colors.border, zIndex: 10, elevation: 5 },
@@ -1384,14 +1384,14 @@ const createStyles = (colors: any) => StyleSheet.create({
   iosDatePickerCancel: { fontSize: 16, color: colors.primary },
   iosDatePickerTitle: { fontSize: 18, fontWeight: '600', color: colors.text },
   iosDatePickerDone: { fontSize: 16, fontWeight: '600', color: colors.primary },
-  expiringBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF3E0', marginHorizontal: 16, marginBottom: 8, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#FFE0B2' },
+  expiringBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.warningLight, marginHorizontal: 16, marginBottom: 8, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.warning },
   expiringBannerContent: { flex: 1, flexDirection: 'row', alignItems: 'center' },
   expiringBannerIcon: { fontSize: 18, marginRight: 8 },
   expiringBannerTextContainer: { flex: 1 },
-  expiringBannerTitle: { fontSize: 13, fontWeight: '600', color: '#E65100' },
-  expiringBannerSubtitle: { fontSize: 11, color: '#BF360C', marginTop: 2 },
+  expiringBannerTitle: { fontSize: 13, fontWeight: '600', color: colors.warningDark },
+  expiringBannerSubtitle: { fontSize: 11, color: colors.warningDark, marginTop: 2 },
   expiringBannerButton: { backgroundColor: colors.primary, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, marginLeft: 8 },
   expiringBannerButtonText: { color: '#FFF', fontSize: 12, fontWeight: '600' },
   expiringBannerDismiss: { padding: 4, marginLeft: 6 },
-  expiringBannerDismissText: { fontSize: 14, color: '#BF360C' },
+  expiringBannerDismissText: { fontSize: 14, color: colors.warningDark },
 });

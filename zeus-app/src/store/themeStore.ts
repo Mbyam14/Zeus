@@ -46,6 +46,8 @@ export interface ThemeColors {
   // Extras
   surface: string;
   successLight: string;
+  warningLight: string;
+  warningDark: string;
   buttonText: string;
 }
 
@@ -91,6 +93,8 @@ export const lightTheme: ThemeColors = {
   // Extras
   surface: '#FFFFFF',
   successLight: 'rgba(39, 174, 96, 0.1)',
+  warningLight: '#FFF3E0',
+  warningDark: '#E65100',
   buttonText: '#FFFFFF',
 };
 
@@ -136,6 +140,8 @@ export const darkTheme: ThemeColors = {
   // Extras
   surface: '#252525',
   successLight: 'rgba(46, 204, 113, 0.15)',
+  warningLight: '#3E2723',
+  warningDark: '#F1C40F',
   buttonText: '#FFFFFF',
 };
 

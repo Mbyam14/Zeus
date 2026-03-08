@@ -301,7 +301,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     zIndex: 1,
   },
   selectedBadgeText: {
-    color: '#FFFFFF',
+    color: colors.buttonText,
     fontSize: 10,
     fontWeight: '700',
   },

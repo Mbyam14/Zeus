@@ -1,6 +1,9 @@
 from typing import List, Optional
 from fastapi import HTTPException, status
+import logging
 from app.database import get_database
+
+logger = logging.getLogger(__name__)
 from app.schemas.recipe import (
     RecipeCreate, RecipeUpdate, RecipeResponse, RecipeFeedFilter, 
     RecipeInteraction, Ingredient, Instruction
@@ -192,11 +195,26 @@ class RecipeService:
     
     async def get_recipe_feed(self, filters: RecipeFeedFilter, user_id: Optional[str] = None) -> List[RecipeResponse]:
         """Get paginated recipe feed with filters"""
+
+        # Pantry mode: fetch user's pantry and filter recipes by ingredient match
+        # pantry_lookup = None means pantry mode is OFF
+        # pantry_lookup = {} means pantry mode is ON but pantry is empty
+        # pantry_lookup = {...} means pantry mode is ON with items
+        pantry_lookup = None
+        if filters.use_pantry_items and user_id:
+            from app.utils.ingredient_matching import prepare_pantry_lookup, calculate_pantry_coverage
+            pantry_result = self.db.table("pantry_items").select(
+                "item_name, quantity, unit, category"
+            ).eq("user_id", user_id).execute()
+            pantry_items = pantry_result.data or []
+            pantry_lookup = prepare_pantry_lookup(pantry_items)
+            logger.info(f"Pantry mode: {len(pantry_lookup)} pantry items for filtering")
+
         query = self.db.table("recipes").select("""
             *,
             users!recipes_user_id_fkey(username)
         """)
-        
+
         # Apply filters
         if filters.cuisine_type:
             query = query.eq("cuisine_type", filters.cuisine_type)
@@ -212,24 +230,59 @@ class RecipeService:
         if filters.search:
             query = query.ilike("title", f"%{filters.search}%")
 
-        # Fetch a larger pool and shuffle for variety
-        # When paginating (offset > 0), use deterministic order so pages don't overlap
-        if filters.offset == 0:
-            # First page: grab a big pool, shuffle, return requested amount
-            pool_size = min(filters.limit * 4, 500)
-            query = query.order("likes_count", desc=True)
-            query = query.range(0, pool_size - 1)
-            result = query.execute()
+        if pantry_lookup is not None:
+            # Pantry mode active — if pantry is empty, return nothing
+            if len(pantry_lookup) == 0:
+                logger.info("Pantry mode: no pantry items, returning empty results")
+                return []
 
-            import random
-            data = result.data or []
-            random.shuffle(data)
-            data = data[:filters.limit]
-        else:
-            query = query.order("id")
-            query = query.range(filters.offset, filters.offset + filters.limit - 1)
+            # Fetch a large pool to filter down from
+            query = query.order("likes_count", desc=True)
+            query = query.range(0, 499)
             result = query.execute()
             data = result.data or []
+
+            # Filter to recipes where most non-trivial ingredients are in pantry
+            PANTRY_THRESHOLD = 0.9
+            pantry_matched = []
+            for recipe_data in data:
+                ingredients = recipe_data.get("ingredients") or []
+                if not ingredients:
+                    continue
+                coverage, matched, total = calculate_pantry_coverage(
+                    ingredients, pantry_lookup
+                )
+                if total > 0 and coverage >= PANTRY_THRESHOLD:
+                    recipe_data["_pantry_coverage"] = round(coverage * 100)
+                    pantry_matched.append(recipe_data)
+
+            # Sort by coverage descending — best matches first
+            pantry_matched.sort(key=lambda r: r.get("_pantry_coverage", 0), reverse=True)
+
+            logger.info(f"Pantry mode: {len(pantry_matched)} recipes >= {int(PANTRY_THRESHOLD*100)}% pantry coverage (from {len(data)} total)")
+
+            # Apply pagination to filtered results
+            import random
+            if filters.offset == 0:
+                random.shuffle(pantry_matched)
+            data = pantry_matched[filters.offset:filters.offset + filters.limit]
+        else:
+            # Normal mode: fetch with shuffle/pagination as before
+            if filters.offset == 0:
+                pool_size = min(filters.limit * 4, 500)
+                query = query.order("likes_count", desc=True)
+                query = query.range(0, pool_size - 1)
+                result = query.execute()
+
+                import random
+                data = result.data or []
+                random.shuffle(data)
+                data = data[:filters.limit]
+            else:
+                query = query.order("id")
+                query = query.range(filters.offset, filters.offset + filters.limit - 1)
+                result = query.execute()
+                data = result.data or []
 
         recipes = []
         for recipe_data in data:

@@ -544,6 +544,7 @@ class AIService:
         preferences: dict,
         selected_days: List[str],
         unique_recipe_counts: Dict[str, int],
+        pantry_items: Optional[List[dict]] = None,
     ) -> Dict[str, List[str]]:
         """
         Ask Claude to select the best recipe combination from shortlisted candidates.
@@ -556,7 +557,7 @@ class AIService:
             return self._algorithmic_selection(candidates, unique_recipe_counts)
 
         prompt = self._build_selection_prompt(
-            candidates, preferences, selected_days, unique_recipe_counts
+            candidates, preferences, selected_days, unique_recipe_counts, pantry_items
         )
 
         try:
@@ -588,6 +589,7 @@ class AIService:
         preferences: dict,
         selected_days: List[str],
         unique_recipe_counts: Dict[str, int],
+        pantry_items: Optional[List[dict]] = None,
     ) -> str:
         """Build compact prompt for Claude recipe selection."""
         calorie_target = preferences.get("calorie_target") or 2000
@@ -597,6 +599,13 @@ class AIService:
         })
         budget = preferences.get("budget_friendly", False)
         num_days = len(selected_days)
+
+        # Build pantry context
+        pantry_section = ""
+        if pantry_items:
+            pantry_names = [item.get("item_name", "") for item in pantry_items if item.get("item_name")]
+            if pantry_names:
+                pantry_section = f"\nUSER'S PANTRY: {', '.join(pantry_names[:40])}\n"
 
         sections = []
         for meal_type in ["breakfast", "dinner", "lunch"]:
@@ -610,7 +619,9 @@ class AIService:
                 prot = r.get("protein_grams", "?")
                 cuisine = r.get("cuisine_type", "?")
                 has_img = "IMG" if r.get("image_url") else "no-img"
-                lines.append(f"  {i+1}. {r['title']} | {cal}cal {prot}g protein | {cuisine} | {has_img}")
+                pantry_pct = r.get("_pantry_coverage")
+                pantry_tag = f" | {pantry_pct}% pantry" if pantry_pct else ""
+                lines.append(f"  {i+1}. {r['title']} | {cal}cal {prot}g protein | {cuisine} | {has_img}{pantry_tag}")
 
             sections.append(
                 f"=== {meal_type.upper()} (pick {count_needed}) ===\n" + "\n".join(lines)
@@ -618,21 +629,29 @@ class AIService:
 
         candidate_text = "\n\n".join(sections)
 
+        rules = ["Pick EXACTLY the number requested for each meal type"]
+        if pantry_items:
+            rules.append("STRONGLY prefer recipes with highest pantry coverage (% pantry) — the user already has these ingredients")
+            rules.append("Look for recipe combinations that share pantry ingredients efficiently to minimize waste")
+        rules.extend([
+            "Maximize cuisine variety (avoid same cuisine within a type)",
+            "Dinners become next-day lunches, so pick dinners that reheat well",
+            "Balance daily nutrition across the combinations",
+            "Prefer recipes with images (IMG)",
+            "Pick recipes whose calories are closest to the per-meal target",
+        ])
+        rules_text = "\n".join(f"{i+1}. {rule}" for i, rule in enumerate(rules))
+
         return f"""Select recipes for a {num_days}-day meal plan.
 
 DAILY TARGETS: {calorie_target} cal, {protein_target}g protein
 DISTRIBUTION: Breakfast {distribution.get('breakfast', 25)}%, Lunch {distribution.get('lunch', 35)}%, Dinner {distribution.get('dinner', 40)}%
 {"BUDGET MODE: prefer simpler/cheaper recipes" if budget else ""}
-
+{pantry_section}
 {candidate_text}
 
 RULES:
-1. Pick EXACTLY the number requested for each meal type
-2. Maximize cuisine variety (avoid same cuisine within a type)
-3. Dinners become next-day lunches, so pick dinners that reheat well
-4. Balance daily nutrition across the combinations
-5. Prefer recipes with images (IMG)
-6. Pick recipes whose calories are closest to the per-meal target
+{rules_text}
 
 Respond with ONLY a JSON object mapping meal type to list of 1-based indices:
 {{"breakfast": [3], "dinner": [2, 5], "lunch": [1]}}"""

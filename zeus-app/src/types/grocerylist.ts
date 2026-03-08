@@ -47,21 +47,21 @@ export const CATEGORY_EMOJIS: Record<string, string> = {
  * Category color mapping for UI display
  */
 export const CATEGORY_COLORS: Record<string, string> = {
-  Produce: '#4CAF50',
-  Dairy: '#2196F3',
-  Protein: '#FF5722',
-  Grains: '#FF9800',
-  Spices: '#E91E63',
-  Condiments: '#FFC107',
-  Beverages: '#00BCD4',
-  Frozen: '#3F51B5',
-  'Canned & Jarred': '#795548',
-  Baking: '#8D6E63',
-  'Oils & Vinegars': '#689F38',
-  Snacks: '#FF7043',
-  Other: '#9E9E9E',
+  Produce: '#22C55E',
+  Dairy: '#3B82F6',
+  Protein: '#EF4444',
+  Grains: '#F59E0B',
+  Spices: '#EC4899',
+  Condiments: '#EAB308',
+  Beverages: '#06B6D4',
+  Frozen: '#6366F1',
+  'Canned & Jarred': '#78716C',
+  Baking: '#A16207',
+  'Oils & Vinegars': '#65A30D',
+  Snacks: '#F97316',
+  Other: '#94A3B8',
   // Keep old value as fallback for existing data
-  Pantry: '#795548',
+  Pantry: '#78716C',
 };
 
 /**

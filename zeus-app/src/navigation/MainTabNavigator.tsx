@@ -9,6 +9,7 @@ import { CreateMealPlanScreen } from '../screens/mealplan/CreateMealPlanScreen';
 import { CreateScreen } from '../screens/create/CreateScreen';
 import { PantryScreen } from '../screens/pantry/PantryScreen';
 import { ImageReviewScreen } from '../screens/pantry/ImageReviewScreen';
+import { IngredientSearchScreen } from '../screens/pantry/IngredientSearchScreen';
 import { RecipeDetailScreen } from '../screens/recipe/RecipeDetailScreen';
 import { RecipeHubScreen } from '../screens/recipes/RecipeHubScreen';
 import { GroceryListScreen } from '../screens/grocerylist/GroceryListScreen';
@@ -33,6 +34,7 @@ export type MealPlanStackParamList = {
 
 export type PantryStackParamList = {
   PantryMain: undefined;
+  IngredientSearch: undefined;
   ImageReview: {
     detectedItems: DetectedPantryItem[];
     imageUri: string;
@@ -57,6 +59,7 @@ const PantryStackNavigator = () => {
   return (
     <PantryStack.Navigator screenOptions={{ headerShown: false }}>
       <PantryStack.Screen name="PantryMain" component={PantryScreen} />
+      <PantryStack.Screen name="IngredientSearch" component={IngredientSearchScreen} />
       <PantryStack.Screen name="ImageReview" component={ImageReviewScreen} />
     </PantryStack.Navigator>
   );

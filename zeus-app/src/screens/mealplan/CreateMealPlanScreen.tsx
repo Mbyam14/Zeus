@@ -291,7 +291,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   optionBadgeText: {
     fontSize: 10,
     fontWeight: '600',
-    color: '#FFFFFF',
+    color: colors.buttonText,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },

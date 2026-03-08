@@ -23,7 +23,7 @@ const ENV: Record<string, EnvConfig> = {
   development: {
     // UPDATE THIS with your local IP address for development
     API_BASE_URL: 'http://192.168.0.16:8000',
-    API_TIMEOUT: 10000,
+    API_TIMEOUT: 20000,
   },
   preview: {
     // UPDATE THIS with your deployed backend URL (e.g., Railway)

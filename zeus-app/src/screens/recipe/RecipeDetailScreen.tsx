@@ -18,6 +18,7 @@ import {
 import { Recipe } from '../../types/recipe';
 import { recipeService } from '../../services/recipeService';
 import { useThemeStore } from '../../store/themeStore';
+import { getDifficultyColor } from '../../utils/colors';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 const SWIPE_THRESHOLD = 30;
@@ -206,19 +207,6 @@ Shared from Zeus - Your AI Meal Planner`;
     // TODO: Navigate to meal plan selector
   };
 
-  const getDifficultyColor = (difficulty: string) => {
-    switch (difficulty) {
-      case 'Easy':
-        return '#2ECC71';
-      case 'Medium':
-        return '#F7B32B';
-      case 'Hard':
-        return '#E74C3C';
-      default:
-        return '#7F8C8D';
-    }
-  };
-
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView>
@@ -298,7 +286,7 @@ Shared from Zeus - Your AI Meal Planner`;
             <View
               style={[
                 styles.difficultyBadge,
-                { backgroundColor: getDifficultyColor(recipe.difficulty) },
+                { backgroundColor: getDifficultyColor(recipe.difficulty, colors) },
               ]}
             >
               <Text style={styles.difficultyText}>{recipe.difficulty}</Text>
@@ -825,7 +813,7 @@ const createStyles = (colors: any) =>
     creatorAvatarText: {
       fontSize: 18,
       fontWeight: 'bold',
-      color: '#FFFFFF',
+      color: colors.buttonText,
     },
     creatorInfo: {
       flex: 1,
@@ -865,7 +853,7 @@ const createStyles = (colors: any) =>
       marginLeft: 'auto',
     },
     difficultyText: {
-      color: '#FFFFFF',
+      color: colors.buttonText,
       fontSize: 12,
       fontWeight: '600',
     },
@@ -891,7 +879,7 @@ const createStyles = (colors: any) =>
       fontSize: 22,
     },
     startCookingTextFull: {
-      color: '#FFFFFF',
+      color: colors.buttonText,
       fontSize: 17,
       fontWeight: '700',
     },
@@ -914,8 +902,8 @@ const createStyles = (colors: any) =>
       borderColor: colors.border,
     },
     dietaryTag: {
-      backgroundColor: '#E8F5E9',
-      borderColor: '#2ECC71',
+      backgroundColor: colors.successLight,
+      borderColor: colors.success,
     },
     tagText: {
       fontSize: 14,
@@ -956,7 +944,7 @@ const createStyles = (colors: any) =>
       marginRight: 12,
     },
     stepNumberText: {
-      color: '#FFFFFF',
+      color: colors.buttonText,
       fontSize: 16,
       fontWeight: 'bold',
     },
@@ -1140,7 +1128,7 @@ const createStyles = (colors: any) =>
     cookingStepNumberText: {
       fontSize: 28,
       fontWeight: 'bold',
-      color: '#FFFFFF',
+      color: colors.buttonText,
     },
     cookingInstructionScroll: {
       flex: 1,
@@ -1192,8 +1180,8 @@ const createStyles = (colors: any) =>
       borderColor: colors.primary,
     },
     cookingNavButtonDone: {
-      backgroundColor: '#2ECC71',
-      borderColor: '#2ECC71',
+      backgroundColor: colors.success,
+      borderColor: colors.success,
     },
     cookingNavButtonIcon: {
       fontSize: 20,
@@ -1207,12 +1195,12 @@ const createStyles = (colors: any) =>
     cookingNavButtonTextNext: {
       fontSize: 16,
       fontWeight: '600',
-      color: '#FFFFFF',
+      color: colors.buttonText,
     },
     cookingNavButtonTextDone: {
       fontSize: 16,
       fontWeight: '600',
-      color: '#FFFFFF',
+      color: colors.buttonText,
     },
     // Ingredients Overlay
     ingredientsOverlay: {
@@ -1221,7 +1209,7 @@ const createStyles = (colors: any) =>
       left: 0,
       right: 0,
       top: 0,
-      backgroundColor: 'rgba(0, 0, 0, 0.8)',
+      backgroundColor: colors.overlay,
       justifyContent: 'center',
       alignItems: 'center',
       padding: 24,

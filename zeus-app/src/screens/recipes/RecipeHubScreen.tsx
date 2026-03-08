@@ -22,6 +22,7 @@ import { recipeService } from '../../services/recipeService';
 import { pantryService } from '../../services/pantryService';
 import { useThemeStore, ThemeColors } from '../../store/themeStore';
 import { useAuthStore } from '../../store/authStore';
+import { getDifficultyColor } from '../../utils/colors';
 import { PantryItem } from '../../types/pantry';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -162,151 +163,6 @@ const reorderUpcoming = (recipes: Recipe[], currentIndex: number, prefs: Session
   return [...seen, ...reordered];
 };
 
-// ============================================================
-// INGREDIENT NORMALIZATION - for pantry matching
-// ============================================================
-
-/** Common staples that most people have and recipes often assume */
-const COMMON_STAPLES = new Set([
-  'salt', 'pepper', 'water', 'oil', 'olive oil', 'vegetable oil',
-  'cooking spray', 'ice', 'black pepper', 'kosher salt', 'sea salt',
-  'cooking oil', 'canola oil', 'sunflower oil', 'sugar', 'flour',
-]);
-
-/** Words to strip from ingredient names (preparations, modifiers) */
-const STRIP_WORDS = new Set([
-  'fresh', 'dried', 'frozen', 'canned', 'chopped', 'diced', 'sliced',
-  'minced', 'grated', 'shredded', 'crushed', 'ground', 'whole',
-  'large', 'small', 'medium', 'thin', 'thick', 'fine', 'coarse',
-  'raw', 'cooked', 'boneless', 'skinless', 'organic', 'unsalted',
-  'salted', 'extra', 'virgin', 'light', 'dark', 'plain', 'pure',
-  'ripe', 'firm', 'soft', 'hot', 'cold', 'warm', 'to', 'taste',
-  'for', 'garnish', 'optional', 'packed', 'loosely', 'tightly',
-]);
-
-/**
- * Normalize an ingredient name for matching.
- * Handles parentheticals, plurals, modifiers, and spacing.
- */
-const normalizeIngredient = (name: string): string => {
-  let n = name.toLowerCase().trim();
-
-  // Remove content in parentheses: "Butter (Tablespoons)" → "Butter"
-  n = n.replace(/\([^)]*\)/g, '').trim();
-
-  // Remove content after comma: "chicken breast, boneless" → "chicken breast"
-  n = n.replace(/,.*$/, '').trim();
-
-  // Remove numbers and units at the start: "2 cups flour" → "flour"
-  n = n.replace(/^[\d./\s]+(cups?|tbsp|tsp|tablespoons?|teaspoons?|oz|ounces?|lbs?|pounds?|g|grams?|kg|ml|l|liters?|pieces?|cloves?|stalks?|heads?|bunche?s?|cans?|jars?|bottles?|packets?|pinche?s?|dashe?s?)?\s*/i, '').trim();
-
-  // Remove modifier words
-  const words = n.split(/\s+/).filter(w => !STRIP_WORDS.has(w));
-  n = words.join(' ');
-
-  // Remove trailing 's' for simple pluralization (but not for words ending in 'ss', 'us')
-  if (n.endsWith('s') && n.length > 3 && !n.endsWith('ss') && !n.endsWith('us')) {
-    n = n.slice(0, -1);
-  }
-  // Handle 'ies' → 'y' (e.g., "berries" → "berry")
-  if (n.endsWith('ie') && n.length > 4) {
-    n = n.slice(0, -2) + 'y';
-  }
-
-  return n.trim();
-};
-
-/** Remove all spaces/hyphens for compound word matching ("hot sauce" == "hotsauce") */
-const compactName = (name: string): string => name.replace(/[\s\-]/g, '');
-
-/** Base ingredient synonyms - maps variations to a canonical form */
-const INGREDIENT_SYNONYMS: Record<string, string[]> = {
-  'egg': ['eggs', 'egg'],
-  'milk': ['milk', 'whole milk', '2% milk', 'skim milk', 'semi-skimmed milk'],
-  'butter': ['butter', 'unsalted butter', 'salted butter'],
-  'cream cheese': ['cream cheese', 'philadelphia'],
-  'sour cream': ['sour cream', 'soured cream'],
-  'yogurt': ['yogurt', 'yoghurt', 'greek yogurt', 'natural yogurt'],
-  'chicken': ['chicken', 'chicken breast', 'chicken thigh', 'chicken leg', 'chicken drumstick'],
-  'beef': ['beef', 'beef mince', 'ground beef', 'stewing beef', 'beef steak'],
-  'pork': ['pork', 'pork chop', 'pork loin', 'ground pork', 'pork mince'],
-  'garlic': ['garlic', 'garlic clove', 'garlic cloves'],
-  'onion': ['onion', 'onions', 'yellow onion', 'white onion', 'brown onion'],
-  'tomato': ['tomato', 'tomatoes', 'cherry tomato', 'cherry tomatoes', 'plum tomato'],
-  'potato': ['potato', 'potatoes', 'russet potato', 'yukon gold'],
-  'rice': ['rice', 'white rice', 'brown rice', 'basmati rice', 'jasmine rice', 'long grain rice'],
-  'pasta': ['pasta', 'spaghetti', 'penne', 'fettuccine', 'linguine', 'macaroni', 'fusilli'],
-  'bell pepper': ['bell pepper', 'red pepper', 'green pepper', 'yellow pepper', 'capsicum', 'romano pepper'],
-  'hot sauce': ['hot sauce', 'hotsauce', 'chili sauce', 'chilli sauce', 'sriracha', 'tabasco'],
-  'soy sauce': ['soy sauce', 'soya sauce', 'shoyu'],
-  'lemon': ['lemon', 'lemon juice', 'lemons'],
-  'lime': ['lime', 'lime juice', 'limes'],
-  'parsley': ['parsley', 'flat leaf parsley', 'italian parsley', 'curly parsley'],
-  'cilantro': ['cilantro', 'coriander', 'fresh coriander', 'coriander leaves'],
-  'cheese': ['cheese', 'cheddar', 'mozzarella', 'parmesan', 'gruyere', 'feta', 'gouda'],
-  'cream': ['cream', 'heavy cream', 'whipping cream', 'double cream', 'single cream', 'heavy whipping cream'],
-  'stock': ['stock', 'broth', 'chicken stock', 'chicken broth', 'beef stock', 'beef broth', 'vegetable stock', 'vegetable broth'],
-  'spring onion': ['spring onion', 'green onion', 'scallion', 'scallions', 'spring onions', 'green onions'],
-  'zucchini': ['zucchini', 'courgette', 'zucchinis', 'courgettes'],
-  'eggplant': ['eggplant', 'aubergine', 'eggplants', 'aubergines'],
-  'shrimp': ['shrimp', 'prawns', 'prawn', 'shrimps', 'king prawn', 'tiger prawn'],
-};
-
-/** Pre-computed reverse lookup: variant → canonical */
-const SYNONYM_LOOKUP: Record<string, string> = {};
-for (const [canonical, variants] of Object.entries(INGREDIENT_SYNONYMS)) {
-  for (const v of variants) {
-    SYNONYM_LOOKUP[v] = canonical;
-  }
-}
-
-/**
- * Check if a recipe ingredient matches a pantry item.
- * Uses multi-tier matching: exact → synonym → word overlap → compact.
- */
-const ingredientsMatch = (recipeIngredient: string, pantryItem: string): boolean => {
-  const ri = normalizeIngredient(recipeIngredient);
-  const pi = normalizeIngredient(pantryItem);
-
-  if (!ri || !pi) return false;
-
-  // Tier 1: Exact normalized match
-  if (ri === pi) return true;
-
-  // Tier 2: One contains the other (e.g., "chicken breast" contains "chicken")
-  if (ri.includes(pi) || pi.includes(ri)) return true;
-
-  // Tier 3: Synonym lookup - both map to the same canonical name
-  const riCanonical = SYNONYM_LOOKUP[ri];
-  const piCanonical = SYNONYM_LOOKUP[pi];
-  if (riCanonical && piCanonical && riCanonical === piCanonical) return true;
-  // Also check if one is the canonical form of the other
-  if (riCanonical && (riCanonical === pi || piCanonical === riCanonical)) return true;
-  if (piCanonical && (piCanonical === ri || riCanonical === piCanonical)) return true;
-
-  // Tier 4: Compact match (remove spaces/hyphens): "hot sauce" == "hotsauce"
-  if (compactName(ri) === compactName(pi)) return true;
-
-  // Tier 5: Word overlap - all words of the shorter name appear in the longer
-  const riWords = new Set(ri.split(/\s+/));
-  const piWords = new Set(pi.split(/\s+/));
-  const [shorter, longer] = riWords.size <= piWords.size ? [riWords, piWords] : [piWords, riWords];
-  if (shorter.size > 0 && [...shorter].every(w => longer.has(w))) return true;
-
-  return false;
-};
-
-/** Check if a recipe ingredient is a common staple */
-const isStaple = (ingredientName: string): boolean => {
-  const n = normalizeIngredient(ingredientName);
-  if (COMMON_STAPLES.has(n)) return true;
-  // Also check if any staple is contained in the name
-  for (const staple of COMMON_STAPLES) {
-    if (n.includes(staple) || staple.includes(n)) return true;
-  }
-  return false;
-};
-
 const DiscoverTab: React.FC<{
   colors: ThemeColors;
   onViewRecipe: (recipe: Recipe) => void;
@@ -318,9 +174,8 @@ const DiscoverTab: React.FC<{
   const [loading, setLoading] = useState(!discoverState.loaded);
   const [isInteracting, setIsInteracting] = useState(false);
   const [pantryMode, setPantryMode] = useState(false);
-  const [pantryItems, setPantryItems] = useState<string[]>([]);
-  const [pantryLoaded, setPantryLoaded] = useState(false);
   const loadingMoreRef = useRef(false);
+  const modeRef = useRef(false); // tracks current pantryMode to detect stale responses
   const INITIAL_SIZE = 10;
   const BATCH_SIZE = 50;
 
@@ -330,24 +185,8 @@ const DiscoverTab: React.FC<{
 
   const { recipes, currentIndex, hasMore } = discoverState;
 
-  // Filter recipes by pantry ingredients when pantry mode is on
-  const filteredRecipes = React.useMemo(() => {
-    if (!pantryMode || pantryItems.length === 0) return recipes;
-    return recipes.filter(recipe => {
-      if (!recipe.ingredients || recipe.ingredients.length === 0) return false;
-      const total = recipe.ingredients.length;
-      // Count non-staple ingredients (the ones that actually matter)
-      const nonStapleIngredients = recipe.ingredients.filter(ing => !isStaple(ing.name));
-      // Count non-staple ingredients matched by pantry
-      const pantryMatchCount = nonStapleIngredients.filter(ing =>
-        pantryItems.some(pi => ingredientsMatch(ing.name, pi))
-      ).length;
-      // Must have at least 80% of non-staple ingredients in pantry
-      // If all ingredients are staples, always show (you can make it with basics)
-      if (nonStapleIngredients.length === 0) return true;
-      return pantryMatchCount / nonStapleIngredients.length >= 0.8;
-    });
-  }, [recipes, pantryMode, pantryItems]);
+  // Backend handles pantry filtering via use_pantry_items param — no client-side filter needed
+  const filteredRecipes = recipes;
 
   const currentRecipe = filteredRecipes[currentIndex] || filteredRecipes[0];
 
@@ -357,19 +196,14 @@ const DiscoverTab: React.FC<{
     }
   }, []);
 
-  // Load pantry items when pantry mode is toggled on
+  // Reload recipes from backend when pantry mode toggles (server-side filtering)
   useEffect(() => {
-    if (pantryMode && !pantryLoaded) {
-      pantryService.getPantryItems().then(items => {
-        setPantryItems(items.map(i => i.item_name));
-        setPantryLoaded(true);
-      }).catch(() => {});
+    modeRef.current = pantryMode;
+    if (discoverState.loaded) {
+      loadingMoreRef.current = false; // cancel any in-flight background loads
+      setDiscoverState(prev => ({ ...prev, recipes: [], currentIndex: 0, offset: 0, hasMore: true, loaded: false }));
+      loadRecipes();
     }
-  }, [pantryMode]);
-
-  // Reset index when toggling pantry mode
-  useEffect(() => {
-    setDiscoverState(prev => ({ ...prev, currentIndex: 0 }));
   }, [pantryMode]);
 
   const buildFilters = (limit: number, offset: number) => {
@@ -377,16 +211,23 @@ const DiscoverTab: React.FC<{
     if (dietaryRestrictions.length > 0) {
       filters.dietary_tags = dietaryRestrictions;
     }
+    if (pantryMode) {
+      filters.use_pantry_items = true;
+    }
     return filters;
   };
 
   const loadRecipes = async () => {
+    const requestMode = pantryMode; // capture mode at request time
     try {
       setLoading(true);
       const fetched = await recipeService.getRecipeFeed(buildFilters(INITIAL_SIZE, 0));
+      // Drop response if mode changed while request was in-flight
+      if (modeRef.current !== requestMode) return;
       setDiscoverState(prev => ({
         ...prev,
         recipes: fetched,
+        currentIndex: 0,
         offset: fetched.length,
         hasMore: fetched.length >= INITIAL_SIZE,
         loaded: true,
@@ -396,16 +237,21 @@ const DiscoverTab: React.FC<{
     } finally {
       setLoading(false);
       // Silently load the next batch in the background
-      loadMoreRecipes(true);
+      if (modeRef.current === requestMode) {
+        loadMoreRecipes(true);
+      }
     }
   };
 
   const loadMoreRecipes = async (isInitialBackground = false) => {
     if (loadingMoreRef.current) return;
     loadingMoreRef.current = true;
+    const requestMode = pantryMode; // capture mode at request time
     try {
       const currentOffset = isInitialBackground ? INITIAL_SIZE : discoverState.offset;
       const fetched = await recipeService.getRecipeFeed(buildFilters(BATCH_SIZE, currentOffset));
+      // Drop response if mode changed while request was in-flight
+      if (modeRef.current !== requestMode) return;
       if (fetched.length > 0) {
         setDiscoverState(prev => {
           const combined = [...prev.recipes, ...fetched];
@@ -612,15 +458,6 @@ const DiscoverTab: React.FC<{
     );
   }
 
-  const getDifficultyColor = (difficulty: string) => {
-    switch (difficulty) {
-      case 'Easy': return '#2ECC71';
-      case 'Medium': return '#F7B32B';
-      case 'Hard': return '#E74C3C';
-      default: return '#7F8C8D';
-    }
-  };
-
   return (
     <View style={styles.container}>
       <View style={styles.cardContainer}>
@@ -670,7 +507,7 @@ const DiscoverTab: React.FC<{
                   style={[styles.pantryToggle, pantryMode && styles.pantryToggleActive]}
                   onPress={() => setPantryMode(true)}
                 >
-                  <Text style={[styles.pantryToggleText, pantryMode && styles.pantryToggleTextActive]}>Pantry</Text>
+                  <Text style={[styles.pantryToggleText, pantryMode && styles.pantryToggleTextActive]}>My Pantry</Text>
                 </TouchableOpacity>
               </View>
 
@@ -682,7 +519,7 @@ const DiscoverTab: React.FC<{
                     <Text style={styles.recipeSubtitle}>{currentRecipe.cuisine_type}</Text>
                   </View>
                   <View style={styles.badgeRow}>
-                    <Text style={[styles.difficultyBadge, { backgroundColor: getDifficultyColor(currentRecipe.difficulty) }]}>
+                    <Text style={[styles.difficultyBadge, { backgroundColor: getDifficultyColor(currentRecipe.difficulty, colors) }]}>
                       {currentRecipe.difficulty}
                     </Text>
                   </View>
@@ -1436,7 +1273,7 @@ const createDiscoverStyles = (colors: ThemeColors) =>
       top: 10,
       right: 10,
       flexDirection: 'row',
-      backgroundColor: 'rgba(0,0,0,0.5)',
+      backgroundColor: colors.overlay,
       borderRadius: 16,
       padding: 2,
       zIndex: 10,
@@ -1491,7 +1328,7 @@ const createDiscoverStyles = (colors: ThemeColors) =>
       borderRadius: 8,
     },
     retryButtonText: {
-      color: '#FFFFFF',
+      color: colors.buttonText,
       fontSize: 16,
       fontWeight: '600',
     },
@@ -1510,7 +1347,7 @@ const createDiscoverStyles = (colors: ThemeColors) =>
       overflow: 'hidden',
       ...Platform.select({
         ios: {
-          shadowColor: '#000',
+          shadowColor: colors.shadow,
           shadowOffset: { width: 0, height: 8 },
           shadowOpacity: 0.15,
           shadowRadius: 20,
@@ -1536,7 +1373,7 @@ const createDiscoverStyles = (colors: ThemeColors) =>
       paddingHorizontal: 20,
       paddingTop: 14,
       paddingBottom: 100,
-      backgroundColor: 'rgba(0,0,0,0.45)',
+      backgroundColor: colors.overlay,
     },
     titleRow: {
       flexDirection: 'row',
@@ -1610,13 +1447,13 @@ const createDiscoverStyles = (colors: ThemeColors) =>
       textShadowRadius: 2,
     },
     skipButton: {
-      backgroundColor: 'rgba(231, 76, 60, 0.85)',
+      backgroundColor: colors.error + 'D9',
     },
     saveButton: {
-      backgroundColor: 'rgba(247, 179, 43, 0.85)',
+      backgroundColor: colors.warning + 'D9',
     },
     likeButton: {
-      backgroundColor: 'rgba(46, 204, 113, 0.85)',
+      backgroundColor: colors.success + 'D9',
     },
     actionButtonText: {
       fontSize: 20,
@@ -1632,22 +1469,22 @@ const createDiscoverStyles = (colors: ThemeColors) =>
     likeLabel: {
       top: '35%',
       right: 30,
-      borderColor: '#2ECC71',
-      backgroundColor: 'rgba(46, 204, 113, 0.6)',
+      borderColor: colors.success,
+      backgroundColor: colors.success + '99',
       transform: [{ rotate: '15deg' }],
     },
     nopeLabel: {
       top: '35%',
       left: 30,
-      borderColor: '#E74C3C',
-      backgroundColor: 'rgba(231, 76, 60, 0.6)',
+      borderColor: colors.error,
+      backgroundColor: colors.error + '99',
       transform: [{ rotate: '-15deg' }],
     },
     saveLabel: {
       top: '25%',
       alignSelf: 'center',
-      borderColor: '#F7B32B',
-      backgroundColor: 'rgba(247, 179, 43, 0.6)',
+      borderColor: colors.warning,
+      backgroundColor: colors.warning + '99',
     },
     overlayText: {
       fontSize: 32,
@@ -1744,13 +1581,13 @@ const createBrowseStyles = (colors: ThemeColors) =>
     expiringBanner: {
       flexDirection: 'row',
       alignItems: 'center',
-      backgroundColor: '#FFF3E0',
+      backgroundColor: colors.warningLight,
       marginHorizontal: 16,
       marginBottom: 8,
       padding: 12,
       borderRadius: 12,
       borderWidth: 1,
-      borderColor: '#FFE0B2',
+      borderColor: colors.warning,
     },
     expiringBannerContent: {
       flex: 1,
@@ -1767,12 +1604,12 @@ const createBrowseStyles = (colors: ThemeColors) =>
     expiringBannerTitle: {
       fontSize: 14,
       fontWeight: '600',
-      color: '#E65100',
+      color: colors.warningDark,
       marginBottom: 2,
     },
     expiringBannerSubtitle: {
       fontSize: 12,
-      color: '#BF360C',
+      color: colors.warningDark,
     },
     expiringBannerDismiss: {
       padding: 4,
@@ -1780,7 +1617,7 @@ const createBrowseStyles = (colors: ThemeColors) =>
     },
     expiringBannerDismissText: {
       fontSize: 14,
-      color: '#BF360C',
+      color: colors.warningDark,
     },
     loadingContainer: {
       paddingTop: 80,
@@ -1822,7 +1659,7 @@ const createBrowseStyles = (colors: ThemeColors) =>
       overflow: 'hidden',
       ...Platform.select({
         ios: {
-          shadowColor: '#000',
+          shadowColor: colors.shadow,
           shadowOffset: { width: 0, height: 1 },
           shadowOpacity: 0.06,
           shadowRadius: 6,
@@ -1858,7 +1695,7 @@ const createBrowseStyles = (colors: ThemeColors) =>
       borderRadius: 8,
     },
     aiBadgeText: {
-      color: '#FFF',
+      color: colors.buttonText,
       fontSize: 10,
       fontWeight: '700',
     },
@@ -1993,7 +1830,7 @@ const createMyRecipesStyles = (colors: ThemeColors) =>
       overflow: 'hidden',
       ...Platform.select({
         ios: {
-          shadowColor: '#000',
+          shadowColor: colors.shadow,
           shadowOffset: { width: 0, height: 1 },
           shadowOpacity: 0.06,
           shadowRadius: 6,
@@ -2029,7 +1866,7 @@ const createMyRecipesStyles = (colors: ThemeColors) =>
       borderRadius: 8,
     },
     aiBadgeText: {
-      color: '#FFF',
+      color: colors.buttonText,
       fontSize: 10,
       fontWeight: '700',
     },

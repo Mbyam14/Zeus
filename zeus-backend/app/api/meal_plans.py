@@ -116,22 +116,31 @@ async def generate_meal_plan(
         )
         logger.info(f"Unique recipe counts needed: {unique_recipe_counts}")
 
-        # Step 1: Shortlist candidates from the recipe database
+        # Fetch user's pantry items for pantry-aware scoring
+        pantry_result = db.table("pantry_items").select(
+            "item_name, quantity, unit, category"
+        ).eq("user_id", current_user.id).execute()
+        pantry_items = pantry_result.data or []
+        logger.info(f"Fetched {len(pantry_items)} pantry items for pantry-aware scoring")
+
+        # Step 1: Shortlist candidates from the recipe database (pantry-aware)
         candidates = await recipe_shortlist_service.shortlist_candidates(
             preferences=preferences,
             selected_days=normalized_days,
             meal_types=["breakfast", "lunch", "dinner"],
+            pantry_items=pantry_items,
         )
 
         total_candidates = sum(len(v) for v in candidates.values())
         logger.info(f"Shortlisted {total_candidates} candidate recipes from database")
 
-        # Step 2: Claude selects the best combination (or algorithmic fallback)
+        # Step 2: Claude selects the best combination (with pantry context)
         selected_ids = await ai_service.select_meal_plan_recipes(
             candidates=candidates,
             preferences=preferences,
             selected_days=normalized_days,
             unique_recipe_counts=unique_recipe_counts,
+            pantry_items=pantry_items,
         )
 
         # Step 3: Fetch selected recipes from DB
@@ -441,22 +450,31 @@ async def generate_meal_plan_for_week(
             num_days, cooking_sessions, leftover_tolerance
         )
 
-        # Step 1: Shortlist candidates from the recipe database
+        # Fetch user's pantry items for pantry-aware scoring
+        pantry_result = db.table("pantry_items").select(
+            "item_name, quantity, unit, category"
+        ).eq("user_id", current_user.id).execute()
+        pantry_items = pantry_result.data or []
+        logger.info(f"Fetched {len(pantry_items)} pantry items for pantry-aware scoring")
+
+        # Step 1: Shortlist candidates from the recipe database (pantry-aware)
         candidates = await recipe_shortlist_service.shortlist_candidates(
             preferences=preferences,
             selected_days=normalized_days,
             meal_types=["breakfast", "lunch", "dinner"],
+            pantry_items=pantry_items,
         )
 
         total_candidates = sum(len(v) for v in candidates.values())
         logger.info(f"Shortlisted {total_candidates} candidate recipes from database")
 
-        # Step 2: Claude selects the best combination
+        # Step 2: Claude selects the best combination (with pantry context)
         selected_ids = await ai_service.select_meal_plan_recipes(
             candidates=candidates,
             preferences=preferences,
             selected_days=normalized_days,
             unique_recipe_counts=unique_recipe_counts,
+            pantry_items=pantry_items,
         )
 
         # Step 3: Fetch selected recipes from DB
