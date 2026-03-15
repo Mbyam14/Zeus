@@ -20,8 +20,9 @@ class MealType(str, Enum):
 
 class Ingredient(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
-    quantity: str = Field(..., min_length=1, max_length=100)
+    quantity: str = Field("", max_length=100)  # Allow empty (e.g., "to taste" items)
     unit: str = Field("", max_length=50)  # Allow empty unit (e.g., "3 eggs")
+    section: Optional[str] = Field(None, max_length=100)  # Recipe sub-section (e.g., "Salsa", "Tacos")
 
 
 class Instruction(BaseModel):
@@ -111,7 +112,9 @@ class RecipeResponse(BaseModel):
 
 class RecipeFeedFilter(BaseModel):
     cuisine_type: Optional[str] = None
+    cuisine_preferences: Optional[List[str]] = None
     difficulty: Optional[DifficultyLevel] = None
+    max_difficulty: Optional[DifficultyLevel] = None
     max_prep_time: Optional[int] = Field(None, ge=0, le=480)
     meal_type: Optional[MealType] = None
     dietary_tags: Optional[List[str]] = None

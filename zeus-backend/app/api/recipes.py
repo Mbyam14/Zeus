@@ -28,7 +28,9 @@ async def create_recipe(
 @router.get("/feed", response_model=List[RecipeResponse])
 async def get_recipe_feed(
     cuisine_type: Optional[str] = Query(None, description="Filter by cuisine type"),
+    cuisine_preferences: Optional[List[str]] = Query(None, description="Preferred cuisines (returns these first)"),
     difficulty: Optional[DifficultyLevel] = Query(None, description="Filter by difficulty level"),
+    max_difficulty: Optional[DifficultyLevel] = Query(None, description="Maximum difficulty level"),
     max_prep_time: Optional[int] = Query(None, description="Maximum prep time in minutes"),
     meal_type: Optional[MealType] = Query(None, description="Filter by meal type"),
     dietary_tags: Optional[List[str]] = Query(None, description="Filter by dietary tags"),
@@ -45,7 +47,9 @@ async def get_recipe_feed(
     """
     filters = RecipeFeedFilter(
         cuisine_type=cuisine_type,
+        cuisine_preferences=cuisine_preferences,
         difficulty=difficulty,
+        max_difficulty=max_difficulty,
         max_prep_time=max_prep_time,
         meal_type=meal_type,
         dietary_tags=dietary_tags,

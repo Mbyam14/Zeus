@@ -167,9 +167,11 @@ const DiscoverTab: React.FC<{
   colors: ThemeColors;
   onViewRecipe: (recipe: Recipe) => void;
   dietaryRestrictions: string[];
+  cuisinePreferences: string[];
+  cookingSkill: string;
   discoverState: DiscoverState;
   setDiscoverState: React.Dispatch<React.SetStateAction<DiscoverState>>;
-}> = ({ colors, onViewRecipe, dietaryRestrictions, discoverState, setDiscoverState }) => {
+}> = ({ colors, onViewRecipe, dietaryRestrictions, cuisinePreferences, cookingSkill, discoverState, setDiscoverState }) => {
   const styles = createDiscoverStyles(colors);
   const [loading, setLoading] = useState(!discoverState.loaded);
   const [isInteracting, setIsInteracting] = useState(false);
@@ -213,6 +215,17 @@ const DiscoverTab: React.FC<{
     }
     if (pantryMode) {
       filters.use_pantry_items = true;
+    } else {
+      // "For You" mode: pass user preferences for smarter suggestions
+      if (cuisinePreferences.length > 0) {
+        filters.cuisine_preferences = cuisinePreferences;
+      }
+      // Map cooking skill to max difficulty
+      if (cookingSkill === 'beginner') {
+        filters.max_difficulty = 'Easy';
+      } else if (cookingSkill === 'intermediate') {
+        filters.max_difficulty = 'Medium';
+      }
     }
     return filters;
   };
@@ -254,7 +267,10 @@ const DiscoverTab: React.FC<{
       if (modeRef.current !== requestMode) return;
       if (fetched.length > 0) {
         setDiscoverState(prev => {
-          const combined = [...prev.recipes, ...fetched];
+          // Deduplicate: only add recipes we haven't seen
+          const existingIds = new Set(prev.recipes.map(r => r.id));
+          const newRecipes = fetched.filter(r => !existingIds.has(r.id));
+          const combined = [...prev.recipes, ...newRecipes];
           const reordered = prev.sessionPrefs.totalLikes >= 3
             ? reorderUpcoming(combined, prev.currentIndex, prev.sessionPrefs)
             : combined;
@@ -437,7 +453,7 @@ const DiscoverTab: React.FC<{
             style={[styles.pantryToggle, !pantryMode && styles.pantryToggleActive]}
             onPress={() => setPantryMode(false)}
           >
-            <Text style={[styles.pantryToggleText, !pantryMode && styles.pantryToggleTextActive]}>All Recipes</Text>
+            <Text style={[styles.pantryToggleText, !pantryMode && styles.pantryToggleTextActive]}>For You</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.pantryToggle, pantryMode && styles.pantryToggleActive]}
@@ -501,7 +517,7 @@ const DiscoverTab: React.FC<{
                   style={[styles.pantryToggle, !pantryMode && styles.pantryToggleActive]}
                   onPress={() => setPantryMode(false)}
                 >
-                  <Text style={[styles.pantryToggleText, !pantryMode && styles.pantryToggleTextActive]}>All</Text>
+                  <Text style={[styles.pantryToggleText, !pantryMode && styles.pantryToggleTextActive]}>For You</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.pantryToggle, pantryMode && styles.pantryToggleActive]}
@@ -1130,6 +1146,8 @@ export const RecipeHubScreen: React.FC = () => {
   const [myRecipesState, setMyRecipesState] = useState<MyRecipesState>(MY_RECIPES_INITIAL);
 
   const dietaryRestrictions = user?.profile_data?.preferences?.dietary_restrictions || [];
+  const cuisinePreferences = user?.profile_data?.preferences?.cuisine_preferences || [];
+  const cookingSkill = user?.profile_data?.preferences?.cooking_skill || 'intermediate';
 
   const tabs: { key: TabMode; label: string }[] = [
     { key: 'discover', label: 'Discover' },
@@ -1178,7 +1196,7 @@ export const RecipeHubScreen: React.FC = () => {
         {/* Content */}
         <View style={styles.content}>
           {activeTab === 'discover' && (
-            <DiscoverTab colors={colors} onViewRecipe={handleViewRecipe} dietaryRestrictions={dietaryRestrictions} discoverState={discoverState} setDiscoverState={setDiscoverState} />
+            <DiscoverTab colors={colors} onViewRecipe={handleViewRecipe} dietaryRestrictions={dietaryRestrictions} cuisinePreferences={cuisinePreferences} cookingSkill={cookingSkill} discoverState={discoverState} setDiscoverState={setDiscoverState} />
           )}
           {activeTab === 'browse' && (
             <BrowseTab colors={colors} onViewRecipe={handleViewRecipe} dietaryRestrictions={dietaryRestrictions} onEditPreferences={handleEditPreferences} browseState={browseState} setBrowseState={setBrowseState} />

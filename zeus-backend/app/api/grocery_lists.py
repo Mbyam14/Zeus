@@ -17,6 +17,7 @@ from app.schemas.grocery_list import (
 from app.schemas.user import UserResponse
 from app.utils.dependencies import get_current_active_user
 from app.services.grocery_list_service import grocery_list_service
+from app.database import get_database
 
 logger = logging.getLogger(__name__)
 
@@ -59,9 +60,22 @@ async def generate_grocery_list(
         HTTPException 500: Database or service error
     """
     try:
+        # Fetch household size from user profile
+        household_size = None
+        try:
+            db = get_database()
+            profile_result = db.table("profiles").select("profile_data").eq("id", current_user.id).execute()
+            if profile_result.data:
+                profile_data = profile_result.data[0].get("profile_data") or {}
+                preferences = profile_data.get("preferences") or {}
+                household_size = preferences.get("household_size")
+        except Exception as profile_err:
+            logger.warning(f"Could not fetch household size: {profile_err}")
+
         grocery_list = await grocery_list_service.generate_grocery_list(
             user_id=current_user.id,
-            meal_plan_id=meal_plan_id
+            meal_plan_id=meal_plan_id,
+            household_size=household_size
         )
         return grocery_list
     except ValueError as e:

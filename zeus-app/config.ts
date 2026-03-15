@@ -22,17 +22,17 @@ interface EnvConfig {
 const ENV: Record<string, EnvConfig> = {
   development: {
     // UPDATE THIS with your local IP address for development
-    API_BASE_URL: 'http://192.168.0.16:8000',
+    API_BASE_URL: 'https://zeus-production-a904.up.railway.app',
     API_TIMEOUT: 20000,
   },
   preview: {
     // UPDATE THIS with your deployed backend URL (e.g., Railway)
-    API_BASE_URL: 'https://your-backend-url.up.railway.app',
+    API_BASE_URL: 'https://zeus-production-a904.up.railway.app',
     API_TIMEOUT: 15000,
   },
   production: {
     // UPDATE THIS with your production backend URL
-    API_BASE_URL: 'https://your-backend-url.up.railway.app',
+    API_BASE_URL: 'https://zeus-production-a904.up.railway.app',
     API_TIMEOUT: 15000,
   },
 };

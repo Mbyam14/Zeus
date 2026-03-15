@@ -354,11 +354,12 @@ class AIService:
 
         User Context:
         - Week starting: {request.week_start_date}
+        - Household size: {user_preferences.get('household_size', 2)} people
         - Dietary preferences: {', '.join(request.dietary_preferences) if request.dietary_preferences else 'None'}
         - Cuisine preferences: {', '.join(request.cuisine_preferences) if request.cuisine_preferences else 'Any'}
         - Cooking skill: {request.cooking_skill or 'intermediate'}
         - Pantry items available: {', '.join(request.pantry_items) if request.pantry_items else 'None'}
-        - Servings per meal: {request.servings_per_meal}
+        - Servings per meal: {user_preferences.get('household_size', request.servings_per_meal)}
         - Budget mode: {'ENABLED - prioritize cheap ingredients!' if budget_friendly else 'Standard'}
 
         {"=" * 50 if budget_friendly else ""}
@@ -617,11 +618,12 @@ class AIService:
             for i, r in enumerate(items):
                 cal = r.get("calories", "?")
                 prot = r.get("protein_grams", "?")
+                servings = r.get("servings", "?")
                 cuisine = r.get("cuisine_type", "?")
                 has_img = "IMG" if r.get("image_url") else "no-img"
                 pantry_pct = r.get("_pantry_coverage")
                 pantry_tag = f" | {pantry_pct}% pantry" if pantry_pct else ""
-                lines.append(f"  {i+1}. {r['title']} | {cal}cal {prot}g protein | {cuisine} | {has_img}{pantry_tag}")
+                lines.append(f"  {i+1}. {r['title']} | {cal}cal {prot}g protein | {servings} servings | {cuisine} | {has_img}{pantry_tag}")
 
             sections.append(
                 f"=== {meal_type.upper()} (pick {count_needed}) ===\n" + "\n".join(lines)
@@ -642,9 +644,12 @@ class AIService:
         ])
         rules_text = "\n".join(f"{i+1}. {rule}" for i, rule in enumerate(rules))
 
+        household_size = preferences.get("household_size", 2)
+
         return f"""Select recipes for a {num_days}-day meal plan.
 
-DAILY TARGETS: {calorie_target} cal, {protein_target}g protein
+HOUSEHOLD SIZE: {household_size} people — prefer recipes whose servings are close to {household_size}
+DAILY TARGETS: {calorie_target} cal, {protein_target}g protein (per person)
 DISTRIBUTION: Breakfast {distribution.get('breakfast', 25)}%, Lunch {distribution.get('lunch', 35)}%, Dinner {distribution.get('dinner', 40)}%
 {"BUDGET MODE: prefer simpler/cheaper recipes" if budget else ""}
 {pantry_section}

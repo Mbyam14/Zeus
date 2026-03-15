@@ -2,6 +2,7 @@ export interface Ingredient {
   name: string;
   quantity: string;
   unit: string;
+  section?: string;
 }
 
 export interface Instruction {
@@ -58,7 +59,9 @@ export interface RecipeCreate {
 
 export interface RecipeFeedFilter {
   cuisine_type?: string;
+  cuisine_preferences?: string[];
   difficulty?: DifficultyLevel;
+  max_difficulty?: DifficultyLevel;
   max_prep_time?: number;
   meal_type?: MealType;
   dietary_tags?: string[];

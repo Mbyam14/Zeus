@@ -98,8 +98,9 @@ class RecipeShortlistService:
             )
 
             # Score and rank
+            household_size = preferences.get("household_size", 2)
             scored = self._score_candidates(
-                filtered, meal_cal_target, meal_protein_target, pantry_lookup
+                filtered, meal_cal_target, meal_protein_target, pantry_lookup, household_size
             )
 
             result[meal_type] = scored[:target_per_meal_type]
@@ -194,10 +195,11 @@ class RecipeShortlistService:
         target_calories: int,
         target_protein: float,
         pantry_lookup: Optional[Dict[str, dict]] = None,
+        household_size: int = 2,
     ) -> List[Dict[str, Any]]:
         """Score and rank candidates. Higher score = better match.
 
-        Scoring breakdown (max ~120 with pantry, ~70 without):
+        Scoring breakdown (max ~135 with pantry, ~85 without):
         - Calorie proximity: 0-20
         - Protein proximity: 0-20
         - Has image: 0 or 10
@@ -206,6 +208,7 @@ class RecipeShortlistService:
         - Cook time: 0-5
         - Pantry coverage: 0-40 (when pantry items available)
         - Simplicity bonus: 0-10
+        - Serving size match: 0-15
         """
         for recipe in candidates:
             score = 0.0
@@ -260,6 +263,17 @@ class RecipeShortlistService:
                 )
                 if non_trivial > 0:
                     score += max(0, 10 * (1 - non_trivial / 15))
+
+            # Serving size match (0-15 points): prefer recipes close to household size
+            recipe_servings = recipe.get("servings") or 4
+            if household_size > 0:
+                serving_diff = abs(recipe_servings - household_size)
+                if serving_diff == 0:
+                    score += 15  # Perfect match
+                elif serving_diff <= 1:
+                    score += 10  # Close enough
+                elif serving_diff <= 2:
+                    score += 5   # Acceptable
 
             recipe["_score"] = round(score, 2)
 

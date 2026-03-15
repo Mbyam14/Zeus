@@ -235,3 +235,119 @@ def prepare_pantry_lookup(pantry_items: List[dict]) -> Dict[str, dict]:
         if normalized:
             lookup[normalized] = item
     return lookup
+
+
+# ============================================================================
+# Unit Conversion
+# ============================================================================
+
+# All conversions are stored relative to a base unit per unit type.
+# Volume base: milliliters (ml)
+# Weight base: grams (g)
+# This lets us convert between any two units of the same type.
+
+UNIT_TO_ML: Dict[str, float] = {
+    "ml": 1.0,
+    "milliliter": 1.0,
+    "milliliters": 1.0,
+    "tsp": 4.929,
+    "teaspoon": 4.929,
+    "teaspoons": 4.929,
+    "tbsp": 14.787,
+    "tablespoon": 14.787,
+    "tablespoons": 14.787,
+    "fl oz": 29.574,
+    "fluid ounce": 29.574,
+    "fluid ounces": 29.574,
+    "cup": 236.588,
+    "cups": 236.588,
+    "pint": 473.176,
+    "pints": 473.176,
+    "quart": 946.353,
+    "quarts": 946.353,
+    "gallon": 3785.41,
+    "gallons": 3785.41,
+    "liter": 1000.0,
+    "liters": 1000.0,
+    "l": 1000.0,
+}
+
+UNIT_TO_GRAMS: Dict[str, float] = {
+    "g": 1.0,
+    "gram": 1.0,
+    "grams": 1.0,
+    "oz": 28.3495,
+    "ounce": 28.3495,
+    "ounces": 28.3495,
+    "lb": 453.592,
+    "lbs": 453.592,
+    "pound": 453.592,
+    "pounds": 453.592,
+    "kg": 1000.0,
+    "kilogram": 1000.0,
+    "kilograms": 1000.0,
+}
+
+# Count-based units (no conversion needed between these)
+COUNT_UNITS: Set[str] = {
+    "", "piece", "pieces", "item", "items", "whole",
+    "clove", "cloves", "head", "heads", "bunch", "bunches",
+    "slice", "slices", "can", "cans", "box", "boxes",
+    "package", "packages", "bag", "bags", "jar", "jars",
+    "stalk", "stalks", "sprig", "sprigs", "leaf", "leaves",
+}
+
+
+def normalize_unit(unit: str) -> str:
+    """Normalize a unit string for comparison."""
+    if not unit:
+        return ""
+    return unit.lower().strip().rstrip(".")
+
+
+def convert_quantity(
+    quantity: float,
+    from_unit: str,
+    to_unit: str,
+) -> Optional[float]:
+    """
+    Convert a quantity from one unit to another.
+
+    Returns the converted quantity, or None if units are incompatible.
+    """
+    from_norm = normalize_unit(from_unit)
+    to_norm = normalize_unit(to_unit)
+
+    if from_norm == to_norm:
+        return quantity
+
+    # Try volume conversion
+    if from_norm in UNIT_TO_ML and to_norm in UNIT_TO_ML:
+        ml = quantity * UNIT_TO_ML[from_norm]
+        return ml / UNIT_TO_ML[to_norm]
+
+    # Try weight conversion
+    if from_norm in UNIT_TO_GRAMS and to_norm in UNIT_TO_GRAMS:
+        grams = quantity * UNIT_TO_GRAMS[from_norm]
+        return grams / UNIT_TO_GRAMS[to_norm]
+
+    # Count-based units are compatible with each other
+    if from_norm in COUNT_UNITS and to_norm in COUNT_UNITS:
+        return quantity
+
+    return None
+
+
+def units_are_compatible(unit_a: str, unit_b: str) -> bool:
+    """Check if two units can be converted between each other."""
+    a = normalize_unit(unit_a)
+    b = normalize_unit(unit_b)
+    if a == b:
+        return True
+    if a in UNIT_TO_ML and b in UNIT_TO_ML:
+        return True
+    if a in UNIT_TO_GRAMS and b in UNIT_TO_GRAMS:
+        return True
+    if a in COUNT_UNITS and b in COUNT_UNITS:
+        return True
+    return False

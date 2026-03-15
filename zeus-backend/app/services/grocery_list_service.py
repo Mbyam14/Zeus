@@ -12,10 +12,21 @@ from typing import List, Dict, Optional, Tuple
 from datetime import datetime, date
 from collections import defaultdict
 import re
+import json
+import math
 import logging
 
+import anthropic
+
 from app.database import get_database
-from app.utils.ingredient_matching import normalize_ingredient_name as shared_normalize
+from app.config import settings
+from app.utils.ingredient_matching import (
+    normalize_ingredient_name as shared_normalize,
+    match_ingredient_to_pantry,
+    prepare_pantry_lookup,
+    convert_quantity,
+    normalize_unit,
+)
 
 logger = logging.getLogger(__name__)
 from app.schemas.grocery_list import (
@@ -36,8 +47,19 @@ from app.schemas.pantry import PantryItemResponse
 class GroceryListService:
     """Service for managing grocery lists."""
 
+    # Valid grocery categories for Claude validation
+    VALID_CATEGORIES = {
+        'Produce', 'Dairy', 'Protein', 'Grains', 'Spices',
+        'Condiments', 'Beverages', 'Frozen', 'Pantry', 'Other'
+    }
+
     def __init__(self):
         self.db = get_database()
+        try:
+            self.claude_client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        except Exception:
+            self.claude_client = None
+            logger.warning("Claude client not available for ingredient categorization")
 
     # ========================================================================
     # PUBLIC METHODS
@@ -46,7 +68,8 @@ class GroceryListService:
     async def generate_grocery_list(
         self,
         user_id: str,
-        meal_plan_id: str
+        meal_plan_id: str,
+        household_size: Optional[int] = None
     ) -> GroceryListResponse:
         """
         Generate grocery list from meal plan.
@@ -79,8 +102,9 @@ class GroceryListService:
             meal_plan = meal_plan_result.data[0]
             week_start_date = meal_plan.get("week_start_date")
 
-            # 2. Extract recipe IDs from meal plan
+            # 2. Extract recipe IDs and count occurrences
             recipe_ids = self._extract_recipe_ids_from_meal_plan(meal_plan)
+            recipe_occurrences = self._count_recipe_occurrences(meal_plan)
 
             if not recipe_ids:
                 raise ValueError("Meal plan has no recipes")
@@ -89,20 +113,40 @@ class GroceryListService:
             recipes_result = self.db.table("recipes").select("*").in_("id", recipe_ids).execute()
             recipes = recipes_result.data
 
-            # 4. Aggregate ingredients from all recipes
-            aggregated_ingredients, recipe_warnings = self._aggregate_ingredients(recipes)
+            if household_size:
+                logger.info(f"Scaling grocery list for household size: {household_size}")
+            for rid, count in recipe_occurrences.items():
+                if count > 1:
+                    logger.info(f"Recipe {rid} appears {count} times in meal plan")
+
+            # 4. Aggregate ingredients from all recipes (scaled for household size + occurrences)
+            aggregated_ingredients, recipe_warnings = self._aggregate_ingredients(
+                recipes, household_size=household_size, recipe_occurrences=recipe_occurrences
+            )
         except Exception as e:
             logger.error(f"Error in generate_grocery_list: {e}", exc_info=True)
             raise
 
-        # 5. Fetch user's pantry items
+        # 5. Use Claude to clean names and categorize ingredients
+        ai_results = self._ai_clean_and_categorize(aggregated_ingredients)
+        if ai_results:
+            for norm_name, ai_data in ai_results.items():
+                if norm_name in aggregated_ingredients:
+                    agg = aggregated_ingredients[norm_name]
+                    agg.display_name = ai_data["clean_name"]
+                    agg.category = GroceryCategory(ai_data["category"])
+        else:
+            # Fallback: use rule-based categorization (already set during aggregation)
+            logger.info("Using rule-based categorization (Claude unavailable)")
+
+        # 6. Fetch user's pantry items
         pantry_result = self.db.table("pantry_items").select("*").eq("user_id", user_id).execute()
         pantry_items = pantry_result.data
 
-        # 6. Match aggregated ingredients to pantry
+        # 7. Match aggregated ingredients to pantry
         pantry_matches = self._match_pantry_items(aggregated_ingredients, pantry_items)
 
-        # 7. Create or update grocery list
+        # 8. Create or update grocery list
         grocery_list_data = GroceryListCreate(
             user_id=user_id,
             meal_plan_id=meal_plan_id,
@@ -136,7 +180,7 @@ class GroceryListService:
             }).execute()
             grocery_list_id = grocery_list_result.data[0]["id"]
 
-        # 8. Create grocery list items (consolidate alternate units into one item)
+        # 9. Create grocery list items (consolidate alternate units into one item)
         grocery_items = []
         for agg_ingredient in aggregated_ingredients.values():
             pantry_match = pantry_matches.get(agg_ingredient.normalized_name)
@@ -190,7 +234,7 @@ class GroceryListService:
 
             self.db.table("grocery_list_items").insert(grocery_items).execute()
 
-        # 9. Fetch and return complete grocery list with warnings
+        # 10. Fetch and return complete grocery list with warnings
         return await self.get_grocery_list(user_id, grocery_list_id, warnings=recipe_warnings)
 
     async def get_grocery_list(
@@ -423,21 +467,55 @@ class GroceryListService:
 
         return list(recipe_ids)
 
+    def _count_recipe_occurrences(self, meal_plan: dict) -> Dict[str, int]:
+        """
+        Count how many times each recipe appears in the meal plan.
+
+        A recipe used for Monday dinner AND Wednesday dinner counts as 2 occurrences,
+        meaning ingredient quantities should be doubled.
+
+        Args:
+            meal_plan: Meal plan dict with 'meals' JSONB field
+
+        Returns:
+            Dict mapping recipe_id -> occurrence count
+        """
+        counts: Dict[str, int] = defaultdict(int)
+        meals = meal_plan.get("meals", {})
+
+        for day_name, day_meals in meals.items():
+            if isinstance(day_meals, dict):
+                for meal_type, meal_data in day_meals.items():
+                    if meal_data:
+                        if isinstance(meal_data, str):
+                            counts[meal_data] += 1
+                        elif isinstance(meal_data, dict) and 'recipe_id' in meal_data:
+                            counts[meal_data['recipe_id']] += 1
+
+        return dict(counts)
+
     def _aggregate_ingredients(
         self,
-        recipes: List[dict]
+        recipes: List[dict],
+        household_size: Optional[int] = None,
+        recipe_occurrences: Optional[Dict[str, int]] = None
     ) -> Tuple[Dict[str, IngredientAggregate], List[RecipeWarning]]:
         """
-        Aggregate ingredients from multiple recipes.
+        Aggregate ingredients from multiple recipes, scaled for household size
+        and recipe occurrence count.
 
         Strategy:
-        1. Group ingredients by normalized name
-        2. For each group, check if units are compatible
-        3. If compatible, convert to common unit and sum quantities
-        4. If incompatible, keep as separate entries
+        1. Multiply quantities by occurrence count (recipe used 6 times = 6x ingredients)
+        2. Scale each recipe's ingredient quantities based on household_size / recipe.servings
+        3. Group ingredients by normalized name
+        4. For each group, check if units are compatible
+        5. If compatible, convert to common unit and sum quantities
+        6. If incompatible, keep as separate entries
 
         Args:
             recipes: List of recipe dicts with 'ingredients' JSONB field
+            household_size: Number of people to cook for (scales quantities)
+            recipe_occurrences: Dict of recipe_id -> count of times used in meal plan
 
         Returns:
             Tuple of:
@@ -452,6 +530,16 @@ class GroceryListService:
             recipe_id = recipe["id"]
             recipe_title = recipe.get("title", "Unknown Recipe")
             ingredients = recipe.get("ingredients")
+
+            # How many times does this recipe appear in the meal plan?
+            occurrence_count = (recipe_occurrences or {}).get(recipe_id, 1)
+
+            # Calculate scaling factor for household size
+            recipe_servings = recipe.get("servings") or 4
+            if household_size and household_size > 0 and recipe_servings > 0:
+                scale_factor = (household_size / recipe_servings) * occurrence_count
+            else:
+                scale_factor = float(occurrence_count)
 
             # Handle None or empty ingredients
             if ingredients is None:
@@ -488,13 +576,16 @@ class GroceryListService:
                     logger.warning(f"Recipe {recipe_id} has invalid ingredient format: {ingredient}")
                     continue
 
-                name = ingredient.get("name") or ""  # Handle None values
+                raw_name = ingredient.get("name") or ""  # Handle None values
                 quantity = ingredient.get("quantity")
                 unit = ingredient.get("unit")
 
                 # Skip ingredients with no name
-                if not name or not name.strip():
+                if not raw_name or not raw_name.strip():
                     continue
+
+                # Clean ingredient name (remove recipe notes like "or more to taste")
+                name = self._clean_ingredient_name(raw_name)
 
                 # Skip common household items that don't need to be purchased
                 if self._should_skip_ingredient(name):
@@ -505,6 +596,24 @@ class GroceryListService:
                 # Parse quantity if it's a string (e.g., "1-2" or "1/2")
                 if isinstance(quantity, str):
                     quantity = self._parse_quantity_string(quantity)
+
+                # Scale quantity for household size + occurrence count
+                if quantity is not None and scale_factor != 1.0:
+                    scaled = quantity * scale_factor
+                    # Round up count-based units (can't buy 0.3 of an egg)
+                    unit_lower = (unit or "").lower().strip()
+                    count_units = {
+                        "", "piece", "pieces", "item", "items", "whole",
+                        "clove", "cloves", "head", "heads", "bunch", "bunches",
+                        "slice", "slices", "can", "cans", "box", "boxes",
+                        "package", "packages", "bag", "bags", "jar", "jars",
+                        "stalk", "stalks", "sprig", "sprigs", "leaf", "leaves",
+                        "strip", "strips", "link", "links",
+                    }
+                    if unit_lower in count_units:
+                        quantity = math.ceil(scaled)
+                    else:
+                        quantity = round(scaled, 2)
 
                 normalized_name = self._normalize_ingredient_name(name)
 
@@ -669,14 +778,10 @@ class GroceryListService:
         pantry_items: List[dict]
     ) -> Dict[str, PantryMatch]:
         """
-        Match aggregated ingredients to pantry items.
+        Match aggregated ingredients to pantry items with unit-aware deduction.
 
-        Strategy:
-        1. Exact match: normalized_name == pantry.normalized_name
-        2. Partial match: one contains the other
-        3. No match
-
-        For matches, calculate needed_quantity = recipe_quantity - pantry_quantity
+        Uses shared 4-level matching (exact → variation → substring → word-overlap)
+        and converts between compatible units (cups↔tbsp, lbs↔oz, etc.).
 
         Args:
             aggregated_ingredients: Dict of normalized_name -> IngredientAggregate
@@ -687,64 +792,42 @@ class GroceryListService:
         """
         pantry_matches = {}
 
-        # Pre-normalize all pantry item names for matching
-        pantry_with_normalized = []
-        for pantry_item in pantry_items:
-            pantry_name = pantry_item.get("item_name") or pantry_item.get("normalized_name") or ""
-            pantry_normalized = self._normalize_ingredient_name(pantry_name)
-            pantry_with_normalized.append((pantry_item, pantry_normalized))
+        # Build pantry lookup using shared utility
+        pantry_lookup = prepare_pantry_lookup(pantry_items)
 
         for normalized_name, ingredient in aggregated_ingredients.items():
-            best_match = None
-            match_type = 'none'
+            # Use shared 4-level matching
+            matched_pantry_name, match_type = match_ingredient_to_pantry(
+                ingredient.display_name, pantry_lookup
+            )
 
-            # Try exact match first
-            for pantry_item, pantry_normalized in pantry_with_normalized:
-                if pantry_normalized and pantry_normalized == normalized_name:
-                    best_match = pantry_item
-                    match_type = 'exact'
-                    break
+            best_match = pantry_lookup.get(matched_pantry_name) if matched_pantry_name else None
 
-            # Try partial/substring match if no exact match
-            if not best_match:
-                for pantry_item, pantry_normalized in pantry_with_normalized:
-                    if pantry_normalized and normalized_name:
-                        if (pantry_normalized in normalized_name or
-                            normalized_name in pantry_normalized):
-                            best_match = pantry_item
-                            match_type = 'partial'
-                            break
-
-            # Try word-overlap match as last resort (e.g. "bell pepper" vs "green bell pepper")
-            if not best_match and normalized_name:
-                ingredient_words = set(normalized_name.split())
-                for pantry_item, pantry_normalized in pantry_with_normalized:
-                    if pantry_normalized and len(pantry_normalized) >= 3:
-                        pantry_words = set(pantry_normalized.split())
-                        # Match if all words of the shorter name appear in the longer one
-                        shorter, longer = (pantry_words, ingredient_words) if len(pantry_words) <= len(ingredient_words) else (ingredient_words, pantry_words)
-                        if shorter and shorter.issubset(longer):
-                            best_match = pantry_item
-                            match_type = 'partial'
-                            break
-
-            # Calculate needed quantity
+            # Calculate needed quantity with unit conversion
             needed_quantity = ingredient.total_quantity
 
             if best_match and ingredient.total_quantity is not None:
                 pantry_quantity = best_match.get("quantity")
-                pantry_unit = best_match.get("unit", "").lower().strip()
-                ingredient_unit = (ingredient.unit or "").lower().strip()
+                pantry_unit = normalize_unit(best_match.get("unit", ""))
+                ingredient_unit = normalize_unit(ingredient.unit or "")
 
-                # Only subtract if units match
-                if pantry_quantity and pantry_unit == ingredient_unit:
-                    needed_quantity = max(0, ingredient.total_quantity - pantry_quantity)
+                if pantry_quantity and pantry_quantity > 0:
+                    # Try to convert pantry quantity to ingredient's unit
+                    converted = convert_quantity(pantry_quantity, pantry_unit, ingredient_unit)
+                    if converted is not None:
+                        needed_quantity = max(0, round(ingredient.total_quantity - converted, 2))
+                    else:
+                        # Units incompatible — still flag as in pantry but don't deduct
+                        logger.info(
+                            f"Cannot convert {pantry_quantity} {pantry_unit} → {ingredient_unit} "
+                            f"for '{ingredient.display_name}'"
+                        )
 
             pantry_matches[normalized_name] = PantryMatch(
                 ingredient_name=ingredient.display_name,
                 normalized_name=normalized_name,
                 pantry_item_id=best_match.get("id") if best_match else None,
-                match_type=match_type,
+                match_type=match_type if match_type != "none" else "none",
                 pantry_quantity=best_match.get("quantity") if best_match else None,
                 pantry_unit=best_match.get("unit") if best_match else None,
                 needed_quantity=needed_quantity
@@ -759,8 +842,8 @@ class GroceryListService:
         """
         Try to convert different units to a common unit.
 
-        Currently simplified - just sums quantities per unit.
-        Future enhancement: Use unit_conversions table for actual conversion.
+        Uses unit conversion tables to merge compatible units (e.g., cups + tbsp → cups).
+        Falls back to separate entries for truly incompatible units (e.g., cups + lbs).
 
         Args:
             unit_groups: Dict mapping unit -> list of ingredients
@@ -768,27 +851,194 @@ class GroceryListService:
         Returns:
             Dict mapping unit -> total quantity
         """
-        # For MVP, just sum quantities within each unit group
-        converted = {}
-
+        # First, sum quantities within each unit group
+        unit_totals = {}
         for unit, ingredients in unit_groups.items():
             total = sum(
                 ing["quantity"] for ing in ingredients
                 if ing["quantity"] is not None
             )
             if total > 0:
-                converted[unit or ""] = total
+                unit_totals[unit or ""] = total
 
-        # TODO: Future enhancement - query unit_conversions table and actually convert
-        # For now, return as-is (separate entries for incompatible units)
+        if len(unit_totals) <= 1:
+            return unit_totals
 
-        return converted
+        # Try to merge compatible units into the most common/largest unit
+        units = list(unit_totals.keys())
+        merged = {}
+        used = set()
+
+        for i, primary_unit in enumerate(units):
+            if primary_unit in used:
+                continue
+
+            total_in_primary = unit_totals[primary_unit]
+            used.add(primary_unit)
+
+            for j in range(i + 1, len(units)):
+                other_unit = units[j]
+                if other_unit in used:
+                    continue
+
+                converted = convert_quantity(unit_totals[other_unit], other_unit, primary_unit)
+                if converted is not None:
+                    total_in_primary += converted
+                    used.add(other_unit)
+
+            merged[primary_unit] = round(total_in_primary, 2)
+
+        return merged
+
+    def _ai_clean_and_categorize(
+        self,
+        ingredients: Dict[str, 'IngredientAggregate']
+    ) -> Dict[str, Dict[str, str]]:
+        """
+        Use Claude to clean ingredient names and assign grocery categories.
+
+        Sends all ingredient names in one batch call. Returns a dict mapping
+        normalized_name -> {"clean_name": "...", "category": "..."}.
+
+        Falls back to rule-based categorization if Claude is unavailable.
+        """
+        if not self.claude_client or not ingredients:
+            return {}
+
+        # Build the list of raw display names
+        name_list = []
+        for norm_name, agg in ingredients.items():
+            name_list.append(f"- {agg.display_name}")
+
+        names_text = "\n".join(name_list)
+
+        prompt = f"""You are a grocery list assistant. For each ingredient below, return:
+1. A clean display name — what you'd see on a grocery shopping list:
+   - Remove brand names ("Eggland's Best Eggs" → "Eggs")
+   - Remove recipe instructions ("minced", "diced", "or to taste", "divided")
+   - Remove size descriptors ("small", "large", "medium")
+   - Fix truncated words ("larg" → infer it was "large" and remove it)
+   - Fix typos and formatting issues
+   - Capitalize properly (title case)
+   - Keep it simple: just the ingredient name a shopper needs
+2. The correct grocery store category
+
+Valid categories (use EXACTLY one of these):
+Produce, Dairy, Protein, Grains, Spices, Condiments, Beverages, Frozen, Pantry, Other
+
+Category rules:
+- Peanut butter, nut butters → Condiments (NOT Dairy)
+- Shallots, scallions, fresh herbs → Produce
+- Sauces (soy, fish, oyster, hot sauce, etc.) → Condiments
+- Oils and vinegars → Condiments
+- Flour, sugar, cornstarch, baking supplies → Pantry
+- Salt, pepper, dried herbs/spices, seasoning → Spices
+- Eggs → Protein
+- Rice, pasta, bread, noodles → Grains
+- Broth/stock → Beverages
+- Nuts, seeds, dried beans → Pantry
+- Honey, maple syrup → Condiments
+- Mirin, cooking wine → Condiments
+
+Ingredients:
+{names_text}
+
+Respond with ONLY a JSON array, no other text. Each element:
+{{"original": "exact original name from list above", "clean_name": "cleaned name", "category": "Category"}}"""
+
+        try:
+            response = self.claude_client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=2000,
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+            response_text = response.content[0].text.strip()
+
+            # Extract JSON from response (handle markdown code blocks)
+            if response_text.startswith("```"):
+                response_text = response_text.split("\n", 1)[1]
+                response_text = response_text.rsplit("```", 1)[0].strip()
+
+            parsed = json.loads(response_text)
+
+            # Build lookup by original name -> result
+            result = {}
+            for item in parsed:
+                original = item.get("original", "")
+                clean_name = item.get("clean_name", original)
+                category = item.get("category", "Other")
+
+                # Validate category
+                if category not in self.VALID_CATEGORIES:
+                    category = "Other"
+
+                # Match back to our normalized names
+                for norm_name, agg in ingredients.items():
+                    if agg.display_name == original:
+                        result[norm_name] = {
+                            "clean_name": clean_name,
+                            "category": category
+                        }
+                        break
+
+            logger.info(f"Claude categorized {len(result)}/{len(ingredients)} ingredients")
+            return result
+
+        except Exception as e:
+            logger.warning(f"Claude categorization failed, falling back to rules: {e}")
+            return {}
+
+    def _clean_ingredient_name(self, name: str) -> str:
+        """
+        Clean ingredient name by removing recipe notes and cooking instructions.
+
+        Strips things like "or more to taste", "divided", "for serving", etc.
+        """
+        if not name:
+            return name
+
+        # Remove trailing recipe notes after comma that are instructions, not part of the name
+        # e.g. "peanut butter, or more to taste" → "peanut butter"
+        # But keep descriptive commas like "Small shallot, minced" → "Shallot"
+        cleaning_patterns = [
+            r',?\s*or (?:more |less )?to taste.*$',
+            r',?\s*to taste.*$',
+            r',?\s*or as needed.*$',
+            r',?\s*as needed.*$',
+            r',?\s*for (?:serving|garnish|topping|decoration).*$',
+            r',?\s*plus (?:more|extra) for.*$',
+            r',?\s*at room temperature.*$',
+            r',?\s*room temperature.*$',
+            r',?\s*divided.*$',
+            r',?\s*optional.*$',
+            r',?\s*adjusted to taste.*$',
+            r',?\s*or to preference.*$',
+        ]
+
+        result = name
+        for pattern in cleaning_patterns:
+            result = re.sub(pattern, '', result, flags=re.IGNORECASE)
+
+        # Remove leading size descriptors (small, medium, large)
+        result = re.sub(r'^(?:small|medium|large|extra.large)\s+', '', result, flags=re.IGNORECASE)
+
+        # Remove trailing cooking instructions after comma (minced, chopped, diced, etc.)
+        result = re.sub(
+            r',\s*(?:minced|chopped|diced|sliced|grated|shredded|crushed|julienned|'
+            r'cut into.*|torn|peeled|seeded|cored|trimmed|halved|quartered|cubed|'
+            r'thinly sliced|finely (?:chopped|diced|minced)|roughly chopped|freshly ground)$',
+            '', result, flags=re.IGNORECASE
+        )
+
+        return result.strip()
 
     def _categorize_ingredient(self, name: str) -> GroceryCategory:
         """
-        Categorize ingredient by name.
+        Categorize ingredient by name using word-boundary matching.
 
-        Simple keyword-based categorization.
+        Uses regex word boundaries to avoid false matches like
+        "peanut butter" → Dairy (from "butter") or "shallot, minced" → Protein (from "mince").
 
         Args:
             name: Ingredient name
@@ -801,74 +1051,103 @@ class GroceryListService:
 
         name_lower = name.lower()
 
+        def _has_word(words):
+            """Check if any word appears as a whole word (word boundary match)."""
+            for word in words:
+                if re.search(r'\b' + re.escape(word) + r'\b', name_lower):
+                    return True
+            return False
+
+        # Condiments — check FIRST for multi-word matches that would conflict
+        # (e.g., "peanut butter" before "butter" matches Dairy)
+        if _has_word([
+            'peanut butter', 'almond butter', 'cashew butter', 'sunflower butter',
+            'soy sauce', 'hot sauce', 'fish sauce', 'oyster sauce', 'hoisin sauce',
+            'teriyaki sauce', 'bbq sauce', 'worcestershire sauce',
+        ]):
+            return GroceryCategory.CONDIMENTS
+
         # Produce
-        if any(word in name_lower for word in [
+        if _has_word([
             'tomato', 'lettuce', 'spinach', 'kale', 'carrot', 'broccoli',
             'cauliflower', 'pepper', 'onion', 'garlic', 'potato', 'cucumber',
             'celery', 'mushroom', 'zucchini', 'squash', 'apple', 'banana',
-            'orange', 'lemon', 'lime', 'berry', 'grape', 'melon', 'avocado'
+            'orange', 'lemon', 'lime', 'berry', 'grape', 'melon', 'avocado',
+            'shallot', 'scallion', 'green onion', 'leek', 'cabbage', 'radish',
+            'turnip', 'beet', 'corn', 'eggplant', 'artichoke', 'asparagus',
+            'pear', 'peach', 'plum', 'mango', 'pineapple', 'grapefruit',
+            'jalapeño', 'jalapeno', 'serrano', 'habanero', 'poblano',
+            'bok choy', 'arugula', 'watercress', 'endive', 'fennel',
+            'ginger root', 'fresh ginger',
         ]):
             return GroceryCategory.PRODUCE
 
         # Dairy
-        if any(word in name_lower for word in [
+        if _has_word([
             'milk', 'cheese', 'butter', 'cream', 'yogurt', 'sour cream',
-            'cottage cheese', 'mozzarella', 'parmesan', 'cheddar'
+            'cottage cheese', 'mozzarella', 'parmesan', 'cheddar',
+            'ricotta', 'feta', 'gouda', 'brie', 'provolone',
+            'cream cheese', 'whipped cream', 'half and half',
         ]):
             return GroceryCategory.DAIRY
 
         # Spices (check before Protein so "ground ginger" doesn't match "ground beef")
-        if any(word in name_lower for word in [
+        if _has_word([
             'salt', 'cumin', 'paprika', 'oregano', 'basil', 'thyme',
             'rosemary', 'cinnamon', 'nutmeg', 'ginger', 'turmeric', 'chili',
             'cayenne', 'parsley', 'cilantro', 'dill', 'sage', 'bay leaf',
             'clove', 'allspice', 'cardamom', 'coriander', 'fennel seed',
             'curry powder', 'garlic powder', 'onion powder', 'seasoning',
-            'black pepper', 'white pepper', 'red pepper flake'
+            'black pepper', 'white pepper', 'red pepper flake',
+            'smoked paprika', 'chili flake', 'dried oregano', 'dried thyme',
+            'dried basil', 'ground cumin', 'ground cinnamon',
         ]):
             return GroceryCategory.SPICES
 
-        # Condiments (check before Protein so "fish sauce" matches "sauce" not "fish")
-        if any(word in name_lower for word in [
+        # Condiments (remaining)
+        if _has_word([
             'sauce', 'ketchup', 'mustard', 'mayo', 'mayonnaise', 'vinegar',
-            'oil', 'olive oil', 'vegetable oil', 'soy sauce', 'hot sauce',
-            'salsa', 'dressing', 'honey', 'syrup', 'jam', 'jelly', 'peanut butter'
+            'oil', 'olive oil', 'vegetable oil',
+            'salsa', 'dressing', 'honey', 'syrup', 'jam', 'jelly',
+            'mirin', 'tahini', 'miso', 'sambal', 'gochujang', 'harissa',
         ]):
             return GroceryCategory.CONDIMENTS
 
-        # Protein
-        if any(word in name_lower for word in [
+        # Protein — use word boundaries to avoid "minced" matching "mince"
+        if _has_word([
             'chicken', 'beef', 'pork', 'turkey', 'fish', 'salmon', 'tuna',
-            'shrimp', 'egg', 'tofu', 'tempeh', 'bacon', 'sausage', 'lamb',
+            'shrimp', 'egg', 'eggs', 'tofu', 'tempeh', 'bacon', 'sausage', 'lamb',
             'steak', 'ground beef', 'ground turkey', 'ground pork', 'ground chicken',
-            'breast', 'thigh', 'drumstick', 'mince'
+            'chicken breast', 'chicken thigh', 'drumstick', 'mince',
+            'prawn', 'crab', 'lobster', 'scallop', 'clam', 'mussel',
+            'duck', 'veal', 'bison', 'venison', 'anchovy',
         ]):
             return GroceryCategory.PROTEIN
 
         # Grains
-        if any(word in name_lower for word in [
+        if _has_word([
             'bread', 'pasta', 'rice', 'flour', 'oats', 'quinoa', 'barley',
-            'cereal', 'tortilla', 'noodle', 'couscous', 'bagel', 'roll'
+            'cereal', 'tortilla', 'noodle', 'couscous', 'bagel', 'roll',
+            'pita', 'cracker', 'granola', 'polenta', 'grits',
         ]):
             return GroceryCategory.GRAINS
 
         # Beverages
-        if any(word in name_lower for word in [
+        if _has_word([
             'juice', 'coffee', 'tea', 'soda', 'water', 'wine', 'beer', 'liquor',
-            'broth', 'stock', 'drink'
+            'broth', 'stock', 'drink', 'kombucha',
         ]):
             return GroceryCategory.BEVERAGES
 
         # Frozen
-        if 'frozen' in name_lower or any(word in name_lower for word in [
-            'ice cream', 'popsicle', 'frozen'
-        ]):
+        if _has_word(['ice cream', 'popsicle', 'frozen']):
             return GroceryCategory.FROZEN
 
         # Pantry staples
-        if any(word in name_lower for word in [
+        if _has_word([
             'sugar', 'baking powder', 'baking soda', 'yeast', 'vanilla',
-            'chocolate', 'beans', 'lentils', 'chickpeas', 'canned', 'corn', 'peas'
+            'chocolate', 'beans', 'lentils', 'chickpeas', 'canned', 'peas',
+            'cornstarch', 'breadcrumbs', 'panko',
         ]):
             return GroceryCategory.PANTRY
 

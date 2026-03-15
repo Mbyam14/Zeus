@@ -207,6 +207,37 @@ export const GroceryListScreen: React.FC = () => {
   };
 
   /**
+   * Clear/delete the grocery list
+   */
+  const handleClearList = () => {
+    Alert.alert(
+      'Clear Grocery List',
+      'Are you sure you want to clear this grocery list? You can regenerate it anytime.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: async () => {
+            if (!groceryList) return;
+
+            try {
+              setLoading(true);
+              await groceryListService.deleteGroceryList(groceryList.id);
+              setGroceryList(null);
+            } catch (error: any) {
+              console.error('Error clearing grocery list:', error);
+              Alert.alert('Error', 'Failed to clear grocery list');
+            } finally {
+              setLoading(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  /**
    * Filter items based on current filter
    */
   const getFilteredItems = (): GroceryListItem[] => {
@@ -281,7 +312,7 @@ export const GroceryListScreen: React.FC = () => {
               item.is_purchased && styles.itemNamePurchased,
             ]}
           >
-            {item.item_name}
+            {item.item_name?.trim()}
           </Text>
 
           <View style={styles.itemMeta}>
@@ -470,9 +501,14 @@ export const GroceryListScreen: React.FC = () => {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Grocery List</Text>
-        <TouchableOpacity style={styles.moreButton} onPress={handleMarkAllPurchased}>
-          <Ionicons name="checkmark-done" size={24} color={colors.primary} />
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <TouchableOpacity style={styles.moreButton} onPress={handleClearList}>
+            <Ionicons name="trash-outline" size={22} color={colors.error || '#FF3B30'} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.moreButton} onPress={handleMarkAllPurchased}>
+            <Ionicons name="checkmark-done" size={24} color={colors.primary} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Summary Card */}

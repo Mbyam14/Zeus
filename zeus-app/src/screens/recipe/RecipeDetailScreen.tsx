@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -15,9 +15,10 @@ import {
   Alert,
   Clipboard,
 } from 'react-native';
-import { Recipe } from '../../types/recipe';
+import { Recipe, Ingredient } from '../../types/recipe';
 import { recipeService } from '../../services/recipeService';
 import { useThemeStore } from '../../store/themeStore';
+import { useAuthStore } from '../../store/authStore';
 import { getDifficultyColor } from '../../utils/colors';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -39,6 +40,93 @@ export const RecipeDetailScreen: React.FC<RecipeDetailScreenProps> = ({
   const { colors } = useThemeStore();
   const styles = createStyles(colors);
   const { recipe } = route.params;
+  const { user } = useAuthStore();
+
+  // Serving size adjustment
+  const householdSize = user?.profile_data?.preferences?.household_size || recipe.servings;
+  const [adjustedServings, setAdjustedServings] = useState(householdSize);
+  const servingScale = recipe.servings > 0 ? adjustedServings / recipe.servings : 1;
+
+  // Units where fractional quantities don't make sense — round up to whole numbers
+  const countUnits = new Set([
+    '', 'piece', 'pieces', 'item', 'items', 'whole',
+    'clove', 'cloves', 'head', 'heads', 'bunch', 'bunches',
+    'slice', 'slices', 'can', 'cans', 'box', 'boxes',
+    'package', 'packages', 'bag', 'bags', 'jar', 'jars',
+    'stalk', 'stalks', 'sprig', 'sprigs', 'leaf', 'leaves',
+    'strip', 'strips', 'link', 'links',
+  ]);
+
+  const scaleQuantity = (quantity: string, unit?: string): string => {
+    if (!quantity || servingScale === 1) return quantity;
+    // Try to parse as a number
+    const num = parseFloat(quantity);
+    if (isNaN(num)) return quantity; // Non-numeric (e.g., "to taste")
+    const scaled = num * servingScale;
+    // Round up count-based units (you can't use 0.3 of an egg)
+    const unitLower = (unit || '').toLowerCase().trim();
+    if (countUnits.has(unitLower)) {
+      return String(Math.ceil(scaled));
+    }
+    // Format nicely: no unnecessary decimals
+    if (scaled === Math.floor(scaled)) return String(scaled);
+    return scaled.toFixed(1).replace(/\.0$/, '');
+  };
+
+  const scaledIngredients = useMemo(() => {
+    if (!recipe.ingredients || servingScale === 1) return recipe.ingredients;
+    return recipe.ingredients.map((ing: Ingredient) => ({
+      ...ing,
+      quantity: scaleQuantity(ing.quantity, ing.unit),
+    }));
+  }, [recipe.ingredients, servingScale]);
+
+  const scaleInstructionText = (text: string): string => {
+    if (!text || servingScale === 1) return text;
+    // Build a set of original ingredient quantities for reference
+    const originalQuantities = new Set<number>();
+    recipe.ingredients?.forEach((ing: Ingredient) => {
+      const num = parseFloat(ing.quantity);
+      if (!isNaN(num)) originalQuantities.add(num);
+    });
+    // Replace numbers in instruction text that match ingredient quantities
+    return text.replace(/(\d+\.?\d*)/g, (match) => {
+      const num = parseFloat(match);
+      if (isNaN(num) || num === 0) return match;
+      // Scale if this number matches an ingredient quantity, or is a
+      // common cooking amount (cups, tbsp, etc. — usually near a unit word)
+      if (originalQuantities.has(num)) {
+        const scaled = num * servingScale;
+        if (scaled === Math.floor(scaled)) return String(scaled);
+        return scaled.toFixed(1).replace(/\.0$/, '');
+      }
+      return match;
+    });
+  };
+
+  const formatIngredient = (ing: Ingredient): string => {
+    const qty = ing.quantity?.trim() || '';
+    const unit = ing.unit?.trim() || '';
+    const name = ing.name?.trim() || '';
+    // "to taste" items: show as "Salt and pepper (to taste)"
+    if (unit.toLowerCase() === 'to taste' || qty.toLowerCase() === 'to taste') {
+      return `${name} (to taste)`;
+    }
+    return [qty, unit, name].filter(Boolean).join(' ');
+  };
+
+  const scaledInstructions = useMemo(() => {
+    if (!recipe.instructions || servingScale === 1) return recipe.instructions;
+    return recipe.instructions.map((inst) => ({
+      ...inst,
+      instruction: scaleInstructionText(inst.instruction),
+    }));
+  }, [recipe.instructions, servingScale]);
+
+  const scaleNutrition = (value: number | undefined): number | undefined => {
+    if (value === undefined || value === null) return value;
+    return Math.round(value * servingScale);
+  };
 
   // Recipe action state
   const [isSaved, setIsSaved] = useState(recipe.is_saved || false);
@@ -157,13 +245,13 @@ export const RecipeDetailScreen: React.FC<RecipeDetailScreenProps> = ({
     setShowOptionsMenu(false);
 
     // Build share message with recipe details
-    const ingredients = recipe.ingredients?.map(i => `• ${i.quantity} ${i.unit} ${i.name}`).join('\n') || '';
+    const ingredients = scaledIngredients?.map(i => `• ${formatIngredient(i)}`).join('\n') || '';
     const shareMessage = `🍳 ${recipe.title}
 
 ${recipe.description || ''}
 
 ⏱️ Prep: ${recipe.prep_time || 0}min | Cook: ${recipe.cook_time || 0}min
-👥 Servings: ${recipe.servings}
+👥 Servings: ${adjustedServings}
 
 ${ingredients ? `📝 Ingredients:\n${ingredients}` : ''}
 
@@ -276,10 +364,6 @@ Shared from Zeus - Your AI Meal Planner`;
               </Text>
             </View>
             <View style={styles.statItem}>
-              <Text style={styles.statIcon}>👥</Text>
-              <Text style={styles.statText}>{recipe.servings} servings</Text>
-            </View>
-            <View style={styles.statItem}>
               <Text style={styles.statIcon}>❤️</Text>
               <Text style={styles.statText}>{recipe.likes_count}</Text>
             </View>
@@ -293,39 +377,62 @@ Shared from Zeus - Your AI Meal Planner`;
             </View>
           </View>
 
+          {/* Serving Size Adjuster */}
+          <View style={styles.servingAdjuster}>
+            <Text style={styles.servingAdjusterLabel}>Servings</Text>
+            <View style={styles.servingAdjusterControls}>
+              <TouchableOpacity
+                style={[styles.servingButton, adjustedServings <= 1 && styles.servingButtonDisabled]}
+                onPress={() => setAdjustedServings(Math.max(1, adjustedServings - 1))}
+                disabled={adjustedServings <= 1}
+              >
+                <Text style={[styles.servingButtonText, adjustedServings <= 1 && styles.servingButtonTextDisabled]}>-</Text>
+              </TouchableOpacity>
+              <Text style={styles.servingCount}>{adjustedServings}</Text>
+              <TouchableOpacity
+                style={styles.servingButton}
+                onPress={() => setAdjustedServings(adjustedServings + 1)}
+              >
+                <Text style={styles.servingButtonText}>+</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
           {/* Nutrition/Macros */}
           {(recipe.calories || recipe.protein_grams || recipe.carbs_grams || recipe.fat_grams) && (
             <View style={styles.macrosSection}>
-              <Text style={styles.macrosTitle}>Nutrition per Serving</Text>
-              {recipe.serving_size && (
+              <Text style={styles.macrosTitle}>
+                {servingScale === 1 ? 'Nutrition per Serving' : `Nutrition (${adjustedServings} servings)`}
+              </Text>
+              {recipe.serving_size && servingScale === 1 && (
                 <Text style={styles.servingSize}>Serving: {recipe.serving_size}</Text>
               )}
               <View style={styles.macrosRow}>
                 {recipe.calories && (
                   <View style={styles.macroCard}>
                     <Text style={styles.macroIcon}>🔥</Text>
-                    <Text style={styles.macroValue}>{recipe.calories}</Text>
+                    <Text style={styles.macroValue}>{scaleNutrition(recipe.calories)}</Text>
                     <Text style={styles.macroLabel}>Calories</Text>
                   </View>
                 )}
                 {recipe.protein_grams && (
                   <View style={styles.macroCard}>
                     <Text style={styles.macroIcon}>💪</Text>
-                    <Text style={styles.macroValue}>{recipe.protein_grams}g</Text>
+                    <Text style={styles.macroValue}>{scaleNutrition(recipe.protein_grams)}g</Text>
                     <Text style={styles.macroLabel}>Protein</Text>
                   </View>
                 )}
                 {recipe.carbs_grams && (
                   <View style={styles.macroCard}>
                     <Text style={styles.macroIcon}>🍞</Text>
-                    <Text style={styles.macroValue}>{recipe.carbs_grams}g</Text>
+                    <Text style={styles.macroValue}>{scaleNutrition(recipe.carbs_grams)}g</Text>
                     <Text style={styles.macroLabel}>Carbs</Text>
                   </View>
                 )}
                 {recipe.fat_grams && (
                   <View style={styles.macroCard}>
                     <Text style={styles.macroIcon}>🥑</Text>
-                    <Text style={styles.macroValue}>{recipe.fat_grams}g</Text>
+                    <Text style={styles.macroValue}>{scaleNutrition(recipe.fat_grams)}g</Text>
                     <Text style={styles.macroLabel}>Fat</Text>
                   </View>
                 )}
@@ -374,15 +481,27 @@ Shared from Zeus - Your AI Meal Planner`;
           {/* Ingredients */}
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { marginBottom: 16 }]}>Ingredients</Text>
-            {recipe.ingredients && recipe.ingredients.length > 0 ? (
-              recipe.ingredients.map((ingredient, index) => (
-                <View key={index} style={styles.ingredientItem}>
-                  <View style={styles.ingredientBullet} />
-                  <Text style={styles.ingredientText}>
-                    {ingredient.quantity} {ingredient.unit} {ingredient.name}
-                  </Text>
-                </View>
-              ))
+            {scaledIngredients && scaledIngredients.length > 0 ? (
+              scaledIngredients.map((ingredient, index) => {
+                // Show section header when section changes
+                const prevSection = index > 0 ? scaledIngredients[index - 1]?.section : undefined;
+                const showSection = ingredient.section && ingredient.section !== prevSection;
+                return (
+                  <View key={index}>
+                    {showSection && (
+                      <Text style={[styles.sectionTitle, { fontSize: 15, marginTop: 12, marginBottom: 6 }]}>
+                        {ingredient.section}
+                      </Text>
+                    )}
+                    <View style={styles.ingredientItem}>
+                      <View style={styles.ingredientBullet} />
+                      <Text style={styles.ingredientText}>
+                        {formatIngredient(ingredient)}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })
             ) : (
               <View style={styles.emptySection}>
                 <Text style={styles.emptySectionIcon}>📝</Text>
@@ -397,8 +516,8 @@ Shared from Zeus - Your AI Meal Planner`;
           {/* Instructions */}
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { marginBottom: 16 }]}>Instructions</Text>
-            {recipe.instructions && recipe.instructions.length > 0 ? (
-              recipe.instructions.map((instruction, index) => (
+            {scaledInstructions && scaledInstructions.length > 0 ? (
+              scaledInstructions.map((instruction, index) => (
                 <View key={index} style={styles.instructionItem}>
                   <View style={styles.stepNumber}>
                     <Text style={styles.stepNumberText}>{instruction.step}</Text>
@@ -563,7 +682,7 @@ Shared from Zeus - Your AI Meal Planner`;
                 contentContainerStyle={styles.cookingInstructionScrollContent}
               >
                 <Text style={styles.cookingInstructionText}>
-                  {recipe.instructions?.[currentStep]?.instruction || ''}
+                  {scaledInstructions?.[currentStep]?.instruction || ''}
                 </Text>
               </ScrollView>
             </View>
@@ -619,14 +738,25 @@ Shared from Zeus - Your AI Meal Planner`;
                   </TouchableOpacity>
                 </View>
                 <ScrollView style={styles.ingredientsOverlayScroll}>
-                  {recipe.ingredients?.map((ingredient, index) => (
-                    <View key={index} style={styles.ingredientsOverlayItem}>
-                      <View style={styles.ingredientsOverlayBullet} />
-                      <Text style={styles.ingredientsOverlayText}>
-                        {ingredient.quantity} {ingredient.unit} {ingredient.name}
-                      </Text>
-                    </View>
-                  ))}
+                  {scaledIngredients?.map((ingredient, index) => {
+                    const prevSection = index > 0 ? scaledIngredients[index - 1]?.section : undefined;
+                    const showSection = ingredient.section && ingredient.section !== prevSection;
+                    return (
+                      <View key={index}>
+                        {showSection && (
+                          <Text style={[styles.ingredientsOverlayText, { fontWeight: '700', marginTop: 10, marginBottom: 4, opacity: 0.8 }]}>
+                            {ingredient.section}
+                          </Text>
+                        )}
+                        <View style={styles.ingredientsOverlayItem}>
+                          <View style={styles.ingredientsOverlayBullet} />
+                          <Text style={styles.ingredientsOverlayText}>
+                            {formatIngredient(ingredient)}
+                          </Text>
+                        </View>
+                      </View>
+                    );
+                  })}
                 </ScrollView>
               </View>
             </View>
@@ -954,6 +1084,54 @@ const createStyles = (colors: any) =>
       color: colors.text,
       lineHeight: 24,
       paddingTop: 4,
+    },
+    servingAdjuster: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.background,
+      borderRadius: 12,
+      padding: 14,
+      marginBottom: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    servingAdjusterLabel: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: colors.text,
+      flex: 1,
+    },
+    servingAdjusterControls: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 16,
+    },
+    servingButton: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: colors.primary,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    servingButtonDisabled: {
+      backgroundColor: colors.border,
+    },
+    servingButtonText: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      color: colors.buttonText,
+      lineHeight: 22,
+    },
+    servingButtonTextDisabled: {
+      color: colors.textMuted,
+    },
+    servingCount: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      color: colors.text,
+      minWidth: 30,
+      textAlign: 'center',
     },
     macrosSection: {
       backgroundColor: colors.background,

@@ -220,6 +220,12 @@ class RecipeService:
             query = query.eq("cuisine_type", filters.cuisine_type)
         if filters.difficulty:
             query = query.eq("difficulty", filters.difficulty.value)
+        if filters.max_difficulty:
+            # Filter to recipes at or below the max difficulty level
+            difficulty_order = {"Easy": 1, "Medium": 2, "Hard": 3}
+            max_level = difficulty_order.get(filters.max_difficulty.value, 3)
+            allowed = [d for d, level in difficulty_order.items() if level <= max_level]
+            query = query.in_("difficulty", allowed)
         if filters.max_prep_time:
             query = query.lte("prep_time", filters.max_prep_time)
         if filters.meal_type:
@@ -242,8 +248,8 @@ class RecipeService:
             result = query.execute()
             data = result.data or []
 
-            # Filter to recipes where most non-trivial ingredients are in pantry
-            PANTRY_THRESHOLD = 0.9
+            # Filter to recipes where at least 60% of non-trivial ingredients are in pantry
+            PANTRY_THRESHOLD = 0.6
             pantry_matched = []
             for recipe_data in data:
                 ingredients = recipe_data.get("ingredients") or []
@@ -267,7 +273,7 @@ class RecipeService:
                 random.shuffle(pantry_matched)
             data = pantry_matched[filters.offset:filters.offset + filters.limit]
         else:
-            # Normal mode: fetch with shuffle/pagination as before
+            # Normal mode: fetch with shuffle/pagination, boost preferred cuisines
             if filters.offset == 0:
                 pool_size = min(filters.limit * 4, 500)
                 query = query.order("likes_count", desc=True)
@@ -276,7 +282,27 @@ class RecipeService:
 
                 import random
                 data = result.data or []
-                random.shuffle(data)
+
+                # Boost preferred cuisines: put them first, then mix in others
+                if filters.cuisine_preferences:
+                    preferred_lower = [c.lower() for c in filters.cuisine_preferences]
+                    preferred = [r for r in data if (r.get("cuisine_type") or "").lower() in preferred_lower]
+                    others = [r for r in data if (r.get("cuisine_type") or "").lower() not in preferred_lower]
+                    random.shuffle(preferred)
+                    random.shuffle(others)
+                    # Interleave: 2 preferred, 1 other for variety
+                    data = []
+                    pi, oi = 0, 0
+                    while pi < len(preferred) or oi < len(others):
+                        for _ in range(2):
+                            if pi < len(preferred):
+                                data.append(preferred[pi])
+                                pi += 1
+                        if oi < len(others):
+                            data.append(others[oi])
+                            oi += 1
+                else:
+                    random.shuffle(data)
                 data = data[:filters.limit]
             else:
                 query = query.order("id")
