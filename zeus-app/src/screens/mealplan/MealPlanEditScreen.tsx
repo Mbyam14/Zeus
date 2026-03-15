@@ -31,6 +31,7 @@ interface MealPlanBuilderProps {
       recipes?: Record<string, Recipe>;
       // Build mode: selected days for new plan
       selectedDays?: DayOfWeek[];
+      weekOffset?: number;
     };
   };
 }
@@ -192,10 +193,12 @@ export const MealPlanEditScreen: React.FC<MealPlanBuilderProps> = ({ navigation,
   };
 
   const getStartDate = (): string => {
+    const weekOffset = route.params.weekOffset ?? 0;
     const today = new Date();
     const dayOfWeek = today.getDay();
     const monday = new Date(today);
     monday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+    monday.setDate(monday.getDate() + (weekOffset * 7));
     return monday.toISOString().split('T')[0];
   };
 

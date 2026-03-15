@@ -17,6 +17,7 @@ interface CreateMealPlanScreenProps {
   route: {
     params: {
       selectedDays: DayOfWeek[];
+      weekOffset?: number;
     };
   };
 }
@@ -25,7 +26,7 @@ export const CreateMealPlanScreen: React.FC<CreateMealPlanScreenProps> = ({
   navigation,
   route,
 }) => {
-  const { selectedDays } = route.params;
+  const { selectedDays, weekOffset = 0 } = route.params;
   const [generating, setGenerating] = useState(false);
   const { colors } = useThemeStore();
   const styles = createStyles(colors);
@@ -49,11 +50,12 @@ export const CreateMealPlanScreen: React.FC<CreateMealPlanScreenProps> = ({
     try {
       setGenerating(true);
 
-      // Get the start date (Monday of current week)
+      // Get the start date (Monday of target week, applying weekOffset)
       const today = new Date();
       const dayOfWeek = today.getDay();
       const monday = new Date(today);
       monday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+      monday.setDate(monday.getDate() + (weekOffset * 7));
       const startDate = monday.toISOString().split('T')[0];
 
       // Generate meal plan with AI
@@ -76,6 +78,7 @@ export const CreateMealPlanScreen: React.FC<CreateMealPlanScreenProps> = ({
   const handleBuildManually = () => {
     navigation.navigate('MealPlanEdit', {
       selectedDays,
+      weekOffset,
     });
   };
 

@@ -623,7 +623,8 @@ class AIService:
                 has_img = "IMG" if r.get("image_url") else "no-img"
                 pantry_pct = r.get("_pantry_coverage")
                 pantry_tag = f" | {pantry_pct}% pantry" if pantry_pct else ""
-                lines.append(f"  {i+1}. {r['title']} | {cal}cal {prot}g protein | {servings} servings | {cuisine} | {has_img}{pantry_tag}")
+                liked_tag = " | LIKED" if r.get("_liked") else ""
+                lines.append(f"  {i+1}. {r['title']} | {cal}cal {prot}g protein | {servings} servings | {cuisine} | {has_img}{pantry_tag}{liked_tag}")
 
             sections.append(
                 f"=== {meal_type.upper()} (pick {count_needed}) ===\n" + "\n".join(lines)
@@ -640,6 +641,7 @@ class AIService:
             "Dinners become next-day lunches, so pick dinners that reheat well",
             "Balance daily nutrition across the combinations",
             "Prefer recipes with images (IMG)",
+            "Prefer recipes marked LIKED — the user has expressed interest in these",
             "Pick recipes whose calories are closest to the per-meal target",
         ])
         rules_text = "\n".join(f"{i+1}. {rule}" for i, rule in enumerate(rules))

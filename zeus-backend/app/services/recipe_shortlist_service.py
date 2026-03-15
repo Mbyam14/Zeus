@@ -99,8 +99,9 @@ class RecipeShortlistService:
 
             # Score and rank
             household_size = preferences.get("household_size", 2)
+            liked_recipe_ids = set(preferences.get("liked_recipe_ids", []))
             scored = self._score_candidates(
-                filtered, meal_cal_target, meal_protein_target, pantry_lookup, household_size
+                filtered, meal_cal_target, meal_protein_target, pantry_lookup, household_size, liked_recipe_ids
             )
 
             result[meal_type] = scored[:target_per_meal_type]
@@ -196,10 +197,11 @@ class RecipeShortlistService:
         target_protein: float,
         pantry_lookup: Optional[Dict[str, dict]] = None,
         household_size: int = 2,
+        liked_recipe_ids: Optional[set] = None,
     ) -> List[Dict[str, Any]]:
         """Score and rank candidates. Higher score = better match.
 
-        Scoring breakdown (max ~135 with pantry, ~85 without):
+        Scoring breakdown (max ~150 with pantry + likes, ~85 without):
         - Calorie proximity: 0-20
         - Protein proximity: 0-20
         - Has image: 0 or 10
@@ -209,6 +211,7 @@ class RecipeShortlistService:
         - Pantry coverage: 0-40 (when pantry items available)
         - Simplicity bonus: 0-10
         - Serving size match: 0-15
+        - User liked recipe: 0 or 15
         """
         for recipe in candidates:
             score = 0.0
@@ -274,6 +277,11 @@ class RecipeShortlistService:
                     score += 10  # Close enough
                 elif serving_diff <= 2:
                     score += 5   # Acceptable
+
+            # Liked by user bonus (0 or 15 points)
+            if liked_recipe_ids and recipe.get("id") in liked_recipe_ids:
+                score += 15
+                recipe["_liked"] = True
 
             recipe["_score"] = round(score, 2)
 

@@ -812,13 +812,20 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
       )}
 
       <View style={styles.searchContainer}>
-        <TextInput
-          style={styles.searchInput}
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          placeholder="Search pantry items..."
-          placeholderTextColor={colors.textMuted}
-        />
+        <View style={styles.searchInputContainer}>
+          <TextInput
+            style={styles.searchInput}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder="Search pantry items..."
+            placeholderTextColor={colors.textMuted}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <Text style={styles.clearSearchButton}>✕</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       <View style={styles.filterContainer}>
@@ -1305,8 +1312,10 @@ const createStyles = (colors: any) => StyleSheet.create({
   quickAddButton2: { backgroundColor: colors.primary, paddingVertical: 16, borderRadius: 12, alignItems: 'center' },
   quickAddButtonDisabled: { backgroundColor: colors.textMuted, opacity: 0.5 },
   quickAddButtonText2: { fontSize: 18, fontWeight: 'bold', color: colors.buttonText },
-  searchContainer: { paddingHorizontal: 20, paddingVertical: 12, backgroundColor: colors.backgroundSecondary },
-  searchInput: { backgroundColor: colors.background, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16, color: colors.text, borderWidth: 1, borderColor: colors.border },
+  searchContainer: { paddingHorizontal: 16, paddingVertical: 8, backgroundColor: colors.backgroundSecondary },
+  searchInputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.background, borderRadius: 10, paddingHorizontal: 12, borderWidth: 1.5, borderColor: colors.primary + '40', height: 40 },
+  searchInput: { flex: 1, fontSize: 15, color: colors.text, paddingVertical: 0 },
+  clearSearchButton: { fontSize: 14, color: colors.textMuted, padding: 4 },
   filterContainer: { backgroundColor: colors.backgroundSecondary, borderBottomWidth: 1, borderBottomColor: colors.border, zIndex: 10, elevation: 5 },
   filterScroll: { paddingHorizontal: 20, paddingVertical: 12, height: 60, flexGrow: 0 },
   filterPill: { paddingHorizontal: 16, paddingVertical: 8, height: 36, borderRadius: 20, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, marginRight: 8, justifyContent: 'center', alignItems: 'center' },

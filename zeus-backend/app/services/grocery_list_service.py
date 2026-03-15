@@ -917,6 +917,8 @@ class GroceryListService:
    - Remove brand names ("Eggland's Best Eggs" → "Eggs")
    - Remove recipe instructions ("minced", "diced", "or to taste", "divided")
    - Remove size descriptors ("small", "large", "medium")
+   - Remove cooking state prefixes ("Uncooked Jasmine Rice" → "Jasmine Rice")
+   - Remove any emoji characters
    - Fix truncated words ("larg" → infer it was "large" and remove it)
    - Fix typos and formatting issues
    - Capitalize properly (title case)
@@ -1020,8 +1022,18 @@ Respond with ONLY a JSON array, no other text. Each element:
         for pattern in cleaning_patterns:
             result = re.sub(pattern, '', result, flags=re.IGNORECASE)
 
+        # Remove emoji characters
+        result = re.sub(
+            r'[\U0001F300-\U0001F9FF\U00002702-\U000027B0\U0000FE00-\U0000FE0F'
+            r'\U0000200D\U00002600-\U000026FF\U0000231A-\U0000231B]+',
+            '', result
+        )
+
         # Remove leading size descriptors (small, medium, large)
         result = re.sub(r'^(?:small|medium|large|extra.large)\s+', '', result, flags=re.IGNORECASE)
+
+        # Remove cooking state prefixes (Uncooked, Raw, Cooked, etc.)
+        result = re.sub(r'^(?:uncooked|raw|cooked|prepared|pre-cooked)\s+', '', result, flags=re.IGNORECASE)
 
         # Remove trailing cooking instructions after comma (minced, chopped, diced, etc.)
         result = re.sub(

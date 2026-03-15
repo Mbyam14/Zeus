@@ -385,7 +385,6 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
                 setMealPlan(null);
                 setRecipes({});
                 setMacroSummary(null);
-                Alert.alert('Success', 'Meal plan has been deleted.');
               }
             } catch (error) {
               console.error('Failed to delete meal plan:', error);
@@ -549,7 +548,7 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
       <View style={styles.container}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Meal Plan</Text>
-          <TouchableOpacity style={styles.addButton} onPress={() => navigation.navigate('DaySelection')}>
+          <TouchableOpacity style={styles.addButton} onPress={() => navigation.navigate('DaySelection', { weekOffset })}>
             <Text style={styles.addButtonText}>+</Text>
           </TouchableOpacity>
         </View>
@@ -604,7 +603,7 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
                 style={styles.dropdownMenuItem}
                 onPress={() => {
                   setShowMenu(false);
-                  navigation.navigate('DaySelection');
+                  navigation.navigate('DaySelection', { weekOffset });
                 }}
               >
                 <View style={styles.dropdownMenuIcon}>

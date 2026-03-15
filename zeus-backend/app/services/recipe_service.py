@@ -273,42 +273,44 @@ class RecipeService:
                 random.shuffle(pantry_matched)
             data = pantry_matched[filters.offset:filters.offset + filters.limit]
         else:
-            # Normal mode: fetch with shuffle/pagination, boost preferred cuisines
-            if filters.offset == 0:
-                pool_size = min(filters.limit * 4, 500)
-                query = query.order("likes_count", desc=True)
-                query = query.range(0, pool_size - 1)
-                result = query.execute()
+            # Normal mode: fetch full pool once, use date-seeded shuffle for
+            # consistent ordering across paginated requests within the same day.
+            import random
+            from datetime import date
 
-                import random
-                data = result.data or []
+            pool_size = 500
+            query = query.order("likes_count", desc=True)
+            query = query.range(0, pool_size - 1)
+            result = query.execute()
+            data = result.data or []
 
-                # Boost preferred cuisines: put them first, then mix in others
-                if filters.cuisine_preferences:
-                    preferred_lower = [c.lower() for c in filters.cuisine_preferences]
-                    preferred = [r for r in data if (r.get("cuisine_type") or "").lower() in preferred_lower]
-                    others = [r for r in data if (r.get("cuisine_type") or "").lower() not in preferred_lower]
-                    random.shuffle(preferred)
-                    random.shuffle(others)
-                    # Interleave: 2 preferred, 1 other for variety
-                    data = []
-                    pi, oi = 0, 0
-                    while pi < len(preferred) or oi < len(others):
-                        for _ in range(2):
-                            if pi < len(preferred):
-                                data.append(preferred[pi])
-                                pi += 1
-                        if oi < len(others):
-                            data.append(others[oi])
-                            oi += 1
-                else:
-                    random.shuffle(data)
-                data = data[:filters.limit]
+            # Deterministic daily shuffle so pagination stays consistent
+            daily_seed = int(date.today().strftime("%Y%m%d"))
+            rng = random.Random(daily_seed)
+
+            # Boost preferred cuisines: put them first, then mix in others
+            if filters.cuisine_preferences:
+                preferred_lower = [c.lower() for c in filters.cuisine_preferences]
+                preferred = [r for r in data if (r.get("cuisine_type") or "").lower() in preferred_lower]
+                others = [r for r in data if (r.get("cuisine_type") or "").lower() not in preferred_lower]
+                rng.shuffle(preferred)
+                rng.shuffle(others)
+                # Interleave: 2 preferred, 1 other for variety
+                data = []
+                pi, oi = 0, 0
+                while pi < len(preferred) or oi < len(others):
+                    for _ in range(2):
+                        if pi < len(preferred):
+                            data.append(preferred[pi])
+                            pi += 1
+                    if oi < len(others):
+                        data.append(others[oi])
+                        oi += 1
             else:
-                query = query.order("id")
-                query = query.range(filters.offset, filters.offset + filters.limit - 1)
-                result = query.execute()
-                data = result.data or []
+                rng.shuffle(data)
+
+            # Apply pagination to the consistently-ordered pool
+            data = data[filters.offset:filters.offset + filters.limit]
 
         recipes = []
         for recipe_data in data:

@@ -973,6 +973,42 @@ const MyRecipesTab: React.FC<{
     }
   };
 
+  const handleUnlike = async (recipe: Recipe) => {
+    try {
+      await recipeService.unlikeRecipe(recipe.id);
+      setRecipes(prev => prev.filter(r => r.id !== recipe.id));
+      setMyRecipesState(prev => ({ ...prev, liked: prev.liked.filter(r => r.id !== recipe.id) }));
+    } catch {
+      Alert.alert('Error', 'Failed to unlike recipe');
+    }
+  };
+
+  const handleClearAllLiked = () => {
+    if (recipes.length === 0) return;
+    Alert.alert(
+      'Clear All Liked',
+      `Remove all ${recipes.length} liked recipes?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear All',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              for (const recipe of recipes) {
+                await recipeService.unlikeRecipe(recipe.id);
+              }
+              setRecipes([]);
+              setMyRecipesState(prev => ({ ...prev, liked: [] }));
+            } catch {
+              Alert.alert('Error', 'Failed to clear liked recipes');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const subTabs: { key: MyRecipesSubTab; label: string; icon: string }[] = [
     { key: 'liked', label: 'Liked', icon: '❤️' },
     { key: 'saved', label: 'Saved', icon: '📌' },
@@ -1002,6 +1038,11 @@ const MyRecipesTab: React.FC<{
         } else if (subTab === 'saved') {
           Alert.alert(item.title, '', [
             { text: 'Unsave', style: 'destructive', onPress: () => handleUnsave(item) },
+            { text: 'Cancel', style: 'cancel' },
+          ]);
+        } else if (subTab === 'liked') {
+          Alert.alert(item.title, '', [
+            { text: 'Unlike', style: 'destructive', onPress: () => handleUnlike(item) },
             { text: 'Cancel', style: 'cancel' },
           ]);
         }
@@ -1066,18 +1107,25 @@ const MyRecipesTab: React.FC<{
 
       {/* Sub-tabs */}
       <View style={styles.subTabContainer}>
-        {subTabs.map((tab) => (
-          <TouchableOpacity
-            key={tab.key}
-            style={[styles.subTab, subTab === tab.key && styles.subTabActive]}
-            onPress={() => setSubTab(tab.key)}
-          >
-            <Text style={styles.subTabIcon}>{tab.icon}</Text>
-            <Text style={[styles.subTabText, subTab === tab.key && styles.subTabTextActive]}>
-              {tab.label}
-            </Text>
+        <View style={{ flexDirection: 'row', flex: 1 }}>
+          {subTabs.map((tab) => (
+            <TouchableOpacity
+              key={tab.key}
+              style={[styles.subTab, subTab === tab.key && styles.subTabActive]}
+              onPress={() => setSubTab(tab.key)}
+            >
+              <Text style={styles.subTabIcon}>{tab.icon}</Text>
+              <Text style={[styles.subTabText, subTab === tab.key && styles.subTabTextActive]}>
+                {tab.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        {subTab === 'liked' && recipes.length > 0 && (
+          <TouchableOpacity onPress={handleClearAllLiked} style={{ paddingHorizontal: 8, paddingVertical: 4 }}>
+            <Text style={{ fontSize: 13, color: colors.error, fontWeight: '500' }}>Clear All</Text>
           </TouchableOpacity>
-        ))}
+        )}
       </View>
 
       {/* Recipe Grid */}

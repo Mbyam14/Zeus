@@ -123,6 +123,13 @@ async def generate_meal_plan(
         pantry_items = pantry_result.data or []
         logger.info(f"Fetched {len(pantry_items)} pantry items for pantry-aware scoring")
 
+        # Fetch user's liked recipe IDs for preference-aware selection
+        liked_result = db.table("recipe_likes").select("recipe_id").eq("user_id", current_user.id).execute()
+        liked_recipe_ids = [r["recipe_id"] for r in (liked_result.data or [])]
+        if liked_recipe_ids:
+            preferences["liked_recipe_ids"] = liked_recipe_ids
+            logger.info(f"User has {len(liked_recipe_ids)} liked recipes for preference boosting")
+
         # Step 1: Shortlist candidates from the recipe database (pantry-aware)
         candidates = await recipe_shortlist_service.shortlist_candidates(
             preferences=preferences,
@@ -456,6 +463,13 @@ async def generate_meal_plan_for_week(
         ).eq("user_id", current_user.id).execute()
         pantry_items = pantry_result.data or []
         logger.info(f"Fetched {len(pantry_items)} pantry items for pantry-aware scoring")
+
+        # Fetch user's liked recipe IDs for preference-aware selection
+        liked_result = db.table("recipe_likes").select("recipe_id").eq("user_id", current_user.id).execute()
+        liked_recipe_ids = [r["recipe_id"] for r in (liked_result.data or [])]
+        if liked_recipe_ids:
+            preferences["liked_recipe_ids"] = liked_recipe_ids
+            logger.info(f"User has {len(liked_recipe_ids)} liked recipes for preference boosting")
 
         # Step 1: Shortlist candidates from the recipe database (pantry-aware)
         candidates = await recipe_shortlist_service.shortlist_candidates(

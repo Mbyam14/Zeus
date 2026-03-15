@@ -11,6 +11,11 @@ import { useThemeStore, ThemeColors } from '../../store/themeStore';
 
 interface DaySelectionScreenProps {
   navigation: any;
+  route: {
+    params?: {
+      weekOffset?: number;
+    };
+  };
 }
 
 type DayOfWeek = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
@@ -34,7 +39,8 @@ const DAYS: DayInfo[] = [
 const WEEKDAYS: DayOfWeek[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
 const FULL_WEEK: DayOfWeek[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 
-export const DaySelectionScreen: React.FC<DaySelectionScreenProps> = ({ navigation }) => {
+export const DaySelectionScreen: React.FC<DaySelectionScreenProps> = ({ navigation, route }) => {
+  const weekOffset = route.params?.weekOffset ?? 0;
   const [selectedDays, setSelectedDays] = useState<Set<DayOfWeek>>(new Set(FULL_WEEK));
   const { colors } = useThemeStore();
   const styles = createStyles(colors);
@@ -70,6 +76,7 @@ export const DaySelectionScreen: React.FC<DaySelectionScreenProps> = ({ navigati
 
     navigation.navigate('CreateMealPlan', {
       selectedDays: orderedDays,
+      weekOffset,
     });
   };
 
