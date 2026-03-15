@@ -633,18 +633,29 @@ class AIService:
         candidate_text = "\n\n".join(sections)
 
         rules = ["Pick EXACTLY the number requested for each meal type"]
+
+        # Priority-ordered rules — pantry first, then dietary, then nutrition
+        rules.append("")
+        rules.append("=== PRIORITY 1: MAXIMIZE PANTRY USAGE ===")
         if pantry_items:
-            rules.append("STRONGLY prefer recipes with highest pantry coverage (% pantry) — the user already has these ingredients")
-            rules.append("Look for recipe combinations that share pantry ingredients efficiently to minimize waste")
-        rules.extend([
-            "Maximize cuisine variety (avoid same cuisine within a type)",
-            "Dinners become next-day lunches, so pick dinners that reheat well",
-            "Balance daily nutrition across the combinations",
-            "Prefer recipes with images (IMG)",
-            "Prefer recipes marked LIKED — the user has expressed interest in these",
-            "Pick recipes whose calories are closest to the per-meal target",
-        ])
-        rules_text = "\n".join(f"{i+1}. {rule}" for i, rule in enumerate(rules))
+            rules.append("Pick recipes with the HIGHEST pantry coverage (% pantry) — this is the #1 priority")
+            rules.append("Choose recipe combos that share pantry ingredients to use up as much of the pantry as possible")
+        else:
+            rules.append("No pantry data available — skip pantry optimization")
+
+        rules.append("")
+        rules.append("=== PRIORITY 2: DIETARY & NUTRITION ===")
+        rules.append("Pick recipes whose calories are closest to the per-meal target")
+        rules.append("Balance daily nutrition (protein, carbs, fat) across meals")
+
+        rules.append("")
+        rules.append("=== PRIORITY 3: VARIETY & PREFERENCES ===")
+        rules.append("Maximize cuisine variety — avoid repeating the same cuisine within a meal type")
+        rules.append("Prefer recipes marked LIKED — the user has expressed interest in these")
+        rules.append("Prefer recipes with images (IMG)")
+        rules.append("Dinners become next-day lunches, so pick dinners that reheat well")
+
+        rules_text = "\n".join(f"{i+1}. {rule}" if rule and not rule.startswith("===") else rule for i, rule in enumerate(rules))
 
         household_size = preferences.get("household_size", 2)
 

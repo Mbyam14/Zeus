@@ -31,7 +31,7 @@ class RecipeShortlistService:
         selected_days: List[str],
         meal_types: List[str] = None,
         exclude_recipe_ids: Optional[List[str]] = None,
-        target_per_meal_type: int = 25,
+        target_per_meal_type: int = 35,
         pantry_items: Optional[List[dict]] = None,
     ) -> Dict[str, List[Dict[str, Any]]]:
         """
@@ -199,89 +199,91 @@ class RecipeShortlistService:
         household_size: int = 2,
         liked_recipe_ids: Optional[set] = None,
     ) -> List[Dict[str, Any]]:
-        """Score and rank candidates. Higher score = better match.
+        """Score and rank candidates. Pantry coverage is THE dominant factor.
 
-        Scoring breakdown (max ~150 with pantry + likes, ~85 without):
-        - Calorie proximity: 0-20
-        - Protein proximity: 0-20
-        - Has image: 0 or 10
-        - Popularity: 0-10
-        - Not AI-generated: 0 or 5
-        - Cook time: 0-5
-        - Pantry coverage: 0-40 (when pantry items available)
-        - Simplicity bonus: 0-10
-        - Serving size match: 0-15
+        Priority order:
+        1. Pantry coverage (use what user already has) — 0-100 points
+        2. Dietary compliance (handled by query filters, not scored here)
+        3. Nutrition targets — 0-15 each for cal/protein
+        4. User preferences (liked, serving size) — 0-15 each
+        5. Quality signals (image, popularity, cook time) — small bonuses
+
+        Scoring breakdown:
+        - Pantry coverage: 0-100 (THE dominant factor)
+        - Calorie proximity: 0-15
+        - Protein proximity: 0-15
         - User liked recipe: 0 or 15
+        - Serving size match: 0-10
+        - Has image: 0 or 5
+        - Popularity: 0-5
+        - Not AI-generated: 0 or 3
+        - Shorter cook time: 0-3
+        - Randomness jitter: 0-8 (prevents identical plans every time)
         """
+        import random
+        from datetime import datetime
+
+        # Seed with current hour so plans vary throughout the day
+        rng = random.Random(int(datetime.now().strftime("%Y%m%d%H")))
+
         for recipe in candidates:
             score = 0.0
 
-            # Calorie proximity (0-20 points)
-            cal = recipe.get("calories") or 0
-            if cal > 0 and target_calories > 0:
-                cal_diff_pct = abs(cal - target_calories) / target_calories
-                score += max(0, 20 * (1 - cal_diff_pct))
-
-            # Protein proximity (0-20 points)
-            prot = float(recipe.get("protein_grams") or 0)
-            if prot > 0 and target_protein > 0:
-                prot_diff_pct = abs(prot - target_protein) / target_protein
-                score += max(0, 20 * (1 - prot_diff_pct))
-
-            # Has image (0 or 10 points)
-            if recipe.get("image_url"):
-                score += 10
-
-            # Popularity (0-10 points, logarithmic)
-            likes = recipe.get("likes_count", 0) or 0
-            score += min(10, math.log2(likes + 1) * 2)
-
-            # Not AI-generated bonus (0 or 5 points)
-            if not recipe.get("is_ai_generated", False):
-                score += 5
-
-            # Shorter cook time bonus (0-5 points)
-            total_time = (recipe.get("prep_time") or 0) + (recipe.get("cook_time") or 0)
-            if total_time > 0:
-                score += max(0, 5 * (1 - total_time / 120))
-
-            # Pantry coverage (0-40 points)
+            # === TIER 1: Pantry coverage (0-100 points) — DOMINANT ===
             ingredients = recipe.get("ingredients") or []
             if pantry_lookup and ingredients:
                 coverage, matched, total = calculate_pantry_coverage(
                     ingredients, pantry_lookup
                 )
-                score += coverage * 40
-                # Store metadata for Claude prompt
+                score += coverage * 100
                 recipe["_pantry_coverage"] = round(coverage * 100)
                 recipe["_pantry_matched"] = matched
                 recipe["_pantry_total"] = total
 
-            # Simplicity bonus (0-10 points): fewer non-trivial ingredients = bonus
-            if ingredients:
-                non_trivial = sum(
-                    1 for ing in ingredients
-                    if isinstance(ing, dict) and ing.get("name")
-                    and not is_trivial_ingredient(ing["name"])
-                )
-                if non_trivial > 0:
-                    score += max(0, 10 * (1 - non_trivial / 15))
+            # === TIER 2: Nutrition targets (0-15 each) ===
+            cal = recipe.get("calories") or 0
+            if cal > 0 and target_calories > 0:
+                cal_diff_pct = abs(cal - target_calories) / target_calories
+                score += max(0, 15 * (1 - cal_diff_pct))
 
-            # Serving size match (0-15 points): prefer recipes close to household size
+            prot = float(recipe.get("protein_grams") or 0)
+            if prot > 0 and target_protein > 0:
+                prot_diff_pct = abs(prot - target_protein) / target_protein
+                score += max(0, 15 * (1 - prot_diff_pct))
+
+            # === TIER 3: User preferences ===
+            # Liked by user (0 or 15 points)
+            if liked_recipe_ids and recipe.get("id") in liked_recipe_ids:
+                score += 15
+                recipe["_liked"] = True
+
+            # Serving size match (0-10 points)
             recipe_servings = recipe.get("servings") or 4
             if household_size > 0:
                 serving_diff = abs(recipe_servings - household_size)
                 if serving_diff == 0:
-                    score += 15  # Perfect match
+                    score += 10
                 elif serving_diff <= 1:
-                    score += 10  # Close enough
+                    score += 6
                 elif serving_diff <= 2:
-                    score += 5   # Acceptable
+                    score += 3
 
-            # Liked by user bonus (0 or 15 points)
-            if liked_recipe_ids and recipe.get("id") in liked_recipe_ids:
-                score += 15
-                recipe["_liked"] = True
+            # === TIER 4: Quality signals (small bonuses) ===
+            if recipe.get("image_url"):
+                score += 5
+
+            likes = recipe.get("likes_count", 0) or 0
+            score += min(5, math.log2(likes + 1))
+
+            if not recipe.get("is_ai_generated", False):
+                score += 3
+
+            total_time = (recipe.get("prep_time") or 0) + (recipe.get("cook_time") or 0)
+            if total_time > 0:
+                score += max(0, 3 * (1 - total_time / 120))
+
+            # === TIER 5: Randomness jitter (prevents identical plans) ===
+            score += rng.uniform(0, 8)
 
             recipe["_score"] = round(score, 2)
 
@@ -289,8 +291,8 @@ class RecipeShortlistService:
 
         # Log top candidates for debugging
         if pantry_lookup and candidates:
-            top3 = candidates[:3]
-            for r in top3:
+            top5 = candidates[:5]
+            for r in top5:
                 logger.info(
                     f"  Top candidate: {r.get('title', '?')} "
                     f"score={r.get('_score', 0)} "
