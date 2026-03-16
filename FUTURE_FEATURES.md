@@ -1,51 +1,25 @@
-# Zeus - Future Feature Ideas
+# Zeus - backlog
 
-## 🛒 Grocery Delivery Integration
+BUG: When ingredients are adjusted from original sizes things like Eggs are displaying 2.3 or a decimal which doesn't really work for eggs. 
 
-### Overview
-Hook up the recipe ingredient list to grocery delivery services, allowing users to order ingredients directly from the app.
+ENHANCEMENT: All Recipe ingredients should be auto adjusted to match the servings of the specified household.
+  - When Creating the Grocery list this should be scaled based on the number of times that meal is being prepared (Dinner 2 days and 3 ppl in house hold. Serving sizes should default to 3 and then grocery list should display quantity to create 6 servings as it is being made 2x during the meal plan)
+  - Discover page should be cycling through all recipes that are allowed based on dietary restrictions. Currently it is only showing 20 and loops. 
+  - Pantry search bar should match the ones in browse recipes and meal plan editor 
+  
 
-### Proposed Services
-- **Target** (Shipt integration)
-- **Amazon Fresh / Amazon Groceries**
-- **Instacart** (multiple store options)
-- **Walmart Grocery**
+MAINTENANCE: Don't show popup confirmation when meal plan is deleted / cleared
 
-### User Flow
-1. User selects recipes for their meal plan
-2. App aggregates all ingredients from selected recipes
-3. Smart consolidation (e.g., if 2 recipes need eggs, combine quantities)
-4. User reviews shopping list with consolidated items
-5. "Order Groceries" button appears
-6. User selects preferred delivery service (Target, Amazon, etc.)
-7. Webhook sends ingredient list to selected service
-8. User completes checkout on delivery service platform
-9. Confirmation returned to Zeus app
+ENHANCEMENT: Ability to modify the number of days in the meal plan while in edit mode
 
-### Technical Implementation Notes
-- **Webhook/API Integration**:
-  - Target/Shipt API
-  - Amazon Fresh API
-  - Instacart API
-- **Ingredient Mapping**: Match recipe ingredients to store product IDs
-- **Quantity Aggregation**: Consolidate duplicate ingredients across multiple recipes
-- **User Preferences**: Save preferred stores, delivery addresses
-- **Order Tracking**: Track delivery status within Zeus app
+BUG: When I attempt to Generate a Meal plan for a different week it is just populating in the current week rather than the other week. 
 
-### Additional Features
-- **Smart Substitutions**: Suggest alternatives if items out of stock
-- **Price Comparison**: Show prices across different services
-- **Scheduled Delivery**: Coordinate delivery with meal plan dates
-- **Pantry Sync**: Don't order items already in user's pantry
-- **Budget Tracking**: Show estimated cost before ordering
+ENHANCEMENT: Add more ingredients to the search. Chili beans, Types of beans, Aoli of any kind… many things missing could be why lots of recipes are unable to match to pantry
 
-### Business Considerations
-- Affiliate partnerships with grocery services
-- Revenue share on orders placed through Zeus
-- Premium feature vs free tier
+ENHANCEMENT: Ability to clear liked Recipes in MY Recipes
 
----
+ENHANCEMENT: Meal Plan Generation should take into account what has been like and disliked by the user from the discover page. (This is not Strict but general tends should appear from the user here and Claude should be using it to help create the meal plan) 
 
-## 📝 Other Future Ideas
+ENHANCEMENT: Grocery list items shouldn't have things like Uncooked for Rice. Ex. Uncooked Jasmine Rice, just list as Jasmine Rice
 
-*Add more feature ideas here as they come up*
+ENHANCEMENT: remove emoji next to grocery items that are popping up…. Oil next to all oils looks bad
