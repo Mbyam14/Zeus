@@ -375,7 +375,7 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
       const result = await mealPlanService.optimizeCalories(mealPlan.id);
       if (result.optimized) {
         // Reload the meal plan to reflect swaps
-        await loadMealPlan(weekOffset);
+        await loadMealPlan();
         // Refresh macro summary if it was showing
         if (macroSummary) {
           const updated = await mealPlanService.getMacroSummary(mealPlan.id);
