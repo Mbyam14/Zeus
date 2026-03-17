@@ -665,10 +665,7 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
     <View style={styles.emptyState}>
       <Text style={styles.emptyIcon}>🥘</Text>
       <Text style={styles.emptyTitle}>No Pantry Items</Text>
-      <Text style={styles.emptyText}>Add your first pantry item to get started!</Text>
-      <TouchableOpacity style={styles.emptyButton} onPress={() => setShowAddModal(true)}>
-        <Text style={styles.emptyButtonText}>Add Item</Text>
-      </TouchableOpacity>
+      <Text style={styles.emptyText}>Tap the + button in the top right to add your first item!</Text>
     </View>
   );
 

@@ -19,6 +19,7 @@ interface MealSlotData {
 interface MealPlanData {
   [day: string]: {
     breakfast?: MealSlotData;
+    snack?: MealSlotData;
     lunch?: MealSlotData;
     dinner?: MealSlotData;
   };
@@ -41,7 +42,7 @@ const DAY_LABELS: Record<DayOfWeek, string> = {
   sunday: 'Sun',
 };
 
-const MEAL_TYPES: MealType[] = ['breakfast', 'lunch', 'dinner'];
+const MEAL_TYPES: MealType[] = ['breakfast', 'snack', 'lunch', 'dinner'];
 const MEAL_LABELS: Record<MealType, string> = {
   breakfast: 'B',
   lunch: 'L',

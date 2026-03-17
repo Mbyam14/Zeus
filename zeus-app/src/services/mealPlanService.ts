@@ -190,6 +190,32 @@ export const mealPlanService = {
    * @param selectedDays - Array of days to include
    * @param meals - Dictionary of meals with recipe_ids
    */
+  /**
+   * Optimize meal plan calories by swapping recipes to better match daily targets
+   */
+  async optimizeCalories(mealPlanId: string): Promise<{
+    meal_plan_id: string;
+    optimized: boolean;
+    swaps_made?: number;
+    message: string;
+    analysis: Array<{
+      day: string;
+      action: string;
+      slot?: string;
+      old_recipe?: string;
+      old_calories?: number;
+      new_recipe?: string;
+      new_calories?: number;
+      old_day_total?: number;
+      new_day_total?: number;
+      target?: number;
+      reason?: string;
+    }>;
+  }> {
+    const response = await api.post(`/api/meal-plans/${mealPlanId}/optimize-calories`);
+    return response.data;
+  },
+
   async createManualMealPlan(
     startDate: string,
     selectedDays: string[],

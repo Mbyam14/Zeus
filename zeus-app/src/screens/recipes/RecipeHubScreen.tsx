@@ -14,6 +14,9 @@ import {
   ScrollView,
   Platform,
   RefreshControl,
+  Modal,
+  KeyboardAvoidingView,
+  Keyboard,
 } from 'react-native';
 import { PanGestureHandler, State, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -24,6 +27,7 @@ import { useThemeStore, ThemeColors } from '../../store/themeStore';
 import { useAuthStore } from '../../store/authStore';
 import { getDifficultyColor } from '../../utils/colors';
 import { PantryItem } from '../../types/pantry';
+import { aiService, AskAIResponse } from '../../services/aiService';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -1197,6 +1201,34 @@ export const RecipeHubScreen: React.FC = () => {
   const cuisinePreferences = user?.profile_data?.preferences?.cuisine_preferences || [];
   const cookingSkill = user?.profile_data?.preferences?.cooking_skill || 'intermediate';
 
+  // Ask AI state
+  const [showAskAI, setShowAskAI] = useState(false);
+  const [askAIInput, setAskAIInput] = useState('');
+  const [askAILoading, setAskAILoading] = useState(false);
+  const [askAIResponse, setAskAIResponse] = useState<string | null>(null);
+
+  const handleAskAI = async () => {
+    if (!askAIInput.trim()) return;
+    Keyboard.dismiss();
+    setAskAILoading(true);
+    setAskAIResponse(null);
+    try {
+      const result = await aiService.ask(askAIInput.trim());
+      setAskAIResponse(result.response);
+    } catch (error) {
+      setAskAIResponse('Sorry, I couldn\'t get a response right now. Please try again.');
+    } finally {
+      setAskAILoading(false);
+    }
+  };
+
+  const QUICK_PROMPTS = [
+    'What should I make for dinner tonight?',
+    'Quick high-protein snack ideas',
+    'What can I make with my pantry?',
+    'Easy meal prep ideas for the week',
+  ];
+
   const tabs: { key: TabMode; label: string }[] = [
     { key: 'discover', label: 'Discover' },
     { key: 'browse', label: 'Browse' },
@@ -1253,6 +1285,109 @@ export const RecipeHubScreen: React.FC = () => {
             <MyRecipesTab colors={colors} onViewRecipe={handleViewRecipe} myRecipesState={myRecipesState} setMyRecipesState={setMyRecipesState} />
           )}
         </View>
+
+        {/* Ask AI Floating Button */}
+        <TouchableOpacity
+          style={styles.askAIFab}
+          onPress={() => {
+            setShowAskAI(true);
+            setAskAIResponse(null);
+            setAskAIInput('');
+          }}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.askAIFabIcon}>AI</Text>
+        </TouchableOpacity>
+
+        {/* Ask AI Modal */}
+        <Modal
+          visible={showAskAI}
+          animationType="slide"
+          transparent={true}
+          onRequestClose={() => setShowAskAI(false)}
+        >
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={styles.askAIModalOverlay}
+          >
+            <View style={styles.askAIModal}>
+              {/* Header */}
+              <View style={styles.askAIHeader}>
+                <Text style={styles.askAITitle}>Ask AI Chef</Text>
+                <TouchableOpacity onPress={() => setShowAskAI(false)}>
+                  <Text style={styles.askAIClose}>X</Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.askAISubtitle}>
+                Ask me anything about cooking, recipes, or meal ideas. I know what's in your pantry and your preferences!
+              </Text>
+
+              {/* Quick Prompts */}
+              {!askAIResponse && !askAILoading && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.quickPromptsScroll}>
+                  {QUICK_PROMPTS.map((prompt, i) => (
+                    <TouchableOpacity
+                      key={i}
+                      style={styles.quickPrompt}
+                      onPress={() => {
+                        setAskAIInput(prompt);
+                        // Auto-submit
+                        setAskAILoading(true);
+                        setAskAIResponse(null);
+                        aiService.ask(prompt).then(r => {
+                          setAskAIResponse(r.response);
+                          setAskAILoading(false);
+                        }).catch(() => {
+                          setAskAIResponse('Sorry, something went wrong. Please try again.');
+                          setAskAILoading(false);
+                        });
+                      }}
+                    >
+                      <Text style={styles.quickPromptText}>{prompt}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
+
+              {/* Response Area */}
+              <ScrollView style={styles.askAIResponseArea} contentContainerStyle={{ flexGrow: 1 }}>
+                {askAILoading && (
+                  <View style={styles.askAILoadingContainer}>
+                    <ActivityIndicator size="large" color={colors.primary} />
+                    <Text style={styles.askAILoadingText}>Thinking...</Text>
+                  </View>
+                )}
+                {askAIResponse && (
+                  <View style={styles.askAIResponseBubble}>
+                    <Text style={styles.askAIResponseText}>{askAIResponse}</Text>
+                  </View>
+                )}
+              </ScrollView>
+
+              {/* Input */}
+              <View style={styles.askAIInputRow}>
+                <TextInput
+                  style={styles.askAIInput}
+                  placeholder="What should I cook tonight?"
+                  placeholderTextColor={colors.textMuted}
+                  value={askAIInput}
+                  onChangeText={setAskAIInput}
+                  onSubmitEditing={handleAskAI}
+                  returnKeyType="send"
+                  multiline={false}
+                />
+                <TouchableOpacity
+                  style={[styles.askAISendButton, (!askAIInput.trim() || askAILoading) && { opacity: 0.4 }]}
+                  onPress={handleAskAI}
+                  disabled={!askAIInput.trim() || askAILoading}
+                >
+                  <Text style={styles.askAISendText}>Send</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
 
       </View>
     </GestureHandlerRootView>
@@ -1326,6 +1461,138 @@ const createHubStyles = (colors: ThemeColors) =>
     },
     content: {
       flex: 1,
+    },
+    // Ask AI styles
+    askAIFab: {
+      position: 'absolute',
+      bottom: 24,
+      right: 20,
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      backgroundColor: colors.primary,
+      justifyContent: 'center',
+      alignItems: 'center',
+      shadowColor: colors.shadow,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.3,
+      shadowRadius: 6,
+      elevation: 6,
+      zIndex: 100,
+    },
+    askAIFabIcon: {
+      fontSize: 16,
+      fontWeight: '800',
+      color: colors.buttonText,
+    },
+    askAIModalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      justifyContent: 'flex-end',
+    },
+    askAIModal: {
+      backgroundColor: colors.background,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+      paddingHorizontal: 20,
+      paddingTop: 20,
+      paddingBottom: Platform.OS === 'ios' ? 36 : 20,
+      maxHeight: '85%',
+      minHeight: '60%',
+    },
+    askAIHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 8,
+    },
+    askAITitle: {
+      fontSize: 22,
+      fontWeight: '700',
+      color: colors.text,
+    },
+    askAIClose: {
+      fontSize: 18,
+      fontWeight: '600',
+      color: colors.textMuted,
+      padding: 8,
+    },
+    askAISubtitle: {
+      fontSize: 13,
+      color: colors.textMuted,
+      marginBottom: 16,
+      lineHeight: 18,
+    },
+    quickPromptsScroll: {
+      marginBottom: 16,
+      maxHeight: 40,
+    },
+    quickPrompt: {
+      backgroundColor: colors.primary + '15',
+      borderRadius: 20,
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      marginRight: 8,
+      borderWidth: 1,
+      borderColor: colors.primary + '30',
+    },
+    quickPromptText: {
+      fontSize: 13,
+      color: colors.primary,
+      fontWeight: '500',
+    },
+    askAIResponseArea: {
+      flex: 1,
+      marginBottom: 12,
+    },
+    askAILoadingContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingVertical: 40,
+    },
+    askAILoadingText: {
+      marginTop: 12,
+      fontSize: 14,
+      color: colors.textMuted,
+    },
+    askAIResponseBubble: {
+      backgroundColor: colors.card,
+      borderRadius: 16,
+      padding: 16,
+      marginTop: 8,
+    },
+    askAIResponseText: {
+      fontSize: 15,
+      color: colors.text,
+      lineHeight: 22,
+    },
+    askAIInputRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    askAIInput: {
+      flex: 1,
+      backgroundColor: colors.card,
+      borderRadius: 24,
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      fontSize: 15,
+      color: colors.text,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    askAISendButton: {
+      backgroundColor: colors.primary,
+      borderRadius: 24,
+      paddingHorizontal: 20,
+      paddingVertical: 12,
+    },
+    askAISendText: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: colors.buttonText,
     },
   });
 

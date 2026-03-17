@@ -53,7 +53,7 @@ class UserPreferences(BaseModel):
 
     # Meal planning preferences
     meal_calorie_distribution: Dict[str, int] = Field(
-        default={"breakfast": 25, "lunch": 35, "dinner": 40},
+        default={"breakfast": 20, "snack": 10, "lunch": 30, "dinner": 40},
         description="Percentage of daily calories per meal type (must sum to 100)"
     )
     cooking_sessions_per_week: int = Field(

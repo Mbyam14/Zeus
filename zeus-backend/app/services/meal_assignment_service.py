@@ -19,7 +19,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-MEAL_TYPES = ["breakfast", "lunch", "dinner"]
+MEAL_TYPES = ["breakfast", "snack", "lunch", "dinner"]
 
 
 @dataclass
@@ -70,19 +70,21 @@ class MealAssignmentService:
 
         # Categorize recipes by meal type
         breakfast_recipes = [r for r in recipes if self._is_meal_type(r, "breakfast")]
+        snack_recipes = [r for r in recipes if self._is_meal_type(r, "snack")]
         lunch_recipes = [r for r in recipes if self._is_meal_type(r, "lunch")]
         dinner_recipes = [r for r in recipes if self._is_meal_type(r, "dinner")]
 
         # If we don't have categorized recipes, distribute evenly
         if not breakfast_recipes:
-            breakfast_recipes = recipes[:max(1, len(recipes) // 3)]
+            breakfast_recipes = recipes[:max(1, len(recipes) // 4)]
         if not dinner_recipes:
-            dinner_recipes = recipes[len(recipes) // 3:] if len(recipes) > 1 else recipes
+            dinner_recipes = recipes[len(recipes) // 4:] if len(recipes) > 1 else recipes
         if not lunch_recipes:
             # Lunches can share with dinners (leftover concept)
             lunch_recipes = dinner_recipes
+        # Snacks can be empty - not every plan has snack recipes
 
-        total_slots = num_days * 3
+        total_slots = num_days * (4 if snack_recipes else 3)
         logger.info(f"Assigning {len(recipes)} recipes to {total_slots} slots across {num_days} days (max {max_repeats} repeats)")
         logger.info(f"Breakfast: {len(breakfast_recipes)}, Lunch: {len(lunch_recipes)}, Dinner: {len(dinner_recipes)}")
 
@@ -141,6 +143,22 @@ class MealAssignmentService:
                 "order": 1
             }
             recipe_usage[recipe_id] = recipe_usage.get(recipe_id, 0) + 1
+
+        # Strategy 4: Snacks - high repetition is fine (people repeat snacks)
+        if snack_recipes:
+            snack_rotation = self._create_rotation(snack_recipes, num_days, max_repeats + 2)
+            for i, day in enumerate(target_days):
+                recipe = snack_rotation[i]
+                recipe_id = recipe.get("id", f"temp_snack_{i}")
+                is_repeat = recipe_usage.get(recipe_id, 0) > 0
+
+                assignments[day]["snack"] = {
+                    "recipe_id": recipe_id,
+                    "is_repeat": is_repeat,
+                    "original_day": self._find_first_use_day(assignments, recipe_id, "snack") if is_repeat else None,
+                    "order": 4
+                }
+                recipe_usage[recipe_id] = recipe_usage.get(recipe_id, 0) + 1
 
         # Log summary
         unique_recipes = len(set(

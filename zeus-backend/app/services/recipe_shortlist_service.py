@@ -41,13 +41,18 @@ class RecipeShortlistService:
         Each candidate has all recipe fields plus a '_score' field.
         """
         if meal_types is None:
-            meal_types = ["breakfast", "lunch", "dinner"]
+            meal_types = ["breakfast", "snack", "lunch", "dinner"]
 
         calorie_target = preferences.get("calorie_target") or 2000
         protein_target = preferences.get("protein_target_grams") or 150
         distribution = preferences.get("meal_calorie_distribution", {
-            "breakfast": 25, "lunch": 35, "dinner": 40
+            "breakfast": 20, "snack": 10, "lunch": 30, "dinner": 40
         })
+        # Backward compat: if old 3-meal distribution, add snack
+        if "snack" not in distribution:
+            distribution = {
+                "breakfast": 20, "snack": 10, "lunch": 30, "dinner": 40
+            }
 
         allergies = preferences.get("allergies", [])
         disliked = preferences.get("disliked_ingredients", [])

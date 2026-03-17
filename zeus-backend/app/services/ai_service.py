@@ -293,22 +293,26 @@ class AIService:
 
         # Get user's custom distribution OR use defaults
         distribution = user_preferences.get("meal_calorie_distribution", {
-            "breakfast": 25, "lunch": 35, "dinner": 40
+            "breakfast": 20, "snack": 10, "lunch": 30, "dinner": 40
         })
+        if "snack" not in distribution:
+            distribution = {"breakfast": 20, "snack": 10, "lunch": 30, "dinner": 40}
 
         # Calculate per-meal targets based on user's distribution
-        breakfast_cals = int(calorie_target * distribution.get("breakfast", 25) / 100)
-        lunch_cals = int(calorie_target * distribution.get("lunch", 35) / 100)
+        breakfast_cals = int(calorie_target * distribution.get("breakfast", 20) / 100)
+        snack_cals = int(calorie_target * distribution.get("snack", 10) / 100)
+        lunch_cals = int(calorie_target * distribution.get("lunch", 30) / 100)
         dinner_cals = int(calorie_target * distribution.get("dinner", 40) / 100)
 
         # Calculate per-meal protein targets (same distribution)
-        breakfast_protein = int(protein_target * distribution.get("breakfast", 25) / 100)
-        lunch_protein = int(protein_target * distribution.get("lunch", 35) / 100)
+        breakfast_protein = int(protein_target * distribution.get("breakfast", 20) / 100)
+        snack_protein = int(protein_target * distribution.get("snack", 10) / 100)
+        lunch_protein = int(protein_target * distribution.get("lunch", 30) / 100)
         dinner_protein = int(protein_target * distribution.get("dinner", 40) / 100)
 
         # Calculate estimated weekly calories (based on selected days)
         weekly_calories = calorie_target * num_days
-        total_meals = num_days * 3  # 3 meals per day
+        total_meals = num_days * 4  # 4 meals per day (breakfast, snack, lunch, dinner)
 
         prompt = f"""
         Generate a BATCH COOKING meal plan where recipes repeat throughout the selected days.
@@ -340,12 +344,14 @@ class AIService:
         DAILY PROTEIN TARGET: {protein_target}g protein
 
         PER-MEAL CALORIE TARGETS (User-configured distribution):
-        - Breakfast: {breakfast_cals} calories ({distribution.get("breakfast", 25)}% of daily)
-        - Lunch: {lunch_cals} calories ({distribution.get("lunch", 35)}% of daily)
+        - Breakfast: {breakfast_cals} calories ({distribution.get("breakfast", 20)}% of daily)
+        - Snack: {snack_cals} calories ({distribution.get("snack", 10)}% of daily)
+        - Lunch: {lunch_cals} calories ({distribution.get("lunch", 30)}% of daily)
         - Dinner: {dinner_cals} calories ({distribution.get("dinner", 40)}% of daily)
 
         PER-MEAL PROTEIN TARGETS:
         - Breakfast: ~{breakfast_protein}g protein
+        - Snack: ~{snack_protein}g protein
         - Lunch: ~{lunch_protein}g protein
         - Dinner: ~{dinner_protein}g protein
 
@@ -596,8 +602,13 @@ class AIService:
         calorie_target = preferences.get("calorie_target") or 2000
         protein_target = preferences.get("protein_target_grams") or 150
         distribution = preferences.get("meal_calorie_distribution", {
-            "breakfast": 25, "lunch": 35, "dinner": 40
+            "breakfast": 20, "snack": 10, "lunch": 30, "dinner": 40
         })
+        # Backward compat: if old 3-meal distribution, add snack
+        if "snack" not in distribution:
+            distribution = {
+                "breakfast": 20, "snack": 10, "lunch": 30, "dinner": 40
+            }
         budget = preferences.get("budget_friendly", False)
         num_days = len(selected_days)
 
@@ -609,7 +620,7 @@ class AIService:
                 pantry_section = f"\nUSER'S PANTRY: {', '.join(pantry_names[:40])}\n"
 
         sections = []
-        for meal_type in ["breakfast", "dinner", "lunch"]:
+        for meal_type in ["breakfast", "snack", "lunch", "dinner"]:
             items = candidates.get(meal_type, [])
             if not items:
                 continue
@@ -663,7 +674,7 @@ class AIService:
 
 HOUSEHOLD SIZE: {household_size} people — prefer recipes whose servings are close to {household_size}
 DAILY TARGETS: {calorie_target} cal, {protein_target}g protein (per person)
-DISTRIBUTION: Breakfast {distribution.get('breakfast', 25)}%, Lunch {distribution.get('lunch', 35)}%, Dinner {distribution.get('dinner', 40)}%
+DISTRIBUTION: Breakfast {distribution.get('breakfast', 20)}%, Snack {distribution.get('snack', 10)}%, Lunch {distribution.get('lunch', 30)}%, Dinner {distribution.get('dinner', 40)}%
 {"BUDGET MODE: prefer simpler/cheaper recipes" if budget else ""}
 {pantry_section}
 {candidate_text}
@@ -672,7 +683,7 @@ RULES:
 {rules_text}
 
 Respond with ONLY a JSON object mapping meal type to list of 1-based indices:
-{{"breakfast": [3], "dinner": [2, 5], "lunch": [1]}}"""
+{{"breakfast": [3], "snack": [1], "dinner": [2, 5], "lunch": [1]}}"""
 
     def _parse_selection_response(
         self,

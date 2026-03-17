@@ -42,6 +42,7 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
   const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set());
   const [weekOffset, setWeekOffset] = useState(0);
   const [showMenu, setShowMenu] = useState(false);
+  const [optimizing, setOptimizing] = useState(false);
 
   const { colors } = useThemeStore();
   const styles = createStyles(colors);
@@ -364,6 +365,38 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
     const recipe = recipes[recipeId];
     if (recipe) {
       navigation.navigate('RecipeDetail', { recipe });
+    }
+  };
+
+  const handleOptimizeCalories = async () => {
+    if (!mealPlan) return;
+    setOptimizing(true);
+    try {
+      const result = await mealPlanService.optimizeCalories(mealPlan.id);
+      if (result.optimized) {
+        // Reload the meal plan to reflect swaps
+        await loadMealPlan(weekOffset);
+        // Refresh macro summary if it was showing
+        if (macroSummary) {
+          const updated = await mealPlanService.getMacroSummary(mealPlan.id);
+          setMacroSummary(updated);
+        }
+        // Show swap details
+        const swapDetails = result.analysis
+          .filter((a: any) => a.action === 'swapped')
+          .map((a: any) => `${a.day}: ${a.old_recipe} → ${a.new_recipe}`)
+          .join('\n');
+        Alert.alert(
+          'Calories Optimized!',
+          `${result.message}\n\n${swapDetails}`
+        );
+      } else {
+        Alert.alert('No Changes Needed', result.message);
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to optimize calories. Please try again.');
+    } finally {
+      setOptimizing(false);
     }
   };
 
@@ -740,6 +773,7 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
         {/* Meals for Selected Day */}
         <View style={styles.mealsContainer}>
           {renderMealCard('breakfast')}
+          {renderMealCard('snack')}
           {renderMealCard('lunch')}
           {renderMealCard('dinner')}
         </View>
@@ -765,6 +799,22 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
             </View>
           </View>
           <Text style={styles.macroToggleArrow}>{showMacroSummary ? '▲' : '▼'}</Text>
+        </TouchableOpacity>
+
+        {/* Optimize Calories Button */}
+        <TouchableOpacity
+          style={[styles.optimizeButton, optimizing && { opacity: 0.6 }]}
+          onPress={handleOptimizeCalories}
+          disabled={optimizing}
+        >
+          {optimizing ? (
+            <ActivityIndicator size="small" color={colors.buttonText} />
+          ) : (
+            <Text style={styles.optimizeButtonIcon}>⚡</Text>
+          )}
+          <Text style={styles.optimizeButtonText}>
+            {optimizing ? 'Optimizing...' : 'Optimize Calories'}
+          </Text>
         </TouchableOpacity>
 
         {/* Weekly Macro Summary */}
@@ -1329,6 +1379,27 @@ const createStyles = (colors: any) => StyleSheet.create({
     marginBottom: 4,
   },
   // Macro Summary Styles - Prominent Button
+  optimizeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 16,
+    marginBottom: 8,
+    padding: 12,
+    backgroundColor: colors.card,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.primary + '40',
+    gap: 8,
+  },
+  optimizeButtonIcon: {
+    fontSize: 18,
+  },
+  optimizeButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.primary,
+  },
   macroToggleButton: {
     flexDirection: 'row',
     justifyContent: 'space-between',

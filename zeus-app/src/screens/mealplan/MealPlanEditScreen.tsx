@@ -67,7 +67,7 @@ export const MealPlanEditScreen: React.FC<MealPlanBuilderProps> = ({ navigation,
 
       if (isEditMode && existingMealPlan.meals[day]) {
         const dayMeals = existingMealPlan.meals[day];
-        const mealTypes: MealType[] = ['breakfast', 'lunch', 'dinner'];
+        const mealTypes: MealType[] = ['breakfast', 'snack', 'lunch', 'dinner'];
         for (const mealType of mealTypes) {
           const slot = dayMeals[mealType];
           const recipeId = getRecipeIdFromSlot(slot);

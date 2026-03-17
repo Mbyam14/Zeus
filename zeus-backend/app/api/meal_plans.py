@@ -24,26 +24,31 @@ def _calculate_unique_recipe_counts(
     Calculate how many unique recipes are needed per meal type.
 
     Based on number of days, cooking sessions per week, and leftover tolerance.
+    Includes snacks - snacks repeat heavily (1-2 unique snacks per week).
     """
     # Distribute cooking sessions across meal types
     # Breakfast: simpler, fewer unique needed (people repeat breakfasts)
     # Dinner: most variety desired
     # Lunch: often leftovers from dinner, fewer unique needed
+    # Snack: very few unique needed (people repeat snacks)
     if cooking_sessions >= num_days * 2:
         # High variety mode
         breakfast_count = min(num_days, max(2, num_days // 2))
         dinner_count = min(num_days, cooking_sessions // 2)
         lunch_count = min(num_days, max(1, cooking_sessions // 4))
+        snack_count = min(num_days, max(2, num_days // 3))
     elif cooking_sessions >= num_days:
         # Moderate variety
         breakfast_count = min(num_days, max(2, num_days // 3))
         dinner_count = min(num_days, max(3, cooking_sessions // 2))
         lunch_count = min(num_days, max(1, cooking_sessions // 4))
+        snack_count = min(num_days, max(1, num_days // 4))
     else:
         # Minimal cooking (batch heavy)
         breakfast_count = max(1, min(3, num_days // 3))
         dinner_count = max(2, cooking_sessions)
         lunch_count = max(1, cooking_sessions // 3)
+        snack_count = max(1, min(2, num_days // 4))
 
     # Adjust based on leftover tolerance
     if leftover_tolerance == "high":
@@ -53,9 +58,11 @@ def _calculate_unique_recipe_counts(
         breakfast_count = min(num_days, breakfast_count + 1)
         dinner_count = min(num_days, dinner_count + 1)
         lunch_count = min(num_days, lunch_count + 1)
+        snack_count = min(num_days, snack_count + 1)
 
     return {
         "breakfast": breakfast_count,
+        "snack": snack_count,
         "lunch": lunch_count,
         "dinner": dinner_count,
     }
@@ -134,7 +141,7 @@ async def generate_meal_plan(
         candidates = await recipe_shortlist_service.shortlist_candidates(
             preferences=preferences,
             selected_days=normalized_days,
-            meal_types=["breakfast", "lunch", "dinner"],
+            meal_types=["breakfast", "snack", "lunch", "dinner"],
             pantry_items=pantry_items,
         )
 
@@ -203,6 +210,216 @@ async def generate_meal_plan(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate meal plan: {str(e)}"
+        )
+
+
+@router.post("/{meal_plan_id}/optimize-calories")
+async def optimize_meal_plan_calories(
+    meal_plan_id: str,
+    current_user: UserResponse = Depends(get_current_active_user)
+) -> Dict[str, Any]:
+    """
+    Analyze a meal plan's calories vs user targets and suggest swaps
+    to better match daily calorie goals. Uses Claude to intelligently
+    pick replacement recipes that bring each day closer to the target.
+    """
+    try:
+        db = get_database()
+
+        # Get the meal plan
+        mp_result = db.table("meal_plans").select("*").eq("id", meal_plan_id).eq("user_id", current_user.id).execute()
+        if not mp_result.data:
+            raise HTTPException(status_code=404, detail="Meal plan not found")
+
+        meal_plan = mp_result.data[0]
+        meals = meal_plan.get("meals", {})
+        selected_days = meal_plan.get("selected_days") or ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+
+        # Get user preferences
+        user_result = db.table("users").select("profile_data").eq("id", current_user.id).execute()
+        profile_data = user_result.data[0].get("profile_data", {}) if user_result.data else {}
+        preferences = profile_data.get("preferences", {})
+
+        calorie_target = preferences.get("calorie_target") or 2000
+        distribution = preferences.get("meal_calorie_distribution", {
+            "breakfast": 20, "snack": 10, "lunch": 30, "dinner": 40
+        })
+        if "snack" not in distribution:
+            distribution = {"breakfast": 20, "snack": 10, "lunch": 30, "dinner": 40}
+
+        # Collect all recipe IDs and fetch nutrition data
+        unique_recipe_ids = set()
+        for day_meals in meals.values():
+            if isinstance(day_meals, dict):
+                for meal_data in day_meals.values():
+                    if meal_data:
+                        rid = meal_data if isinstance(meal_data, str) else meal_data.get("recipe_id") if isinstance(meal_data, dict) else None
+                        if rid:
+                            unique_recipe_ids.add(rid)
+
+        if not unique_recipe_ids:
+            return {"meal_plan_id": meal_plan_id, "optimized": False, "message": "No recipes in meal plan"}
+
+        recipes_result = db.table("recipes").select(
+            "id, title, calories, protein_grams, meal_type"
+        ).in_("id", list(unique_recipe_ids)).execute()
+        recipes_by_id = {r["id"]: r for r in recipes_result.data}
+
+        # Analyze each day's calories vs target
+        days_needing_optimization = []
+        for day in selected_days:
+            day_meals = meals.get(day, {})
+            day_total = 0
+            day_detail = {}
+            for meal_type in ["breakfast", "snack", "lunch", "dinner"]:
+                meal_data = day_meals.get(meal_type)
+                if meal_data:
+                    rid = meal_data if isinstance(meal_data, str) else meal_data.get("recipe_id") if isinstance(meal_data, dict) else None
+                    if rid and rid in recipes_by_id:
+                        cal = recipes_by_id[rid].get("calories") or 0
+                        day_total += cal
+                        day_detail[meal_type] = {
+                            "recipe_id": rid,
+                            "title": recipes_by_id[rid].get("title", "?"),
+                            "calories": cal,
+                            "target": int(calorie_target * distribution.get(meal_type, 25) / 100),
+                        }
+            diff = day_total - calorie_target
+            if abs(diff) > 200:  # More than 200 cal off target
+                days_needing_optimization.append({
+                    "day": day,
+                    "total": day_total,
+                    "target": calorie_target,
+                    "difference": diff,
+                    "meals": day_detail,
+                })
+
+        if not days_needing_optimization:
+            return {
+                "meal_plan_id": meal_plan_id,
+                "optimized": False,
+                "message": "All days are within 200 calories of your target. No optimization needed!",
+                "analysis": []
+            }
+
+        # For each day that's off, find better swaps from the recipe database
+        # Focus on the meal slot that's furthest from its per-meal target
+        swaps_made = 0
+        analysis = []
+        exclude_ids = list(unique_recipe_ids)  # Don't swap to recipes already in the plan
+
+        for day_info in days_needing_optimization:
+            day = day_info["day"]
+            day_meals_detail = day_info["meals"]
+
+            # Find the meal slot most off-target
+            worst_slot = None
+            worst_diff = 0
+            for meal_type, info in day_meals_detail.items():
+                # Skip repeat/leftover meals
+                meal_data = meals.get(day, {}).get(meal_type)
+                if isinstance(meal_data, dict) and meal_data.get("is_repeat"):
+                    continue
+                slot_diff = abs(info["calories"] - info["target"])
+                if slot_diff > worst_diff:
+                    worst_diff = slot_diff
+                    worst_slot = meal_type
+
+            if not worst_slot or worst_diff < 100:
+                analysis.append({
+                    "day": day,
+                    "action": "skipped",
+                    "reason": "No single meal slot is far enough from target to justify a swap",
+                    "total_calories": day_info["total"],
+                    "target": calorie_target,
+                })
+                continue
+
+            # Find a better recipe for this slot
+            target_cal = day_meals_detail[worst_slot]["target"]
+            old_recipe = day_meals_detail[worst_slot]
+
+            # Query candidates close to the target calories
+            cal_min = max(50, int(target_cal * 0.8))
+            cal_max = int(target_cal * 1.2)
+
+            query = db.table("recipes").select("id, title, calories, protein_grams, image_url, meal_type")
+            query = query.contains("meal_type", [worst_slot.capitalize()])
+            query = query.gte("calories", cal_min)
+            query = query.lte("calories", cal_max)
+            query = query.not_.is_("image_url", "null")
+
+            # Apply dietary restrictions
+            dietary = preferences.get("dietary_restrictions", [])
+            if dietary:
+                query = query.contains("dietary_tags", dietary)
+
+            query = query.order("likes_count", desc=True).limit(20)
+            swap_result = query.execute()
+
+            swap_candidates = [r for r in (swap_result.data or []) if r["id"] not in exclude_ids]
+
+            if not swap_candidates:
+                analysis.append({
+                    "day": day,
+                    "action": "no_swap_found",
+                    "slot": worst_slot,
+                    "reason": f"No {worst_slot} recipes found near {target_cal} cal target",
+                    "total_calories": day_info["total"],
+                    "target": calorie_target,
+                })
+                continue
+
+            # Pick the candidate closest to target
+            swap_candidates.sort(key=lambda r: abs((r.get("calories") or 0) - target_cal))
+            new_recipe = swap_candidates[0]
+
+            # Apply the swap
+            if day not in meals:
+                meals[day] = {}
+            meals[day][worst_slot] = {
+                "recipe_id": new_recipe["id"],
+                "is_repeat": False,
+                "original_day": None,
+                "order": {"breakfast": 1, "snack": 2, "lunch": 3, "dinner": 4}.get(worst_slot, 1)
+            }
+            swaps_made += 1
+            exclude_ids.append(new_recipe["id"])
+
+            new_day_total = day_info["total"] - old_recipe["calories"] + (new_recipe.get("calories") or 0)
+            analysis.append({
+                "day": day,
+                "action": "swapped",
+                "slot": worst_slot,
+                "old_recipe": old_recipe["title"],
+                "old_calories": old_recipe["calories"],
+                "new_recipe": new_recipe["title"],
+                "new_calories": new_recipe.get("calories"),
+                "old_day_total": day_info["total"],
+                "new_day_total": new_day_total,
+                "target": calorie_target,
+            })
+
+        # Save updated meals if any swaps were made
+        if swaps_made > 0:
+            db.table("meal_plans").update({"meals": meals}).eq("id", meal_plan_id).execute()
+            logger.info(f"Optimized meal plan {meal_plan_id}: {swaps_made} swaps made")
+
+        return {
+            "meal_plan_id": meal_plan_id,
+            "optimized": swaps_made > 0,
+            "swaps_made": swaps_made,
+            "message": f"Made {swaps_made} swap(s) to better match your {calorie_target} cal/day target." if swaps_made > 0 else "Could not find better alternatives for off-target days.",
+            "analysis": analysis,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to optimize meal plan: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to optimize meal plan: {str(e)}"
         )
 
 
@@ -475,7 +692,7 @@ async def generate_meal_plan_for_week(
         candidates = await recipe_shortlist_service.shortlist_candidates(
             preferences=preferences,
             selected_days=normalized_days,
-            meal_types=["breakfast", "lunch", "dinner"],
+            meal_types=["breakfast", "snack", "lunch", "dinner"],
             pantry_items=pantry_items,
         )
 
@@ -783,7 +1000,7 @@ async def regenerate_single_meal(
             "recipe_id": new_recipe_id,
             "is_repeat": False,
             "original_day": None,
-            "order": {"breakfast": 1, "lunch": 2, "dinner": 3, "snack": 2}.get(meal_type, 1)
+            "order": {"breakfast": 1, "snack": 2, "lunch": 3, "dinner": 4}.get(meal_type, 1)
         }
 
         db.table("meal_plans").update({"meals": meals}).eq("id", meal_plan_id).execute()
@@ -838,7 +1055,7 @@ async def fill_remaining_with_ai(
 
         # Find empty slots
         empty_slots = []
-        meal_types = ["breakfast", "lunch", "dinner"]
+        meal_types = ["breakfast", "snack", "lunch", "dinner"]
 
         for day in selected_days:
             day_meals = meals.get(day, {})
@@ -896,7 +1113,7 @@ async def fill_remaining_with_ai(
                     "recipe_id": new_recipe_id,
                     "is_repeat": False,
                     "original_day": None,
-                    "order": {"breakfast": 1, "lunch": 2, "dinner": 3, "snack": 2}.get(meal_type, 1)
+                    "order": {"breakfast": 1, "snack": 2, "lunch": 3, "dinner": 4}.get(meal_type, 1)
                 }
                 filled_count += 1
 
@@ -1019,7 +1236,7 @@ async def get_meal_plan_macro_summary(
             day_meals = meals.get(day, {})
             day_recipes = []
 
-            for meal_type in ["breakfast", "lunch", "dinner"]:
+            for meal_type in ["breakfast", "snack", "lunch", "dinner"]:
                 meal_data = day_meals.get(meal_type)
                 if meal_data:
                     # Handle old format (string) and new format (object with recipe_id)
