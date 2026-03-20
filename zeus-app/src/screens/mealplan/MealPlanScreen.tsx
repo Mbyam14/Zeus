@@ -25,6 +25,9 @@ import {
 } from '../../types/mealplan';
 import { useThemeStore } from '../../store/themeStore';
 import { useDataStore } from '../../store/dataStore';
+import { MealPlanSkeleton } from '../../components/SkeletonLoader';
+import { EmptyState } from '../../components/EmptyState';
+import { ErrorBanner } from '../../components/ErrorBanner';
 
 interface MealPlanScreenProps {
   navigation: any;
@@ -568,10 +571,10 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
   if (loading) {
     return (
       <View style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={styles.loadingText}>Loading meal plan...</Text>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Meal Plan</Text>
         </View>
+        <MealPlanSkeleton />
       </View>
     );
   }
@@ -605,15 +608,15 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
             <Text style={styles.weekNavArrow}>›</Text>
           </TouchableOpacity>
         </View>
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyIcon}>📅</Text>
-          <Text style={styles.emptyTitle}>No Meal Plan</Text>
-          <Text style={styles.emptyDescription}>
-            {weekOffset === 0
-              ? 'Tap + to create a personalized meal plan'
-              : `No meal plan for ${getWeekLabel().toLowerCase()}. Tap + to create one!`}
-          </Text>
-        </View>
+        <EmptyState
+          icon="calendar-outline"
+          title="No Meal Plan"
+          description={weekOffset === 0
+            ? 'Create a personalized meal plan powered by AI that fits your dietary needs and preferences.'
+            : `No meal plan for ${getWeekLabel().toLowerCase()}. Create one to stay on track!`}
+          actionLabel="Create Meal Plan"
+          onAction={() => navigation.navigate('DaySelection', { weekOffset })}
+        />
       </View>
     );
   }

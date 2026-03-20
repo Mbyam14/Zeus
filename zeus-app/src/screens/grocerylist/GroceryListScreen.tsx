@@ -37,6 +37,8 @@ import {
   CATEGORY_COLORS,
 } from '../../types/grocerylist';
 import { useThemeStore } from '../../store/themeStore';
+import { GroceryItemSkeleton } from '../../components/SkeletonLoader';
+import { EmptyState } from '../../components/EmptyState';
 
 export const GroceryListScreen: React.FC = () => {
   const { colors } = useThemeStore();
@@ -223,9 +225,8 @@ export const GroceryListScreen: React.FC = () => {
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Grocery List</Text>
         </View>
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-        </View>
+        <GroceryItemSkeleton />
+        <GroceryItemSkeleton />
       </View>
     );
   }
@@ -237,40 +238,22 @@ export const GroceryListScreen: React.FC = () => {
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Grocery List</Text>
         </View>
-        <View style={styles.emptyContainer}>
-          <View style={styles.emptyIconCircle}>
-            <Ionicons name="cart-outline" size={48} color={colors.primary} />
-          </View>
-          {!mealPlanId ? (
-            <>
-              <Text style={styles.emptyTitle}>No Meal Plan</Text>
-              <Text style={styles.emptyText}>
-                Create a meal plan first, then come back to generate your shopping list.
-              </Text>
-            </>
-          ) : (
-            <>
-              <Text style={styles.emptyTitle}>Ready to Shop?</Text>
-              <Text style={styles.emptyText}>
-                Generate a grocery list from your meal plan with smart pantry matching.
-              </Text>
-              <TouchableOpacity
-                style={styles.generateButton}
-                onPress={handleGenerateList}
-                disabled={generating}
-              >
-                {generating ? (
-                  <ActivityIndicator size="small" color={colors.buttonText} />
-                ) : (
-                  <Ionicons name="sparkles" size={18} color={colors.buttonText} />
-                )}
-                <Text style={styles.generateButtonText}>
-                  {generating ? 'Generating...' : 'Generate List'}
-                </Text>
-              </TouchableOpacity>
-            </>
-          )}
-        </View>
+        {!mealPlanId ? (
+          <EmptyState
+            icon="calendar-outline"
+            title="No Meal Plan Yet"
+            description="Create a meal plan first, then come back to generate your smart shopping list."
+            actionLabel="Go to Meal Plans"
+          />
+        ) : (
+          <EmptyState
+            icon="cart-outline"
+            title="Ready to Shop?"
+            description="Generate a grocery list from your meal plan with smart pantry matching — we'll check what you already have."
+            actionLabel={generating ? 'Generating...' : 'Generate List'}
+            onAction={generating ? undefined : handleGenerateList}
+          />
+        )}
       </View>
     );
   }

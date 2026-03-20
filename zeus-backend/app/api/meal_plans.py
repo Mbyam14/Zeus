@@ -6,6 +6,7 @@ from app.services.ai_service import ai_service
 from app.services.nutrition_service import nutrition_service
 from app.services.meal_assignment_service import meal_assignment_service
 from app.services.recipe_shortlist_service import recipe_shortlist_service
+from app.services.analytics_service import analytics
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 import logging
@@ -195,10 +196,12 @@ async def generate_meal_plan(
         }
         result = db.table("meal_plans").insert(meal_plan_record).execute()
 
-        logger.info(f"Successfully created hybrid meal plan {result.data[0]['id']} with {len(saved_recipes)} days")
+        plan_id = result.data[0]["id"]
+        logger.info(f"Successfully created hybrid meal plan {plan_id} with {len(saved_recipes)} days")
+        analytics.track("meal_plan_generated", current_user.id, {"plan_id": plan_id, "days": len(normalized_days)})
 
         return {
-            "meal_plan_id": result.data[0]["id"],
+            "meal_plan_id": plan_id,
             "selected_days": normalized_days,
             "meals": saved_recipes,
             "summary": {},
@@ -416,7 +419,8 @@ async def optimize_meal_plan_calories(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to optimize meal plan: {e}")
+        import traceback
+        logger.error(f"Failed to optimize meal plan: {e}\n{traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to optimize meal plan: {str(e)}"

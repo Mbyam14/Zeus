@@ -19,7 +19,11 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import { PantryItem, PantryCategory, PantryItemCreate, IngredientLibraryItem, DetectedPantryItem } from '../../types/pantry';
 import { pantryService } from '../../services/pantryService';
+import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../store/themeStore';
+import { PantryItemSkeleton } from '../../components/SkeletonLoader';
+import { EmptyState } from '../../components/EmptyState';
+import { smartAIService, CookTonightResult } from '../../services/smartAIService';
 
 const CATEGORIES: PantryCategory[] = [
   'Produce', 'Dairy', 'Protein', 'Grains', 'Spices', 'Condiments', 'Beverages', 'Frozen', 'Canned & Jarred', 'Baking', 'Oils & Vinegars', 'Snacks', 'Other'
@@ -167,6 +171,25 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [expiringItems, setExpiringItems] = useState<PantryItem[]>([]);
   const [showExpiringBanner, setShowExpiringBanner] = useState(false);
+
+  // Cook Tonight
+  const [cookTonightModal, setCookTonightModal] = useState(false);
+  const [cookTonightLoading, setCookTonightLoading] = useState(false);
+  const [cookTonightResult, setCookTonightResult] = useState<CookTonightResult | null>(null);
+
+  const handleCookTonight = async () => {
+    setCookTonightModal(true);
+    setCookTonightLoading(true);
+    setCookTonightResult(null);
+    try {
+      const result = await smartAIService.getCookTonightSuggestion(30);
+      setCookTonightResult(result);
+    } catch {
+      setCookTonightResult({ suggestion: null, message: 'Failed to get suggestion. Try again.' });
+    } finally {
+      setCookTonightLoading(false);
+    }
+  };
 
   useEffect(() => {
     loadPantryItems();
@@ -662,11 +685,13 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
   );
 
   const renderEmptyState = () => (
-    <View style={styles.emptyState}>
-      <Text style={styles.emptyIcon}>🥘</Text>
-      <Text style={styles.emptyTitle}>No Pantry Items</Text>
-      <Text style={styles.emptyText}>Tap the + button in the top right to add your first item!</Text>
-    </View>
+    <EmptyState
+      icon="cube-outline"
+      title="Your Pantry is Empty"
+      description="Add items to your pantry so Zeus can suggest recipes based on what you have and build smarter grocery lists."
+      actionLabel="Add Items"
+      onAction={() => setShowAddDropdown(true)}
+    />
   );
 
   return (
@@ -884,9 +909,7 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
       )}
 
       {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-        </View>
+        <PantryItemSkeleton />
       ) : pantryItems.length === 0 ? (
         renderEmptyState()
       ) : (
@@ -1275,6 +1298,106 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
           )}
 
         </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Cook Tonight FAB */}
+      {pantryItems.length > 0 && !selectionMode && (
+        <TouchableOpacity
+          style={{
+            position: 'absolute', bottom: 24, right: 20,
+            backgroundColor: colors.primary, borderRadius: 28,
+            paddingHorizontal: 20, paddingVertical: 14,
+            flexDirection: 'row', alignItems: 'center', gap: 8,
+            shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.25, shadowRadius: 8, elevation: 6,
+          }}
+          onPress={handleCookTonight}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="sparkles" size={20} color="#FFF" />
+          <Text style={{ color: '#FFF', fontSize: 15, fontWeight: '700' }}>Cook Tonight</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* Cook Tonight Modal */}
+      <Modal visible={cookTonightModal} transparent animationType="slide" onRequestClose={() => setCookTonightModal(false)}>
+        <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' }}>
+          <View style={{ backgroundColor: colors.background, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '75%' }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="sparkles" size={22} color={colors.primary} />
+                <Text style={{ fontSize: 20, fontWeight: '700', color: colors.text }}>Cook Tonight</Text>
+              </View>
+              <TouchableOpacity onPress={() => setCookTonightModal(false)}>
+                <Ionicons name="close" size={24} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            {cookTonightLoading ? (
+              <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+                <ActivityIndicator size="large" color={colors.primary} />
+                <Text style={{ marginTop: 14, color: colors.textMuted, fontSize: 15 }}>Finding the perfect recipe...</Text>
+                <Text style={{ marginTop: 6, color: colors.textMuted, fontSize: 13 }}>Based on your pantry and what's expiring</Text>
+              </View>
+            ) : cookTonightResult?.suggestion ? (
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <Text style={{ fontSize: 22, fontWeight: '700', color: colors.text, marginBottom: 6 }}>
+                  {cookTonightResult.suggestion.recipe_title}
+                </Text>
+                <Text style={{ fontSize: 14, color: colors.primary, marginBottom: 12, lineHeight: 20 }}>
+                  {cookTonightResult.suggestion.why}
+                </Text>
+
+                <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
+                  {cookTonightResult.suggestion.prep_time_minutes && (
+                    <View style={{ backgroundColor: colors.backgroundSecondary, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <Ionicons name="time-outline" size={16} color={colors.textMuted} />
+                      <Text style={{ fontSize: 13, color: colors.text, fontWeight: '500' }}>{cookTonightResult.suggestion.prep_time_minutes} min</Text>
+                    </View>
+                  )}
+                  {cookTonightResult.suggestion.calories_estimate && (
+                    <View style={{ backgroundColor: colors.backgroundSecondary, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <Ionicons name="flame-outline" size={16} color={colors.textMuted} />
+                      <Text style={{ fontSize: 13, color: colors.text, fontWeight: '500' }}>{cookTonightResult.suggestion.calories_estimate} cal</Text>
+                    </View>
+                  )}
+                </View>
+
+                {cookTonightResult.suggestion.pantry_items_used?.length > 0 && (
+                  <View style={{ marginBottom: 14 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: colors.text, marginBottom: 6 }}>From your pantry:</Text>
+                    <Text style={{ fontSize: 14, color: colors.textSecondary }}>{cookTonightResult.suggestion.pantry_items_used.join(', ')}</Text>
+                  </View>
+                )}
+
+                {cookTonightResult.suggestion.items_to_buy?.length > 0 && (
+                  <View style={{ marginBottom: 14 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: colors.text, marginBottom: 6 }}>You'll need:</Text>
+                    <Text style={{ fontSize: 14, color: colors.error }}>{cookTonightResult.suggestion.items_to_buy.join(', ')}</Text>
+                  </View>
+                )}
+
+                {cookTonightResult.suggestion.quick_instructions?.length > 0 && (
+                  <View style={{ marginBottom: 14 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: colors.text, marginBottom: 8 }}>Quick steps:</Text>
+                    {cookTonightResult.suggestion.quick_instructions.map((step, i) => (
+                      <View key={i} style={{ flexDirection: 'row', marginBottom: 8, gap: 8 }}>
+                        <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center' }}>
+                          <Text style={{ color: '#FFF', fontSize: 12, fontWeight: '700' }}>{i + 1}</Text>
+                        </View>
+                        <Text style={{ flex: 1, fontSize: 14, lineHeight: 20, color: colors.text }}>{step}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </ScrollView>
+            ) : (
+              <Text style={{ color: colors.textMuted, textAlign: 'center', paddingVertical: 20, fontSize: 15 }}>
+                {cookTonightResult?.message || 'Add items to your pantry to get suggestions!'}
+              </Text>
+            )}
+          </View>
+        </View>
       </Modal>
     </View>
   );

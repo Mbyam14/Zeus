@@ -14,9 +14,12 @@ import {
   Share,
   Alert,
   Clipboard,
+  ActivityIndicator,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Recipe, Ingredient } from '../../types/recipe';
 import { recipeService } from '../../services/recipeService';
+import { smartAIService } from '../../services/smartAIService';
 import { useThemeStore } from '../../store/themeStore';
 import { useAuthStore } from '../../store/authStore';
 import { getDifficultyColor } from '../../utils/colors';
@@ -137,6 +140,32 @@ export const RecipeDetailScreen: React.FC<RecipeDetailScreenProps> = ({
   const [cookingMode, setCookingMode] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
   const [showIngredients, setShowIngredients] = useState(false);
+
+  // Smart AI state
+  const [substitutionModal, setSubstitutionModal] = useState<{ ingredient: string; loading: boolean; result: any } | null>(null);
+  const [cookingTip, setCookingTip] = useState<{ loading: boolean; tip: string | null }>({ loading: false, tip: null });
+
+  const handleSubstitution = async (ingredientName: string) => {
+    setSubstitutionModal({ ingredient: ingredientName, loading: true, result: null });
+    try {
+      const result = await smartAIService.getSubstitution(recipe.id, ingredientName);
+      setSubstitutionModal({ ingredient: ingredientName, loading: false, result });
+    } catch {
+      setSubstitutionModal({ ingredient: ingredientName, loading: false, result: { error: 'Failed to get substitutions. Try again.' } });
+    }
+  };
+
+  const handleCookingTip = async () => {
+    const step = scaledInstructions?.[currentStep];
+    if (!step) return;
+    setCookingTip({ loading: true, tip: null });
+    try {
+      const result = await smartAIService.getCookingTip(recipe.title, step.step, step.instruction);
+      setCookingTip({ loading: false, tip: result.tip });
+    } catch {
+      setCookingTip({ loading: false, tip: 'Sorry, I couldn\'t get a tip right now.' });
+    }
+  };
 
   // Use ref to track current step for panResponder (avoids stale closure)
   const currentStepRef = useRef(currentStep);
@@ -495,9 +524,16 @@ Shared from Zeus - Your AI Meal Planner`;
                     )}
                     <View style={styles.ingredientItem}>
                       <View style={styles.ingredientBullet} />
-                      <Text style={styles.ingredientText}>
+                      <Text style={[styles.ingredientText, { flex: 1 }]}>
                         {formatIngredient(ingredient)}
                       </Text>
+                      <TouchableOpacity
+                        onPress={() => handleSubstitution(ingredient.name)}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        style={{ paddingLeft: 8 }}
+                      >
+                        <Ionicons name="swap-horizontal-outline" size={18} color={colors.textMuted} />
+                      </TouchableOpacity>
                     </View>
                   </View>
                 );
@@ -687,7 +723,34 @@ Shared from Zeus - Your AI Meal Planner`;
               </ScrollView>
             </View>
 
-            {/* Swipe Hint */}
+            {/* AI Cooking Tip */}
+            {cookingTip.tip && (
+              <View style={{ backgroundColor: colors.primary + '10', borderRadius: 12, padding: 14, marginTop: 12, marginHorizontal: 16 }}>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: colors.primary, marginBottom: 6 }}>AI Tip</Text>
+                <Text style={{ fontSize: 14, lineHeight: 21, color: colors.text }}>{cookingTip.tip}</Text>
+                <TouchableOpacity onPress={() => setCookingTip({ loading: false, tip: null })} style={{ alignSelf: 'flex-end', marginTop: 6 }}>
+                  <Text style={{ fontSize: 12, color: colors.textMuted }}>Dismiss</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Ask AI + Swipe Hint */}
+            <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 16, marginTop: 8 }}>
+              <TouchableOpacity
+                onPress={handleCookingTip}
+                disabled={cookingTip.loading}
+                style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colors.primary + '15', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, gap: 6 }}
+              >
+                {cookingTip.loading ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Ionicons name="sparkles" size={16} color={colors.primary} />
+                )}
+                <Text style={{ fontSize: 13, fontWeight: '600', color: colors.primary }}>
+                  {cookingTip.loading ? 'Thinking...' : 'Help with this step'}
+                </Text>
+              </TouchableOpacity>
+            </View>
             <Text style={styles.swipeHint}>Swipe left or right to navigate</Text>
           </Animated.View>
 
@@ -761,6 +824,49 @@ Shared from Zeus - Your AI Meal Planner`;
               </View>
             </View>
           )}
+        </View>
+      </Modal>
+      {/* Substitution Modal */}
+      <Modal
+        visible={!!substitutionModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setSubstitutionModal(null)}
+      >
+        <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' }}>
+          <View style={{ backgroundColor: colors.background, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '60%' }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <Text style={{ fontSize: 18, fontWeight: '700', color: colors.text }}>
+                Substitute: {substitutionModal?.ingredient}
+              </Text>
+              <TouchableOpacity onPress={() => setSubstitutionModal(null)}>
+                <Ionicons name="close" size={24} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            {substitutionModal?.loading ? (
+              <View style={{ alignItems: 'center', paddingVertical: 30 }}>
+                <ActivityIndicator size="large" color={colors.primary} />
+                <Text style={{ marginTop: 12, color: colors.textMuted }}>Finding substitutions...</Text>
+              </View>
+            ) : substitutionModal?.result?.error ? (
+              <Text style={{ color: colors.error, textAlign: 'center', paddingVertical: 20 }}>
+                {substitutionModal.result.error}
+              </Text>
+            ) : (
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {(substitutionModal?.result?.substitutions || []).map((sub: any, i: number) => (
+                  <View key={i} style={{ backgroundColor: colors.backgroundSecondary, borderRadius: 12, padding: 14, marginBottom: 10 }}>
+                    <Text style={{ fontSize: 16, fontWeight: '600', color: colors.primary, marginBottom: 4 }}>
+                      {sub.substitute} {sub.quantity ? `(${sub.quantity})` : ''}
+                    </Text>
+                    {sub.impact ? <Text style={{ fontSize: 14, color: colors.text, marginBottom: 4 }}>{sub.impact}</Text> : null}
+                    {sub.adjustments ? <Text style={{ fontSize: 13, color: colors.textMuted, fontStyle: 'italic' }}>{sub.adjustments}</Text> : null}
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+          </View>
         </View>
       </Modal>
     </SafeAreaView>

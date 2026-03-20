@@ -1,18 +1,15 @@
-import axios from 'axios';
+import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import * as SecureStore from 'expo-secure-store';
 import { config } from '../../config';
 
-// Base URL for your Zeus backend (configured in config.ts)
 const BASE_URL = config.API_BASE_URL;
 
 const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 15000, // 15 second default timeout
+  timeout: 15000,
   headers: {
     'Content-Type': 'application/json',
   },
-  // Custom params serializer to handle arrays in FastAPI-compatible format
-  // Converts selected_days: ['monday', 'tuesday'] to selected_days=monday&selected_days=tuesday
   paramsSerializer: {
     serialize: (params) => {
       const parts: string[] = [];
@@ -30,6 +27,19 @@ const api = axios.create({
   },
 });
 
+// Track refresh state to prevent concurrent refresh attempts
+let isRefreshing = false;
+let refreshSubscribers: Array<(token: string) => void> = [];
+
+function onRefreshed(token: string) {
+  refreshSubscribers.forEach((cb) => cb(token));
+  refreshSubscribers = [];
+}
+
+function addRefreshSubscriber(cb: (token: string) => void) {
+  refreshSubscribers.push(cb);
+}
+
 // Request interceptor to add auth token
 api.interceptors.request.use(
   async (config) => {
@@ -44,31 +54,82 @@ api.interceptors.request.use(
   }
 );
 
-// Response interceptor to handle auth errors and retry on failures
+// Response interceptor with token refresh
 api.interceptors.response.use(
   (response) => response,
-  async (error) => {
-    const config = error.config;
+  async (error: AxiosError) => {
+    const originalRequest = error.config as InternalAxiosRequestConfig & { _retryCount?: number; _isRetry?: boolean };
+    if (!originalRequest) return Promise.reject(error);
 
-    // Handle 401 - token expired
-    if (error.response?.status === 401) {
-      await SecureStore.deleteItemAsync('auth_token');
-      return Promise.reject(error);
+    // Handle 401 - try refresh token
+    if (error.response?.status === 401 && !originalRequest._isRetry) {
+      // Don't try to refresh if this IS the refresh request
+      if (originalRequest.url?.includes('/auth/refresh')) {
+        await SecureStore.deleteItemAsync('auth_token');
+        await SecureStore.deleteItemAsync('refresh_token');
+        return Promise.reject(error);
+      }
+
+      if (isRefreshing) {
+        // Wait for the ongoing refresh to complete
+        return new Promise((resolve) => {
+          addRefreshSubscriber((newToken: string) => {
+            originalRequest.headers.Authorization = `Bearer ${newToken}`;
+            originalRequest._isRetry = true;
+            resolve(api(originalRequest));
+          });
+        });
+      }
+
+      isRefreshing = true;
+      originalRequest._isRetry = true;
+
+      try {
+        const refreshToken = await SecureStore.getItemAsync('refresh_token');
+        if (!refreshToken) {
+          throw new Error('No refresh token');
+        }
+
+        const response = await axios.post(`${BASE_URL}/api/auth/refresh`, {
+          refresh_token: refreshToken,
+        });
+
+        const { access_token, refresh_token: newRefreshToken } = response.data;
+
+        await SecureStore.setItemAsync('auth_token', access_token);
+        if (newRefreshToken) {
+          await SecureStore.setItemAsync('refresh_token', newRefreshToken);
+        }
+
+        isRefreshing = false;
+        onRefreshed(access_token);
+
+        // Retry original request with new token
+        originalRequest.headers.Authorization = `Bearer ${access_token}`;
+        return api(originalRequest);
+      } catch (refreshError) {
+        isRefreshing = false;
+        refreshSubscribers = [];
+        // Refresh failed — clear tokens and force re-login
+        await SecureStore.deleteItemAsync('auth_token');
+        await SecureStore.deleteItemAsync('refresh_token');
+        return Promise.reject(error);
+      }
     }
 
     // Retry logic: retry up to 2x on network errors and 5xx responses
-    if (!config._retryCount) config._retryCount = 0;
+    if (!originalRequest._retryCount) originalRequest._retryCount = 0;
     const isRetryable =
       error.code === 'ECONNABORTED' ||
       error.code === 'ERR_NETWORK' ||
       (!error.response && error.message === 'Network Error') ||
-      (error.response?.status >= 500 && error.response?.status < 600);
+      (error.response && error.response.status >= 500 && error.response.status < 600);
 
-    if (config._retryCount < 2 && isRetryable) {
-      config._retryCount++;
-      const delay = 1000 * Math.pow(2, config._retryCount - 1); // 1s, 2s
+    if (originalRequest._retryCount < 2 && isRetryable) {
+      originalRequest._retryCount++;
+      const delay = 1000 * Math.pow(2, originalRequest._retryCount - 1);
       await new Promise((resolve) => setTimeout(resolve, delay));
-      return api(config);
+      return api(originalRequest);
     }
 
     return Promise.reject(error);

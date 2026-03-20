@@ -7,6 +7,8 @@ from app.schemas.recipe import (
 from app.schemas.user import UserResponse
 from app.services.recipe_service import recipe_service
 from app.services.s3_service import s3_service
+from app.services.cache_service import cache, make_cache_key, hash_dict, TTL_RECIPE_FEED, TTL_RECIPE
+from app.services.analytics_service import analytics
 from app.utils.dependencies import get_current_active_user, get_current_user_optional
 
 router = APIRouter(prefix="/api/recipes", tags=["Recipes"])
@@ -22,7 +24,10 @@ async def create_recipe(
 
     Requires authentication. The recipe will be associated with the current user.
     """
-    return await recipe_service.create_recipe(recipe_data, current_user.id)
+    result = await recipe_service.create_recipe(recipe_data, current_user.id)
+    analytics.track("recipe_created", current_user.id, {"recipe_id": result.id})
+    cache.invalidate_pattern("feed:")
+    return result
 
 
 @router.get("/feed", response_model=List[RecipeResponse])
@@ -60,7 +65,20 @@ async def get_recipe_feed(
     )
     
     user_id = current_user.id if current_user else None
-    return await recipe_service.get_recipe_feed(filters, user_id)
+
+    # Cache anonymous feed queries (user-specific feeds have likes/saves so skip cache)
+    if not user_id and not use_pantry_items:
+        cache_key = make_cache_key("feed", hash_dict(filters.dict()))
+        cached = cache.get(cache_key, TTL_RECIPE_FEED)
+        if cached:
+            return cached
+
+    result = await recipe_service.get_recipe_feed(filters, user_id)
+
+    if not user_id and not use_pantry_items:
+        cache.set(cache_key, result, TTL_RECIPE_FEED)
+
+    return result
 
 
 @router.get("/saved/my", response_model=List[RecipeResponse])

@@ -28,6 +28,8 @@ import { useAuthStore } from '../../store/authStore';
 import { getDifficultyColor } from '../../utils/colors';
 import { PantryItem } from '../../types/pantry';
 import { aiService, AskAIResponse } from '../../services/aiService';
+import { RecipeCardSkeleton } from '../../components/SkeletonLoader';
+import { EmptyState } from '../../components/EmptyState';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -441,9 +443,9 @@ const DiscoverTab: React.FC<{
 
   if (loading) {
     return (
-      <View style={styles.centerContainer}>
+      <View style={[styles.centerContainer, { justifyContent: 'flex-start', paddingTop: 60 }]}>
         <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={styles.loadingText}>Loading recipes...</Text>
+        <Text style={styles.loadingText}>Finding recipes for you...</Text>
       </View>
     );
   }
@@ -843,17 +845,17 @@ const BrowseTab: React.FC<{
 
       {/* Recipe Grid */}
       {loading && recipes.length === 0 ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', padding: 8, gap: 8 }}>
+          {[1,2,3,4,5,6].map(i => <View key={i} style={{ width: '48%' }}><RecipeCardSkeleton /></View>)}
         </View>
       ) : recipes.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyIcon}>📭</Text>
-          <Text style={styles.emptyText}>No recipes found</Text>
-          <Text style={styles.emptySubtext}>
-            {searchQuery ? 'Try a different search term' : 'Recipes will appear here as they are added'}
-          </Text>
-        </View>
+        <EmptyState
+          icon="search-outline"
+          title="No Recipes Found"
+          description={searchQuery ? 'Try a different search term or adjust your filters' : 'Recipes will appear here as they are added'}
+          actionLabel={searchQuery ? 'Clear Search' : undefined}
+          onAction={searchQuery ? () => setSearchQuery('') : undefined}
+        />
       ) : (
         <FlatList
           data={recipes}
@@ -1134,34 +1136,22 @@ const MyRecipesTab: React.FC<{
 
       {/* Recipe Grid */}
       {loading && recipes.length === 0 ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', padding: 8, gap: 8 }}>
+          {[1,2,3,4].map(i => <View key={i} style={{ width: '48%' }}><RecipeCardSkeleton /></View>)}
         </View>
       ) : filteredRecipes.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          {searchQuery.trim() ? (
-            <>
-              <Text style={styles.emptyIcon}>🔍</Text>
-              <Text style={styles.emptyTitle}>No results found</Text>
-              <Text style={styles.emptySubtitle}>Try a different search term</Text>
-            </>
-          ) : (
-            <>
-              <Text style={styles.emptyIcon}>
-                {subTab === 'liked' ? '❤️' : subTab === 'saved' ? '📌' : '📖'}
-              </Text>
-              <Text style={styles.emptyTitle}>
-                {subTab === 'liked' ? 'No Liked Recipes' :
+        <EmptyState
+          icon={searchQuery.trim() ? 'search-outline' :
+                subTab === 'liked' ? 'heart-outline' :
+                subTab === 'saved' ? 'bookmark-outline' : 'book-outline'}
+          title={searchQuery.trim() ? 'No Results Found' :
+                 subTab === 'liked' ? 'No Liked Recipes' :
                  subTab === 'saved' ? 'No Saved Recipes' : 'No Recipes Created'}
-              </Text>
-              <Text style={styles.emptySubtitle}>
-                {subTab === 'liked' ? 'Like recipes from Discover to see them here' :
-                 subTab === 'saved' ? 'Save recipes from Discover to find them here' :
-                 'Tap the + button to create your first recipe!'}
-              </Text>
-            </>
-          )}
-        </View>
+          description={searchQuery.trim() ? 'Try a different search term' :
+                       subTab === 'liked' ? 'Swipe right on recipes in Discover to like them' :
+                       subTab === 'saved' ? 'Swipe up on recipes in Discover to save them' :
+                       'Create your own recipes and they\'ll show up here'}
+        />
       ) : (
         <FlatList
           data={filteredRecipes}

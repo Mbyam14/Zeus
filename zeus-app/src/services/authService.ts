@@ -6,25 +6,32 @@ class AuthService {
   async register(data: RegisterRequest): Promise<AuthToken> {
     const response = await api.post<AuthToken>('/api/auth/register', data);
     const authToken = response.data;
-    
-    // Store token securely
+
+    // Store tokens securely
     await SecureStore.setItemAsync('auth_token', authToken.access_token);
-    
+    if (authToken.refresh_token) {
+      await SecureStore.setItemAsync('refresh_token', authToken.refresh_token);
+    }
+
     return authToken;
   }
 
   async login(data: LoginRequest): Promise<AuthToken> {
     const response = await api.post<AuthToken>('/api/auth/login', data);
     const authToken = response.data;
-    
-    // Store token securely
+
+    // Store tokens securely
     await SecureStore.setItemAsync('auth_token', authToken.access_token);
-    
+    if (authToken.refresh_token) {
+      await SecureStore.setItemAsync('refresh_token', authToken.refresh_token);
+    }
+
     return authToken;
   }
 
   async logout(): Promise<void> {
     await SecureStore.deleteItemAsync('auth_token');
+    await SecureStore.deleteItemAsync('refresh_token');
   }
 
   async getCurrentUser(): Promise<User> {
