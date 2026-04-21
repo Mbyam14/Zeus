@@ -6,7 +6,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from app.config import settings
-from app.api import auth, recipes, ai, pantry, users, meal_plans, grocery_lists, instacart, tasks, analytics
+from app.api import auth, recipes, ai, pantry, users, meal_plans, grocery_lists, instacart, tasks, analytics, chat
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ limiter = Limiter(
 app = FastAPI(
     title=settings.app_name,
     description="Zeus - AI-Powered Meal Planning Application",
-    version="1.1.0",
+    version="1.2.0",
     debug=settings.debug,
     docs_url="/docs" if not settings.is_production else None,
     redoc_url="/redoc" if not settings.is_production else None,
@@ -100,7 +100,7 @@ async def rate_limit_sensitive_routes(request: Request, call_next):
 
 # --- API Versioning ---
 # Mount all routers under both /api/ (backward compat) and /api/v1/
-for router_module in [auth, recipes, ai, pantry, users, meal_plans, grocery_lists, instacart, tasks, analytics]:
+for router_module in [auth, recipes, ai, pantry, users, meal_plans, grocery_lists, instacart, tasks, analytics, chat]:
     # Original /api/ prefix (already in each router)
     app.include_router(router_module.router)
 
@@ -111,7 +111,7 @@ for router_module in [auth, recipes, ai, pantry, users, meal_plans, grocery_list
 # --- Root endpoints ---
 @app.get("/")
 async def root():
-    return {"message": "Welcome to Zeus API", "version": "1.1.0"}
+    return {"message": "Welcome to Zeus API", "version": "1.2.0"}
 
 
 @app.get("/health")

@@ -18,6 +18,7 @@ import { UserPreferences } from '../../types/user';
 import { userService } from '../../services/userService';
 import { useThemeStore } from '../../store/themeStore';
 import { useAuthStore } from '../../store/authStore';
+import { useOnboardingStore } from '../../store/onboardingStore';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const TOTAL_STEPS = 5;
@@ -62,6 +63,7 @@ interface PreferencesSetupScreenProps {
 export const PreferencesSetupScreen: React.FC<PreferencesSetupScreenProps> = ({ navigation }) => {
   const { colors } = useThemeStore();
   const { setSetupCompleted, user } = useAuthStore();
+  const startOnboarding = useOnboardingStore((s) => s.startOnboarding);
   const styles = createStyles(colors);
   const [loading, setLoading] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
@@ -131,10 +133,12 @@ export const PreferencesSetupScreen: React.FC<PreferencesSetupScreenProps> = ({ 
         ...preferences,
         household_size: preferences.household_size || 2,
       });
+      startOnboarding();
       setSetupCompleted();
     } catch (error) {
       console.error('Failed to save preferences:', error);
       Alert.alert('Error', 'Failed to save preferences. You can update them later in your profile.');
+      startOnboarding();
       setSetupCompleted();
     } finally {
       setLoading(false);
@@ -142,6 +146,7 @@ export const PreferencesSetupScreen: React.FC<PreferencesSetupScreenProps> = ({ 
   };
 
   const handleSkip = () => {
+    startOnboarding();
     setSetupCompleted();
   };
 

@@ -72,13 +72,15 @@ class RecipeService {
     offset = 0,
     search?: string,
     mealType?: string,
-    dietaryTags?: string[]
+    dietaryTags?: string[],
+    cuisineType?: string
   ): Promise<Recipe[]> {
     const params = new URLSearchParams();
     params.append('limit', limit.toString());
     params.append('offset', offset.toString());
     if (search) params.append('search', search);
     if (mealType) params.append('meal_type', mealType);
+    if (cuisineType) params.append('cuisine_type', cuisineType);
     if (dietaryTags) {
       dietaryTags.forEach(tag => params.append('dietary_tags', tag));
     }

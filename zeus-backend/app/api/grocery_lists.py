@@ -64,7 +64,7 @@ async def generate_grocery_list(
         household_size = None
         try:
             db = get_database()
-            profile_result = db.table("profiles").select("profile_data").eq("id", current_user.id).execute()
+            profile_result = db.table("users").select("profile_data").eq("id", current_user.id).execute()
             if profile_result.data:
                 profile_data = profile_result.data[0].get("profile_data") or {}
                 preferences = profile_data.get("preferences") or {}

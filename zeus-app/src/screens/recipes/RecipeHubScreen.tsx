@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,1387 +8,824 @@ import {
   TextInput,
   ActivityIndicator,
   Image,
-  Animated,
-  Dimensions,
-  Alert,
   ScrollView,
   Platform,
+  Dimensions,
   RefreshControl,
   Modal,
-  KeyboardAvoidingView,
-  Keyboard,
 } from 'react-native';
-import { PanGestureHandler, State, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Recipe } from '../../types/recipe';
 import { recipeService } from '../../services/recipeService';
-import { pantryService } from '../../services/pantryService';
+import { smartAIService, CookTonightResult } from '../../services/smartAIService';
 import { useThemeStore, ThemeColors } from '../../store/themeStore';
-import { useAuthStore } from '../../store/authStore';
-import { getDifficultyColor } from '../../utils/colors';
-import { PantryItem } from '../../types/pantry';
-import { aiService, AskAIResponse } from '../../services/aiService';
-import { RecipeCardSkeleton } from '../../components/SkeletonLoader';
-import { EmptyState } from '../../components/EmptyState';
+import { useDataStore } from '../../store/dataStore';
 
-const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+const { width: screenWidth } = Dimensions.get('window');
 
-type TabMode = 'discover' | 'browse' | 'myrecipes';
-type MyRecipesSubTab = 'created' | 'saved' | 'liked';
+type MainTab = 'browse' | 'myRecipes';
+type MyRecipesTab = 'liked' | 'saved' | 'created';
+type SortOption = 'popular' | 'newest' | 'quick';
 
-// ============================================================
-// DISCOVER TAB - Swipe-based recipe discovery
-// ============================================================
-interface SessionPreferences {
-  likedCuisines: Record<string, number>;
-  likedDifficulties: Record<string, number>;
-  skippedCuisines: Record<string, number>;
-  totalLikes: number;
-  totalSkips: number;
-}
+const MEAL_TYPES = ['All', 'Breakfast', 'Lunch', 'Dinner', 'Snack', 'Dessert'];
+const CUISINES = ['All', 'Italian', 'Mexican', 'Asian', 'Mediterranean', 'American', 'Indian', 'Japanese', 'Thai', 'Korean', 'Greek'];
+const LIMIT = 20;
 
-export interface DiscoverState {
-  recipes: Recipe[];
-  currentIndex: number;
-  hasMore: boolean;
-  offset: number;
-  loaded: boolean;
-  sessionPrefs: SessionPreferences;
-}
-
-const EMPTY_SESSION_PREFS: SessionPreferences = {
-  likedCuisines: {},
-  likedDifficulties: {},
-  skippedCuisines: {},
-  totalLikes: 0,
-  totalSkips: 0,
-};
-
-const DISCOVER_INITIAL: DiscoverState = {
-  recipes: [],
-  currentIndex: 0,
-  hasMore: true,
-  offset: 0,
-  loaded: false,
-  sessionPrefs: { ...EMPTY_SESSION_PREFS },
-};
-
-export interface BrowseState {
-  recipes: Recipe[];
-  hasMore: boolean;
-  offset: number;
-  loaded: boolean;
-}
-
-const BROWSE_INITIAL: BrowseState = {
-  recipes: [],
-  hasMore: true,
-  offset: 0,
-  loaded: false,
-};
-
-export interface MyRecipesState {
-  liked: Recipe[];
-  saved: Recipe[];
-  created: Recipe[];
-  likedLoaded: boolean;
-  savedLoaded: boolean;
-  createdLoaded: boolean;
-}
-
-const MY_RECIPES_INITIAL: MyRecipesState = {
-  liked: [],
-  saved: [],
-  created: [],
-  likedLoaded: false,
-  savedLoaded: false,
-  createdLoaded: false,
-};
-
-/**
- * Score and reorder upcoming recipes based on session swipe behavior.
- * Only reorders recipes AFTER currentIndex to avoid disrupting the user's position.
- * Mixes boosted recipes with others to maintain variety.
- */
-const reorderUpcoming = (recipes: Recipe[], currentIndex: number, prefs: SessionPreferences): Recipe[] => {
-  if (prefs.totalLikes < 3) return recipes; // Need enough signal before reordering
-
-  const seen = recipes.slice(0, currentIndex + 1);
-  const upcoming = [...recipes.slice(currentIndex + 1)];
-
-  // Score each upcoming recipe
-  const scored = upcoming.map(recipe => {
-    let score = 0;
-    const cuisine = recipe.cuisine_type?.toLowerCase() || '';
-    const difficulty = recipe.difficulty?.toLowerCase() || '';
-
-    // Boost cuisines the user likes
-    for (const [liked, count] of Object.entries(prefs.likedCuisines)) {
-      if (cuisine === liked.toLowerCase()) {
-        score += count * 2;
-      }
-    }
-
-    // Slight penalty for cuisines the user skips a lot
-    for (const [skipped, count] of Object.entries(prefs.skippedCuisines)) {
-      if (cuisine === skipped.toLowerCase() && count >= 3) {
-        score -= Math.min(count, 5);
-      }
-    }
-
-    // Boost matching difficulty
-    for (const [liked, count] of Object.entries(prefs.likedDifficulties)) {
-      if (difficulty === liked.toLowerCase()) {
-        score += count;
-      }
-    }
-
-    return { recipe, score };
-  });
-
-  // Sort by score but interleave: take top scored, then one random, repeat
-  // This prevents monotonous runs of the same cuisine
-  scored.sort((a, b) => b.score - a.score);
-
-  const reordered: Recipe[] = [];
-  const boosted = scored.filter(s => s.score > 0);
-  const neutral = scored.filter(s => s.score <= 0);
-  let bIdx = 0;
-  let nIdx = 0;
-
-  while (bIdx < boosted.length || nIdx < neutral.length) {
-    // Add 2 boosted, then 1 neutral for variety
-    for (let i = 0; i < 2 && bIdx < boosted.length; i++) {
-      reordered.push(boosted[bIdx++].recipe);
-    }
-    if (nIdx < neutral.length) {
-      reordered.push(neutral[nIdx++].recipe);
-    }
-  }
-
-  return [...seen, ...reordered];
-};
-
-const DiscoverTab: React.FC<{
+// ─────────────────────────────────────────────────────────────
+// Reusable Recipe Card
+// ─────────────────────────────────────────────────────────────
+const RecipeCard: React.FC<{
+  recipe: Recipe;
+  onPress: () => void;
+  compact?: boolean;
   colors: ThemeColors;
-  onViewRecipe: (recipe: Recipe) => void;
-  dietaryRestrictions: string[];
-  cuisinePreferences: string[];
-  cookingSkill: string;
-  discoverState: DiscoverState;
-  setDiscoverState: React.Dispatch<React.SetStateAction<DiscoverState>>;
-}> = ({ colors, onViewRecipe, dietaryRestrictions, cuisinePreferences, cookingSkill, discoverState, setDiscoverState }) => {
-  const styles = createDiscoverStyles(colors);
-  const [loading, setLoading] = useState(!discoverState.loaded);
-  const [isInteracting, setIsInteracting] = useState(false);
-  const [pantryMode, setPantryMode] = useState(false);
-  const loadingMoreRef = useRef(false);
-  const modeRef = useRef(false); // tracks current pantryMode to detect stale responses
-  const INITIAL_SIZE = 10;
-  const BATCH_SIZE = 50;
-
-  const translateX = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(0)).current;
-  const opacity = useRef(new Animated.Value(1)).current;
-
-  const { recipes, currentIndex, hasMore } = discoverState;
-
-  // Backend handles pantry filtering via use_pantry_items param — no client-side filter needed
-  const filteredRecipes = recipes;
-
-  const currentRecipe = filteredRecipes[currentIndex] || filteredRecipes[0];
-
-  useEffect(() => {
-    if (!discoverState.loaded) {
-      loadRecipes();
-    }
-  }, []);
-
-  // Reload recipes from backend when pantry mode toggles (server-side filtering)
-  useEffect(() => {
-    modeRef.current = pantryMode;
-    if (discoverState.loaded) {
-      loadingMoreRef.current = false; // cancel any in-flight background loads
-      setDiscoverState(prev => ({ ...prev, recipes: [], currentIndex: 0, offset: 0, hasMore: true, loaded: false }));
-      loadRecipes();
-    }
-  }, [pantryMode]);
-
-  const buildFilters = (limit: number, offset: number) => {
-    const filters: any = { limit, offset };
-    if (dietaryRestrictions.length > 0) {
-      filters.dietary_tags = dietaryRestrictions;
-    }
-    if (pantryMode) {
-      filters.use_pantry_items = true;
-    } else {
-      // "For You" mode: pass user preferences for smarter suggestions
-      if (cuisinePreferences.length > 0) {
-        filters.cuisine_preferences = cuisinePreferences;
-      }
-      // Map cooking skill to max difficulty
-      if (cookingSkill === 'beginner') {
-        filters.max_difficulty = 'Easy';
-      } else if (cookingSkill === 'intermediate') {
-        filters.max_difficulty = 'Medium';
-      }
-    }
-    return filters;
-  };
-
-  const loadRecipes = async () => {
-    const requestMode = pantryMode; // capture mode at request time
-    try {
-      setLoading(true);
-      const fetched = await recipeService.getRecipeFeed(buildFilters(INITIAL_SIZE, 0));
-      // Drop response if mode changed while request was in-flight
-      if (modeRef.current !== requestMode) return;
-      setDiscoverState(prev => ({
-        ...prev,
-        recipes: fetched,
-        currentIndex: 0,
-        offset: fetched.length,
-        hasMore: fetched.length >= INITIAL_SIZE,
-        loaded: true,
-      }));
-    } catch (err) {
-      console.error('Error loading discover recipes:', err);
-    } finally {
-      setLoading(false);
-      // Silently load the next batch in the background
-      if (modeRef.current === requestMode) {
-        loadMoreRecipes(true);
-      }
-    }
-  };
-
-  const loadMoreRecipes = async (isInitialBackground = false) => {
-    if (loadingMoreRef.current) return;
-    loadingMoreRef.current = true;
-    const requestMode = pantryMode; // capture mode at request time
-    try {
-      const currentOffset = isInitialBackground ? INITIAL_SIZE : discoverState.offset;
-      const fetched = await recipeService.getRecipeFeed(buildFilters(BATCH_SIZE, currentOffset));
-      // Drop response if mode changed while request was in-flight
-      if (modeRef.current !== requestMode) return;
-      if (fetched.length > 0) {
-        setDiscoverState(prev => {
-          // Deduplicate: only add recipes we haven't seen
-          const existingIds = new Set(prev.recipes.map(r => r.id));
-          const newRecipes = fetched.filter(r => !existingIds.has(r.id));
-          const combined = [...prev.recipes, ...newRecipes];
-          const reordered = prev.sessionPrefs.totalLikes >= 3
-            ? reorderUpcoming(combined, prev.currentIndex, prev.sessionPrefs)
-            : combined;
-          return {
-            ...prev,
-            recipes: reordered,
-            offset: prev.offset + fetched.length,
-            hasMore: fetched.length >= BATCH_SIZE,
-          };
-        });
-      } else {
-        setDiscoverState(prev => ({ ...prev, hasMore: false }));
-      }
-    } catch (err) {
-      console.error('Error loading more discover recipes:', err);
-    } finally {
-      loadingMoreRef.current = false;
-    }
-  };
-
-  const nextRecipe = () => {
-    const nextIdx = currentIndex + 1;
-    if (nextIdx < filteredRecipes.length) {
-      // Pre-fetch more when 10 recipes away from the end (use full list length)
-      if (nextIdx >= recipes.length - 10 && hasMore) {
-        loadMoreRecipes();
-      }
-      // Update index while card is still off-screen, then fade in the new card
-      setDiscoverState(prev => ({ ...prev, currentIndex: nextIdx }));
-      // Reset position off-screen briefly, then animate to center
-      translateX.setValue(0);
-      translateY.setValue(0);
-      opacity.setValue(0);
-      Animated.timing(opacity, {
-        toValue: 1,
-        duration: 150,
-        useNativeDriver: true,
-      }).start(() => setIsInteracting(false));
-    } else if (hasMore) {
-      translateX.setValue(0);
-      translateY.setValue(0);
-      setIsInteracting(false);
-      loadMoreRecipes();
-    } else {
-      setDiscoverState(prev => ({ ...prev, currentIndex: 0 }));
-      translateX.setValue(0);
-      translateY.setValue(0);
-      opacity.setValue(0);
-      Animated.timing(opacity, {
-        toValue: 1,
-        duration: 150,
-        useNativeDriver: true,
-      }).start(() => setIsInteracting(false));
-    }
-  };
-
-  const recordPreference = (recipe: Recipe, action: 'like' | 'skip' | 'save') => {
-    setDiscoverState(prev => {
-      const prefs = { ...prev.sessionPrefs };
-      const cuisine = recipe.cuisine_type || 'Unknown';
-      const difficulty = recipe.difficulty || 'Medium';
-
-      if (action === 'like' || action === 'save') {
-        prefs.likedCuisines = { ...prefs.likedCuisines, [cuisine]: (prefs.likedCuisines[cuisine] || 0) + 1 };
-        prefs.likedDifficulties = { ...prefs.likedDifficulties, [difficulty]: (prefs.likedDifficulties[difficulty] || 0) + 1 };
-        prefs.totalLikes = prefs.totalLikes + 1;
-      } else {
-        prefs.skippedCuisines = { ...prefs.skippedCuisines, [cuisine]: (prefs.skippedCuisines[cuisine] || 0) + 1 };
-        prefs.totalSkips = prefs.totalSkips + 1;
-      }
-
-      // Reorder upcoming recipes every 5 interactions
-      const totalActions = prefs.totalLikes + prefs.totalSkips;
-      if (totalActions >= 3 && totalActions % 5 === 0) {
-        return { ...prev, sessionPrefs: prefs, recipes: reorderUpcoming(prev.recipes, prev.currentIndex, prefs) };
-      }
-
-      return { ...prev, sessionPrefs: prefs };
-    });
-  };
-
-  const handleSwipeLeft = () => {
-    if (isInteracting) return;
-    setIsInteracting(true);
-    if (currentRecipe) {
-      recordPreference(currentRecipe, 'skip');
-    }
-    Animated.timing(translateX, {
-      toValue: -500,
-      duration: 200,
-      useNativeDriver: true,
-    }).start(() => nextRecipe());
-  };
-
-  const handleSwipeRight = () => {
-    if (isInteracting) return;
-    setIsInteracting(true);
-    if (currentRecipe) {
-      recipeService.likeRecipe(currentRecipe.id).catch(() => {});
-      recordPreference(currentRecipe, 'like');
-    }
-    Animated.timing(translateX, {
-      toValue: 500,
-      duration: 200,
-      useNativeDriver: true,
-    }).start(() => nextRecipe());
-  };
-
-  const handleSwipeUp = () => {
-    if (isInteracting) return;
-    setIsInteracting(true);
-    if (currentRecipe) {
-      recipeService.saveRecipe(currentRecipe.id).catch(() => {});
-      recordPreference(currentRecipe, 'save');
-    }
-    Animated.timing(translateY, {
-      toValue: -500,
-      duration: 200,
-      useNativeDriver: true,
-    }).start(() => nextRecipe());
-  };
-
-  const onGestureEvent = Animated.event(
-    [{ nativeEvent: { translationX: translateX, translationY: translateY } }],
-    { useNativeDriver: true }
-  );
-
-  const onHandlerStateChange = ({ nativeEvent }: any) => {
-    if (nativeEvent.state === State.END) {
-      if (isInteracting) return;
-      const { translationX: tx, translationY: ty } = nativeEvent;
-      if (tx > 120) handleSwipeRight();
-      else if (tx < -120) handleSwipeLeft();
-      else if (ty < -120) handleSwipeUp();
-      else {
-        Animated.spring(translateX, { toValue: 0, useNativeDriver: true }).start();
-        Animated.spring(translateY, { toValue: 0, useNativeDriver: true }).start();
-      }
-    }
-  };
-
-  const rotate = translateX.interpolate({
-    inputRange: [-200, 0, 200],
-    outputRange: ['-10deg', '0deg', '10deg'],
-  });
-
-  const likeOpacity = translateX.interpolate({
-    inputRange: [0, 120],
-    outputRange: [0, 1],
-    extrapolate: 'clamp',
-  });
-
-  const nopeOpacity = translateX.interpolate({
-    inputRange: [-120, 0],
-    outputRange: [1, 0],
-    extrapolate: 'clamp',
-  });
-
-  const saveOpacity = translateY.interpolate({
-    inputRange: [-120, 0],
-    outputRange: [1, 0],
-    extrapolate: 'clamp',
-  });
-
-  if (loading) {
-    return (
-      <View style={[styles.centerContainer, { justifyContent: 'flex-start', paddingTop: 60 }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={styles.loadingText}>Finding recipes for you...</Text>
-      </View>
-    );
-  }
-
-  if (!currentRecipe || filteredRecipes.length === 0) {
-    return (
-      <View style={styles.centerContainer}>
-        {/* Pantry Toggle - show even in empty state */}
-        <View style={styles.pantryToggleRow}>
-          <TouchableOpacity
-            style={[styles.pantryToggle, !pantryMode && styles.pantryToggleActive]}
-            onPress={() => setPantryMode(false)}
-          >
-            <Text style={[styles.pantryToggleText, !pantryMode && styles.pantryToggleTextActive]}>For You</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.pantryToggle, pantryMode && styles.pantryToggleActive]}
-            onPress={() => setPantryMode(true)}
-          >
-            <Text style={[styles.pantryToggleText, pantryMode && styles.pantryToggleTextActive]}>My Pantry</Text>
-          </TouchableOpacity>
-        </View>
-        <Text style={styles.emptyIcon}>🍽️</Text>
-        <Text style={styles.emptyTitle}>{pantryMode ? 'No Pantry Matches' : 'No Recipes to Discover'}</Text>
-        <Text style={styles.emptySubtitle}>
-          {pantryMode ? 'Add more items to your pantry or switch to All Recipes' : 'Check back later for new recipes!'}
-        </Text>
-        <TouchableOpacity style={styles.retryButton} onPress={loadRecipes}>
-          <Text style={styles.retryButtonText}>Refresh</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
+}> = ({ recipe, onPress, compact, colors }) => {
+  const cardWidth = compact ? 180 : (screenWidth - 48) / 2;
+  const imageHeight = compact ? 110 : 120;
 
   return (
-    <View style={styles.container}>
-      <View style={styles.cardContainer}>
-        <PanGestureHandler
-          onGestureEvent={onGestureEvent}
-          onHandlerStateChange={onHandlerStateChange}
-        >
-          <Animated.View
-            style={[
-              styles.card,
-              {
-                opacity,
-                transform: [{ translateX }, { translateY }, { rotate }],
-              },
-            ]}
-          >
-            {/* Swipe Overlays */}
-            <Animated.View style={[styles.overlayLabel, styles.likeLabel, { opacity: likeOpacity }]}>
-              <Text style={styles.overlayText}>LIKE</Text>
-            </Animated.View>
-            <Animated.View style={[styles.overlayLabel, styles.nopeLabel, { opacity: nopeOpacity }]}>
-              <Text style={styles.overlayText}>SKIP</Text>
-            </Animated.View>
-            <Animated.View style={[styles.overlayLabel, styles.saveLabel, { opacity: saveOpacity }]}>
-              <Text style={styles.overlayText}>SAVE</Text>
-            </Animated.View>
-
-            <TouchableOpacity
-              style={styles.imageContainer}
-              activeOpacity={0.9}
-              onPress={() => onViewRecipe(currentRecipe)}
-            >
-              <Image
-                source={{ uri: currentRecipe.image_url || 'https://via.placeholder.com/400x300/FF6B35/FFFFFF?text=Recipe' }}
-                style={styles.recipeImage}
-              />
-
-              {/* Pantry Mode Toggle - overlayed top right */}
-              <View style={styles.pantryToggleRow}>
-                <TouchableOpacity
-                  style={[styles.pantryToggle, !pantryMode && styles.pantryToggleActive]}
-                  onPress={() => setPantryMode(false)}
-                >
-                  <Text style={[styles.pantryToggleText, !pantryMode && styles.pantryToggleTextActive]}>For You</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.pantryToggle, pantryMode && styles.pantryToggleActive]}
-                  onPress={() => setPantryMode(true)}
-                >
-                  <Text style={[styles.pantryToggleText, pantryMode && styles.pantryToggleTextActive]}>My Pantry</Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Recipe info overlay at bottom of card */}
-              <View style={styles.imageOverlay}>
-                <View style={styles.titleRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.recipeTitle} numberOfLines={1}>{currentRecipe.title}</Text>
-                    <Text style={styles.recipeSubtitle}>{currentRecipe.cuisine_type}</Text>
-                  </View>
-                  <View style={styles.badgeRow}>
-                    <Text style={[styles.difficultyBadge, { backgroundColor: getDifficultyColor(currentRecipe.difficulty, colors) }]}>
-                      {currentRecipe.difficulty}
-                    </Text>
-                  </View>
-                </View>
-                <View style={styles.metaRow}>
-                  <Text style={styles.metaLabel}>⏱️ {(currentRecipe.prep_time || 0) + (currentRecipe.cook_time || 0)} min</Text>
-                  <Text style={styles.metaLabel}>👥 {currentRecipe.servings} servings</Text>
-                  {currentRecipe.calories && (
-                    <Text style={styles.metaLabel}>🔥 {currentRecipe.calories} cal</Text>
-                  )}
-                </View>
-              </View>
-
-              {/* Overlaid action buttons */}
-              <View style={styles.actionButtons}>
-                <View style={styles.actionButtonWrapper}>
-                  <TouchableOpacity style={[styles.actionButton, styles.skipButton]} onPress={handleSwipeLeft}>
-                    <Text style={styles.actionButtonText}>✕</Text>
-                  </TouchableOpacity>
-                  <Text style={styles.actionButtonLabel}>Skip</Text>
-                </View>
-                <View style={styles.actionButtonWrapper}>
-                  <TouchableOpacity style={[styles.actionButton, styles.saveButton]} onPress={handleSwipeUp}>
-                    <Text style={styles.actionButtonText}>📌</Text>
-                  </TouchableOpacity>
-                  <Text style={styles.actionButtonLabel}>Save</Text>
-                </View>
-                <View style={styles.actionButtonWrapper}>
-                  <TouchableOpacity style={[styles.actionButton, styles.likeButton]} onPress={handleSwipeRight}>
-                    <Text style={styles.actionButtonText}>❤️</Text>
-                  </TouchableOpacity>
-                  <Text style={styles.actionButtonLabel}>Like</Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-          </Animated.View>
-        </PanGestureHandler>
-      </View>
-
-    </View>
-  );
-};
-
-// ============================================================
-// BROWSE TAB - Grid view with filters
-// ============================================================
-const BrowseTab: React.FC<{
-  colors: ThemeColors;
-  onViewRecipe: (recipe: Recipe) => void;
-  dietaryRestrictions: string[];
-  onEditPreferences: () => void;
-  browseState: BrowseState;
-  setBrowseState: React.Dispatch<React.SetStateAction<BrowseState>>;
-}> = ({ colors, onViewRecipe, dietaryRestrictions, onEditPreferences, browseState, setBrowseState }) => {
-  const styles = createBrowseStyles(colors);
-  const [recipes, setRecipes] = useState<Recipe[]>(browseState.recipes);
-  const [loading, setLoading] = useState(!browseState.loaded);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [activeMealType, setActiveMealType] = useState<string | undefined>(undefined);
-  const [expiringItems, setExpiringItems] = useState<PantryItem[]>([]);
-  const [showExpiringBanner, setShowExpiringBanner] = useState(false);
-  const [browseHasMore, setBrowseHasMore] = useState(browseState.hasMore);
-  const browseOffsetRef = useRef(browseState.offset);
-  const BROWSE_INITIAL_SIZE = 8;
-  const BROWSE_BATCH = 40;
-
-  const mealTypes = [
-    { key: undefined, label: 'All' },
-    { key: 'Breakfast', label: 'Breakfast' },
-    { key: 'Lunch', label: 'Lunch' },
-    { key: 'Dinner', label: 'Dinner' },
-    { key: 'Snack', label: 'Snack' },
-  ];
-
-  // Sync local state back to parent for caching
-  useEffect(() => {
-    if (recipes.length > 0 && !searchQuery && !activeMealType) {
-      setBrowseState({ recipes, hasMore: browseHasMore, offset: browseOffsetRef.current, loaded: true });
-    }
-  }, [recipes, browseHasMore]);
-
-  const isDefaultView = !searchQuery && !activeMealType && dietaryRestrictions.length === 0;
-
-  const loadRecipes = useCallback(async () => {
-    // Skip fetch if we have cached data and no filters active
-    if (browseState.loaded && !searchQuery && !activeMealType && dietaryRestrictions.length === 0 && recipes.length > 0) {
-      setLoading(false);
-      return;
-    }
-    try {
-      setLoading(true);
-      browseOffsetRef.current = 0;
-      const result = await recipeService.getAllRecipes(
-        BROWSE_INITIAL_SIZE, 0, searchQuery || undefined, activeMealType,
-        dietaryRestrictions.length > 0 ? dietaryRestrictions : undefined
-      );
-      setRecipes(result);
-      browseOffsetRef.current = result.length;
-      setBrowseHasMore(result.length >= BROWSE_INITIAL_SIZE);
-    } catch (error) {
-      console.error('Failed to load recipes:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [searchQuery, activeMealType, dietaryRestrictions]);
-
-  const loadMoreBrowse = useCallback(async () => {
-    if (loadingMore || !browseHasMore) return;
-    setLoadingMore(true);
-    try {
-      const result = await recipeService.getAllRecipes(
-        BROWSE_BATCH, browseOffsetRef.current, searchQuery || undefined, activeMealType,
-        dietaryRestrictions.length > 0 ? dietaryRestrictions : undefined
-      );
-      if (result.length > 0) {
-        setRecipes(prev => [...prev, ...result]);
-        browseOffsetRef.current += result.length;
-        setBrowseHasMore(result.length >= BROWSE_BATCH);
-      } else {
-        setBrowseHasMore(false);
-      }
-    } catch (error) {
-      console.error('Failed to load more recipes:', error);
-    } finally {
-      setLoadingMore(false);
-    }
-  }, [loadingMore, browseHasMore, searchQuery, activeMealType, dietaryRestrictions]);
-
-  const loadExpiringItems = async () => {
-    try {
-      const items = await pantryService.getExpiringItems(7);
-      setExpiringItems(items);
-      setShowExpiringBanner(items.length > 0);
-    } catch {
-      // silently fail - banner just won't show
-    }
-  };
-
-  useEffect(() => {
-    const debounce = setTimeout(async () => {
-      await loadRecipes();
-      // Silently load more in the background after initial load
-      if (!browseState.loaded && browseHasMore) {
-        loadMoreBrowse();
-      }
-    }, 300);
-    return () => clearTimeout(debounce);
-  }, [loadRecipes]);
-
-  useEffect(() => {
-    loadExpiringItems();
-  }, []);
-
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    setBrowseHasMore(true);
-    // Force refresh by temporarily clearing cached state
-    setBrowseState(BROWSE_INITIAL);
-    browseOffsetRef.current = 0;
-    try {
-      const result = await recipeService.getAllRecipes(
-        BROWSE_INITIAL_SIZE, 0, searchQuery || undefined, activeMealType,
-        dietaryRestrictions.length > 0 ? dietaryRestrictions : undefined
-      );
-      setRecipes(result);
-      browseOffsetRef.current = result.length;
-      setBrowseHasMore(result.length >= BROWSE_INITIAL_SIZE);
-      await loadExpiringItems();
-    } catch (error) {
-      console.error('Failed to refresh recipes:', error);
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
-  const renderRecipeCard = ({ item }: { item: Recipe }) => (
     <TouchableOpacity
-      style={styles.recipeCard}
-      onPress={() => onViewRecipe(item)}
-      activeOpacity={0.7}
+      activeOpacity={0.85}
+      onPress={onPress}
+      style={[
+        cardStyles(colors).card,
+        { width: cardWidth, marginRight: compact ? 12 : 0 },
+      ]}
     >
-      <View style={styles.recipeImageContainer}>
-        {item.image_url ? (
-          <Image source={{ uri: item.image_url }} style={styles.recipeImage} />
+      <View style={[cardStyles(colors).imageContainer, { height: imageHeight }]}>
+        {recipe.image_url ? (
+          <Image source={{ uri: recipe.image_url }} style={cardStyles(colors).image} />
         ) : (
-          <View style={styles.recipeImagePlaceholder}>
-            <Text style={styles.placeholderEmoji}>
-              {item.meal_type?.includes('Breakfast') ? '🍳' :
-               item.meal_type?.includes('Lunch') ? '🥗' :
-               item.meal_type?.includes('Dinner') ? '🍽️' : '🍴'}
-            </Text>
+          <View style={cardStyles(colors).imagePlaceholder}>
+            <Ionicons name="restaurant-outline" size={32} color={colors.textMuted} />
           </View>
         )}
-        {item.is_ai_generated && (
-          <View style={styles.aiBadge}>
-            <Text style={styles.aiBadgeText}>AI</Text>
+        {recipe.is_ai_generated && (
+          <View style={cardStyles(colors).aiBadge}>
+            <Text style={cardStyles(colors).aiBadgeText}>AI</Text>
           </View>
         )}
       </View>
-      <View style={styles.recipeInfo}>
-        <Text style={styles.recipeTitle} numberOfLines={2}>{item.title}</Text>
-        <View style={styles.recipeMeta}>
-          {item.prep_time ? (
-            <Text style={styles.recipeMetaText}>
-              {item.prep_time + (item.cook_time || 0)} min
+      <View style={cardStyles(colors).info}>
+        <Text style={cardStyles(colors).title} numberOfLines={2}>
+          {recipe.title}
+        </Text>
+        <View style={cardStyles(colors).meta}>
+          {recipe.calories != null && (
+            <Text style={cardStyles(colors).calorieText}>
+              {Math.round(recipe.calories)} cal
             </Text>
-          ) : null}
-          {item.difficulty ? (
-            <Text style={styles.recipeMetaText}>{item.difficulty}</Text>
-          ) : null}
+          )}
+          {(recipe.prep_time != null || recipe.cook_time != null) && (
+            <Text style={cardStyles(colors).metaText}>
+              {(recipe.prep_time || 0) + (recipe.cook_time || 0)} min
+            </Text>
+          )}
         </View>
-        {item.calories ? (
-          <Text style={styles.calorieText}>{item.calories} cal/serving</Text>
-        ) : null}
       </View>
     </TouchableOpacity>
   );
-
-  return (
-    <View style={styles.container}>
-      {/* Search Bar */}
-      <View style={styles.searchContainer}>
-        <View style={styles.searchInputContainer}>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search recipes..."
-            placeholderTextColor={colors.textMuted}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <Text style={styles.clearButton}>✕</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* Meal Type Filter */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterContainer}
-        >
-          {mealTypes.map((type) => (
-            <TouchableOpacity
-              key={type.label}
-              style={[
-                styles.filterChip,
-                activeMealType === type.key && styles.filterChipActive,
-              ]}
-              onPress={() => setActiveMealType(type.key)}
-            >
-              <Text
-                style={[
-                  styles.filterChipText,
-                  activeMealType === type.key && styles.filterChipTextActive,
-                ]}
-              >
-                {type.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
-
-      {/* Dietary Preferences Indicator */}
-      {dietaryRestrictions.length > 0 && (
-        <TouchableOpacity style={styles.dietaryBanner} onPress={onEditPreferences}>
-          <Text style={styles.dietaryBannerText}>
-            Showing: {dietaryRestrictions.join(', ')}
-          </Text>
-          <Text style={styles.dietaryBannerLink}>Edit</Text>
-        </TouchableOpacity>
-      )}
-
-      {/* Expiring Items Banner */}
-      {showExpiringBanner && (
-        <View style={styles.expiringBanner}>
-          <View style={styles.expiringBannerContent}>
-            <Text style={styles.expiringBannerIcon}>⚠️</Text>
-            <View style={styles.expiringBannerText}>
-              <Text style={styles.expiringBannerTitle}>
-                {expiringItems.length} item{expiringItems.length !== 1 ? 's' : ''} expiring soon
-              </Text>
-              <Text style={styles.expiringBannerSubtitle}>
-                {expiringItems.slice(0, 3).map(i => i.item_name).join(', ')}
-                {expiringItems.length > 3 ? ` +${expiringItems.length - 3} more` : ''}
-              </Text>
-            </View>
-          </View>
-          <TouchableOpacity
-            style={styles.expiringBannerDismiss}
-            onPress={() => setShowExpiringBanner(false)}
-          >
-            <Text style={styles.expiringBannerDismissText}>✕</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* Recipe Grid */}
-      {loading && recipes.length === 0 ? (
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', padding: 8, gap: 8 }}>
-          {[1,2,3,4,5,6].map(i => <View key={i} style={{ width: '48%' }}><RecipeCardSkeleton /></View>)}
-        </View>
-      ) : recipes.length === 0 ? (
-        <EmptyState
-          icon="search-outline"
-          title="No Recipes Found"
-          description={searchQuery ? 'Try a different search term or adjust your filters' : 'Recipes will appear here as they are added'}
-          actionLabel={searchQuery ? 'Clear Search' : undefined}
-          onAction={searchQuery ? () => setSearchQuery('') : undefined}
-        />
-      ) : (
-        <FlatList
-          data={recipes}
-          renderItem={renderRecipeCard}
-          keyExtractor={(item) => item.id}
-          numColumns={2}
-          contentContainerStyle={styles.recipeGrid}
-          columnWrapperStyle={styles.gridRow}
-          showsVerticalScrollIndicator={false}
-          onEndReached={loadMoreBrowse}
-          onEndReachedThreshold={0.3}
-          ListFooterComponent={loadingMore ? (
-            <ActivityIndicator size="small" color={colors.primary} style={{ paddingVertical: 16 }} />
-          ) : null}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
-              tintColor={colors.primary}
-            />
-          }
-        />
-      )}
-    </View>
-  );
 };
 
-// ============================================================
-// MY RECIPES TAB - Created / Saved / Liked
-// ============================================================
-const MyRecipesTab: React.FC<{
-  colors: ThemeColors;
-  onViewRecipe: (recipe: Recipe) => void;
-  myRecipesState: MyRecipesState;
-  setMyRecipesState: React.Dispatch<React.SetStateAction<MyRecipesState>>;
-}> = ({ colors, onViewRecipe, myRecipesState, setMyRecipesState }) => {
-  const styles = createMyRecipesStyles(colors);
-  const [subTab, setSubTab] = useState<MyRecipesSubTab>('liked');
-  const [recipes, setRecipes] = useState<Recipe[]>(myRecipesState[subTab] || []);
-  const [loading, setLoading] = useState(!myRecipesState[`${subTab}Loaded` as keyof MyRecipesState]);
+const cardStyles = (colors: ThemeColors) =>
+  StyleSheet.create({
+    card: {
+      backgroundColor: colors.backgroundSecondary,
+      borderRadius: 14,
+      marginBottom: 12,
+      overflow: 'hidden',
+      ...Platform.select({
+        ios: {
+          shadowColor: colors.shadow,
+          shadowOffset: { width: 0, height: 1 },
+          shadowOpacity: 0.06,
+          shadowRadius: 6,
+        },
+        android: { elevation: 2 },
+      }),
+    },
+    imageContainer: {
+      backgroundColor: colors.border,
+    },
+    image: {
+      width: '100%',
+      height: '100%',
+      resizeMode: 'cover',
+    },
+    imagePlaceholder: {
+      width: '100%',
+      height: '100%',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    aiBadge: {
+      position: 'absolute',
+      top: 8,
+      right: 8,
+      backgroundColor: colors.secondary,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 8,
+    },
+    aiBadgeText: {
+      color: colors.buttonText,
+      fontSize: 10,
+      fontWeight: '700',
+    },
+    info: {
+      padding: 10,
+    },
+    title: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.text,
+      marginBottom: 4,
+      lineHeight: 19,
+    },
+    meta: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    calorieText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.primary,
+    },
+    metaText: {
+      fontSize: 12,
+      color: colors.textMuted,
+    },
+  });
+
+// ─────────────────────────────────────────────────────────────
+// Main Screen
+// ─────────────────────────────────────────────────────────────
+export const RecipeHubScreen: React.FC = () => {
+  const { colors } = useThemeStore();
+  const navigation = useNavigation<any>();
+  const insets = useSafeAreaInsets();
+  const styles = createStyles(colors);
+  const cachedRecipeFeed = useDataStore((s) => s.recipeFeed);
+  const recipeFeedFresh = useDataStore((s) => s.isFresh('recipeFeed'));
+
+  // Main tab
+  const [mainTab, setMainTab] = useState<MainTab>('browse');
+
+  // ── Browse state ──
+  const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [search, setSearch] = useState('');
+  const [mealTypeFilter, setMealTypeFilter] = useState<string>('All');
+  const [cuisineFilter, setCuisineFilter] = useState<string>('All');
+  const [sortBy, setSortBy] = useState<SortOption>('popular');
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
 
-  const loadRecipes = useCallback(async (forceRefresh = false) => {
-    const loadedKey = `${subTab}Loaded` as 'likedLoaded' | 'savedLoaded' | 'createdLoaded';
-    const cached = myRecipesState[subTab] as Recipe[];
-    const isLoaded = myRecipesState[loadedKey] as boolean;
+  // Cook Tonight
+  const [cookTonightLoading, setCookTonightLoading] = useState(false);
+  const [cookTonightResult, setCookTonightResult] = useState<CookTonightResult['suggestion']>(null);
+  const [cookTonightExpanded, setCookTonightExpanded] = useState(false);
 
-    // Use cache if available and not forcing refresh
-    if (!forceRefresh && isLoaded && cached.length > 0) {
-      setRecipes(cached);
-      setLoading(false);
-      return;
+  // Filter modal
+  const [showFilterModal, setShowFilterModal] = useState(false);
+
+  // ── My Recipes state ──
+  const [myRecipesTab, setMyRecipesTab] = useState<MyRecipesTab>('liked');
+  const [likedRecipes, setLikedRecipes] = useState<Recipe[]>([]);
+  const [savedRecipes, setSavedRecipes] = useState<Recipe[]>([]);
+  const [createdRecipes, setCreatedRecipes] = useState<Recipe[]>([]);
+  const [myRecipesLoading, setMyRecipesLoading] = useState(false);
+
+  // ── Browse loaders ──
+
+  const loadRecipes = useCallback(async (reset = false) => {
+    // Check cache first for default browse (no filters, no search, popular sort)
+    if (reset && !search && mealTypeFilter === 'All' && cuisineFilter === 'All' && sortBy === 'popular') {
+      if (recipeFeedFresh && cachedRecipeFeed.length > 0) {
+        setRecipes(cachedRecipeFeed);
+        setLoading(false);
+        return;
+      }
     }
+
+    const newOffset = reset ? 0 : offset;
+    if (reset) { setLoading(true); setOffset(0); }
+    else { setLoadingMore(true); }
 
     try {
-      setLoading(true);
-      let data: Recipe[];
-      switch (subTab) {
-        case 'created':
-          const allMyRecipes = await recipeService.getMyRecipes(50);
-          data = allMyRecipes.filter(r => !r.is_ai_generated);
-          break;
-        case 'saved':
-          data = await recipeService.getSavedRecipes(50);
-          break;
-        case 'liked':
-          data = await recipeService.getLikedRecipes(50);
-          break;
+      const mealType = mealTypeFilter !== 'All' ? mealTypeFilter : undefined;
+      const cuisine = cuisineFilter !== 'All' ? cuisineFilter : undefined;
+
+      let results = await recipeService.getAllRecipes(
+        LIMIT, newOffset, search || undefined, mealType, undefined, cuisine
+      );
+
+      // Client-side sorting
+      if (sortBy === 'newest') {
+        results = results.sort((a, b) => {
+          const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+          const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+          return dateB - dateA;
+        });
+      } else if (sortBy === 'quick') {
+        results = results.sort((a, b) => {
+          const timeA = (a.prep_time || 0) + (a.cook_time || 0);
+          const timeB = (b.prep_time || 0) + (b.cook_time || 0);
+          return timeA - timeB;
+        });
       }
-      setRecipes(data);
-      // Cache in parent
-      setMyRecipesState(prev => ({ ...prev, [subTab]: data, [loadedKey]: true }));
-    } catch (error) {
-      console.error('Failed to load recipes:', error);
+      // 'popular' is the default backend sort (by likes_count)
+
+      if (reset) setRecipes(results);
+      else setRecipes(prev => [...prev, ...results]);
+
+      // Cache default browse results for offline access
+      if (reset && !search && mealTypeFilter === 'All' && cuisineFilter === 'All') {
+        useDataStore.getState().setRecipeFeed(results);
+      }
+
+      setHasMore(results.length === LIMIT);
+      setOffset(newOffset + LIMIT);
+    } catch {
+      /* silent */
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
-  }, [subTab, myRecipesState]);
+  }, [offset, search, mealTypeFilter, cuisineFilter, sortBy]);
 
+  // Reload when filters change
+  const isFirstMount = useRef(true);
   useEffect(() => {
-    loadRecipes();
-  }, [subTab]);
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      loadRecipes(true);
+      return;
+    }
+    loadRecipes(true);
+  }, [search, mealTypeFilter, cuisineFilter, sortBy]);
 
-  const handleRefresh = async () => {
+  // ── My Recipes loader ──
+
+  const loadMyRecipes = async () => {
+    setMyRecipesLoading(true);
+    try {
+      const [liked, saved, created] = await Promise.all([
+        recipeService.getLikedRecipes(30, 0),
+        recipeService.getSavedRecipes(30, 0),
+        recipeService.getMyRecipes(30, 0),
+      ]);
+      setLikedRecipes(liked);
+      setSavedRecipes(saved);
+      setCreatedRecipes(created.filter(r => !r.is_ai_generated));
+    } catch {
+      /* silent */
+    } finally {
+      setMyRecipesLoading(false);
+    }
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      if (mainTab === 'browse') {
+        loadRecipes(true);
+      } else {
+        loadMyRecipes();
+      }
+    }, [mainTab]),
+  );
+
+  // ── Search debounce ──
+
+  const handleSearchChange = (text: string) => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    if (text.trim().length === 0) {
+      setSearch('');
+      return;
+    }
+    searchTimerRef.current = setTimeout(() => {
+      setSearch(text.trim());
+    }, 400);
+  };
+
+  const [searchText, setSearchText] = useState('');
+  const onSearchTextChange = (text: string) => {
+    setSearchText(text);
+    handleSearchChange(text);
+  };
+
+  const clearSearch = () => {
+    setSearchText('');
+    setSearch('');
+  };
+
+  // ── Cook Tonight ──
+
+  const handleCookTonight = async () => {
+    if (cookTonightExpanded && cookTonightResult) {
+      // Already expanded — just collapse
+      setCookTonightExpanded(false);
+      return;
+    }
+    setCookTonightLoading(true);
+    setCookTonightExpanded(true);
+    try {
+      const result = await smartAIService.getCookTonightSuggestion();
+      setCookTonightResult(result.suggestion);
+    } catch {
+      setCookTonightResult(null);
+    } finally {
+      setCookTonightLoading(false);
+    }
+  };
+
+  const handleRefreshSuggestion = async () => {
+    setCookTonightLoading(true);
+    try {
+      const result = await smartAIService.getCookTonightSuggestion();
+      setCookTonightResult(result.suggestion);
+    } catch { }
+    finally { setCookTonightLoading(false); }
+  };
+
+  const activeFilterCount =
+    (mealTypeFilter !== 'All' ? 1 : 0) +
+    (cuisineFilter !== 'All' ? 1 : 0) +
+    (sortBy !== 'popular' ? 1 : 0);
+
+  // ── Refresh ──
+
+  const onRefresh = async () => {
     setRefreshing(true);
-    await loadRecipes(true);
+    if (mainTab === 'browse') {
+      await loadRecipes(true);
+    } else {
+      await loadMyRecipes();
+    }
     setRefreshing(false);
   };
 
-  const handleDeleteRecipe = (recipe: Recipe) => {
-    Alert.alert(
-      'Delete Recipe',
-      `Are you sure you want to delete "${recipe.title}"?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await recipeService.deleteRecipe(recipe.id);
-              setRecipes(prev => prev.filter(r => r.id !== recipe.id));
-              setMyRecipesState(prev => ({ ...prev, created: prev.created.filter(r => r.id !== recipe.id) }));
-            } catch {
-              Alert.alert('Error', 'Failed to delete recipe');
-            }
-          },
-        },
-      ]
-    );
+  // ── Navigation ──
+
+  const goToRecipe = (recipe: Recipe) => {
+    navigation.navigate('RecipeDetail', { recipe });
   };
 
-  const handleUnsave = async (recipe: Recipe) => {
-    try {
-      await recipeService.unsaveRecipe(recipe.id);
-      setRecipes(prev => prev.filter(r => r.id !== recipe.id));
-      setMyRecipesState(prev => ({ ...prev, saved: prev.saved.filter(r => r.id !== recipe.id) }));
-    } catch {
-      Alert.alert('Error', 'Failed to remove recipe');
+  const goToCreate = () => {
+    navigation.navigate('CreateRecipe');
+  };
+
+  // ── Load more ──
+
+  const handleLoadMore = () => {
+    if (!loadingMore && hasMore && !loading) {
+      loadRecipes(false);
     }
   };
 
-  const handleUnlike = async (recipe: Recipe) => {
-    try {
-      await recipeService.unlikeRecipe(recipe.id);
-      setRecipes(prev => prev.filter(r => r.id !== recipe.id));
-      setMyRecipesState(prev => ({ ...prev, liked: prev.liked.filter(r => r.id !== recipe.id) }));
-    } catch {
-      Alert.alert('Error', 'Failed to unlike recipe');
-    }
-  };
+  // ── My Recipes derived data ──
 
-  const handleClearAllLiked = () => {
-    if (recipes.length === 0) return;
-    Alert.alert(
-      'Clear All Liked',
-      `Remove all ${recipes.length} liked recipes?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Clear All',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              for (const recipe of recipes) {
-                await recipeService.unlikeRecipe(recipe.id);
-              }
-              setRecipes([]);
-              setMyRecipesState(prev => ({ ...prev, liked: [] }));
-            } catch {
-              Alert.alert('Error', 'Failed to clear liked recipes');
-            }
-          },
-        },
-      ]
-    );
-  };
+  const activeMyRecipes =
+    myRecipesTab === 'liked'
+      ? likedRecipes
+      : myRecipesTab === 'saved'
+        ? savedRecipes
+        : createdRecipes;
 
-  const subTabs: { key: MyRecipesSubTab; label: string; icon: string }[] = [
-    { key: 'liked', label: 'Liked', icon: '❤️' },
-    { key: 'saved', label: 'Saved', icon: '📌' },
-    { key: 'created', label: 'Created', icon: '📝' },
-  ];
+  // ── Filter chip renderer ──
 
-  const filteredRecipes = React.useMemo(() => {
-    if (!searchQuery.trim()) return recipes;
-    const q = searchQuery.toLowerCase();
-    return recipes.filter(r =>
-      r.title.toLowerCase().includes(q) ||
-      r.cuisine_type?.toLowerCase().includes(q)
-    );
-  }, [recipes, searchQuery]);
-
-  const renderRecipeCard = ({ item }: { item: Recipe }) => (
-    <TouchableOpacity
-      style={styles.recipeCard}
-      onPress={() => onViewRecipe(item)}
-      activeOpacity={0.7}
-      onLongPress={() => {
-        if (subTab === 'created') {
-          Alert.alert(item.title, '', [
-            { text: 'Delete', style: 'destructive', onPress: () => handleDeleteRecipe(item) },
-            { text: 'Cancel', style: 'cancel' },
-          ]);
-        } else if (subTab === 'saved') {
-          Alert.alert(item.title, '', [
-            { text: 'Unsave', style: 'destructive', onPress: () => handleUnsave(item) },
-            { text: 'Cancel', style: 'cancel' },
-          ]);
-        } else if (subTab === 'liked') {
-          Alert.alert(item.title, '', [
-            { text: 'Unlike', style: 'destructive', onPress: () => handleUnlike(item) },
-            { text: 'Cancel', style: 'cancel' },
-          ]);
-        }
-      }}
+  const renderFilterChips = (
+    items: string[],
+    selected: string,
+    onSelect: (item: string) => void,
+  ) => (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.filterChipRow}
     >
-      <View style={styles.recipeImageContainer}>
-        {item.image_url ? (
-          <Image source={{ uri: item.image_url }} style={styles.recipeImage} />
-        ) : (
-          <View style={styles.recipeImagePlaceholder}>
-            <Text style={styles.placeholderEmoji}>
-              {item.meal_type?.includes('Breakfast') ? '🍳' :
-               item.meal_type?.includes('Lunch') ? '🥗' :
-               item.meal_type?.includes('Dinner') ? '🍽️' : '🍴'}
+      {items.map(item => {
+        const isActive = selected === item;
+        return (
+          <TouchableOpacity
+            key={item}
+            activeOpacity={0.7}
+            onPress={() => onSelect(item)}
+            style={[styles.filterChip, isActive && styles.filterChipActive]}
+          >
+            <Text style={[styles.filterChipText, isActive && styles.filterChipTextActive]}>
+              {item}
             </Text>
-          </View>
-        )}
-        {item.is_ai_generated && (
-          <View style={styles.aiBadge}>
-            <Text style={styles.aiBadgeText}>AI</Text>
-          </View>
-        )}
-      </View>
-      <View style={styles.recipeInfo}>
-        <Text style={styles.recipeTitle} numberOfLines={2}>{item.title}</Text>
-        <View style={styles.recipeMeta}>
-          {item.prep_time ? (
-            <Text style={styles.recipeMetaText}>
-              {item.prep_time + (item.cook_time || 0)} min
-            </Text>
-          ) : null}
-          {item.difficulty ? (
-            <Text style={styles.recipeMetaText}>{item.difficulty}</Text>
-          ) : null}
-        </View>
-        {item.calories ? (
-          <Text style={styles.calorieText}>{item.calories} cal/serving</Text>
-        ) : null}
-      </View>
-    </TouchableOpacity>
+          </TouchableOpacity>
+        );
+      })}
+    </ScrollView>
   );
 
-  return (
-    <View style={styles.container}>
-      {/* Search Bar */}
-      <View style={styles.searchContainer}>
-        <View style={styles.searchInputContainer}>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search my recipes..."
-            placeholderTextColor={colors.textMuted}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <Text style={styles.clearButton}>✕</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
+  // ── Sort pills ──
 
-      {/* Sub-tabs */}
-      <View style={styles.subTabContainer}>
-        <View style={{ flexDirection: 'row', flex: 1 }}>
-          {subTabs.map((tab) => (
+  const renderSortRow = () => {
+    const sortOptions: { key: SortOption; label: string }[] = [
+      { key: 'popular', label: 'Popular' },
+      { key: 'newest', label: 'Newest' },
+      { key: 'quick', label: 'Quick to Make' },
+    ];
+
+    return (
+      <View style={styles.sortRow}>
+        <Text style={styles.sortLabel}>Sort by</Text>
+        {sortOptions.map(opt => {
+          const isActive = sortBy === opt.key;
+          return (
             <TouchableOpacity
-              key={tab.key}
-              style={[styles.subTab, subTab === tab.key && styles.subTabActive]}
-              onPress={() => setSubTab(tab.key)}
+              key={opt.key}
+              activeOpacity={0.7}
+              onPress={() => setSortBy(opt.key)}
+              style={[styles.filterChip, isActive && styles.filterChipActive]}
             >
-              <Text style={styles.subTabIcon}>{tab.icon}</Text>
-              <Text style={[styles.subTabText, subTab === tab.key && styles.subTabTextActive]}>
-                {tab.label}
+              <Text style={[styles.filterChipText, isActive && styles.filterChipTextActive]}>
+                {opt.label}
               </Text>
             </TouchableOpacity>
-          ))}
+          );
+        })}
+      </View>
+    );
+  };
+
+  // ── Browse header (rendered above the FlatList) ──
+
+  const renderBrowseHeader = () => (
+    <View>
+      {/* Cook Tonight mini-banner */}
+      <TouchableOpacity
+        style={styles.cookTonightBanner}
+        onPress={handleCookTonight}
+        activeOpacity={0.7}
+      >
+        <Ionicons name="sparkles" size={18} color={colors.primary} />
+        <Text style={styles.cookTonightText}>What should I cook tonight?</Text>
+        <Ionicons name={cookTonightExpanded ? 'chevron-up' : 'chevron-forward'} size={16} color={colors.primary} />
+      </TouchableOpacity>
+
+      {/* Cook Tonight expanded result */}
+      {cookTonightExpanded && (
+        <View style={styles.cookTonightCard}>
+          {cookTonightLoading ? (
+            <View style={{ padding: 20, alignItems: 'center' }}>
+              <ActivityIndicator size="small" color={colors.primary} />
+              <Text style={[styles.cookTonightCardSubtext, { marginTop: 8 }]}>Thinking...</Text>
+            </View>
+          ) : cookTonightResult ? (
+            <>
+              <Text style={styles.cookTonightCardTitle}>{cookTonightResult.recipe_title}</Text>
+              <Text style={styles.cookTonightCardSubtext}>{cookTonightResult.why}</Text>
+              <View style={styles.cookTonightMeta}>
+                <View style={styles.cookTonightMetaItem}>
+                  <Ionicons name="time-outline" size={14} color={colors.textMuted} />
+                  <Text style={styles.cookTonightMetaText}>{cookTonightResult.prep_time_minutes} min</Text>
+                </View>
+                <View style={styles.cookTonightMetaItem}>
+                  <Ionicons name="flame-outline" size={14} color={colors.textMuted} />
+                  <Text style={styles.cookTonightMetaText}>{cookTonightResult.calories_estimate} cal</Text>
+                </View>
+                <View style={styles.cookTonightMetaItem}>
+                  <Ionicons name="basket-outline" size={14} color={colors.textMuted} />
+                  <Text style={styles.cookTonightMetaText}>{cookTonightResult.pantry_items_used.length} pantry items</Text>
+                </View>
+              </View>
+              {cookTonightResult.items_to_buy.length > 0 && (
+                <Text style={styles.cookTonightBuyText}>
+                  Need to buy: {cookTonightResult.items_to_buy.join(', ')}
+                </Text>
+              )}
+              <TouchableOpacity style={styles.cookTonightRefresh} onPress={handleRefreshSuggestion}>
+                <Ionicons name="refresh-outline" size={16} color={colors.primary} />
+                <Text style={[styles.cookTonightText, { flex: 0 }]}>Get another suggestion</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <Text style={styles.cookTonightCardSubtext}>Add items to your pantry for personalized suggestions!</Text>
+          )}
         </View>
-        {subTab === 'liked' && recipes.length > 0 && (
-          <TouchableOpacity onPress={handleClearAllLiked} style={{ paddingHorizontal: 8, paddingVertical: 4 }}>
-            <Text style={{ fontSize: 13, color: colors.error, fontWeight: '500' }}>Clear All</Text>
+      )}
+
+      {/* Filter & Sort button */}
+      <View style={styles.filterBar}>
+        <TouchableOpacity
+          style={styles.filterButton}
+          onPress={() => setShowFilterModal(true)}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="options-outline" size={18} color={activeFilterCount > 0 ? colors.primary : colors.textMuted} />
+          <Text style={[styles.filterButtonText, activeFilterCount > 0 && { color: colors.primary }]}>
+            Filter & Sort
+          </Text>
+          {activeFilterCount > 0 && (
+            <View style={styles.filterBadge}>
+              <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+        {/* Active filter pills (quick summary) */}
+        {mealTypeFilter !== 'All' && (
+          <TouchableOpacity style={styles.activeFilterPill} onPress={() => setMealTypeFilter('All')}>
+            <Text style={styles.activeFilterPillText}>{mealTypeFilter}</Text>
+            <Ionicons name="close" size={14} color={colors.primary} />
+          </TouchableOpacity>
+        )}
+        {cuisineFilter !== 'All' && (
+          <TouchableOpacity style={styles.activeFilterPill} onPress={() => setCuisineFilter('All')}>
+            <Text style={styles.activeFilterPillText}>{cuisineFilter}</Text>
+            <Ionicons name="close" size={14} color={colors.primary} />
           </TouchableOpacity>
         )}
       </View>
+    </View>
+  );
 
-      {/* Recipe Grid */}
-      {loading && recipes.length === 0 ? (
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', padding: 8, gap: 8 }}>
-          {[1,2,3,4].map(i => <View key={i} style={{ width: '48%' }}><RecipeCardSkeleton /></View>)}
+  // ── Browse grid footer ──
+
+  const renderBrowseFooter = () => {
+    if (loadingMore) {
+      return (
+        <View style={styles.footerLoader}>
+          <ActivityIndicator size="small" color={colors.primary} />
         </View>
-      ) : filteredRecipes.length === 0 ? (
-        <EmptyState
-          icon={searchQuery.trim() ? 'search-outline' :
-                subTab === 'liked' ? 'heart-outline' :
-                subTab === 'saved' ? 'bookmark-outline' : 'book-outline'}
-          title={searchQuery.trim() ? 'No Results Found' :
-                 subTab === 'liked' ? 'No Liked Recipes' :
-                 subTab === 'saved' ? 'No Saved Recipes' : 'No Recipes Created'}
-          description={searchQuery.trim() ? 'Try a different search term' :
-                       subTab === 'liked' ? 'Swipe right on recipes in Discover to like them' :
-                       subTab === 'saved' ? 'Swipe up on recipes in Discover to save them' :
-                       'Create your own recipes and they\'ll show up here'}
-        />
-      ) : (
-        <FlatList
-          data={filteredRecipes}
-          renderItem={renderRecipeCard}
-          keyExtractor={(item) => item.id}
-          numColumns={2}
-          contentContainerStyle={styles.recipeGrid}
-          columnWrapperStyle={styles.gridRow}
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
-              tintColor={colors.primary}
+      );
+    }
+    return <View style={{ height: 100 }} />;
+  };
+
+  // ── Browse empty state ──
+
+  const renderBrowseEmpty = () => {
+    if (loading) return null;
+    return (
+      <View style={styles.emptyContainer}>
+        <Ionicons name="search-outline" size={48} color={colors.textMuted} />
+        <Text style={styles.emptyTitle}>No recipes found</Text>
+        <Text style={styles.emptySubtitle}>Try changing your filters or search term</Text>
+      </View>
+    );
+  };
+
+  // ── My Recipes tab pills ──
+
+  const renderMyRecipesTabs = () => (
+    <View style={styles.pillContainer}>
+      {(['liked', 'saved', 'created'] as MyRecipesTab[]).map(tab => {
+        const isActive = myRecipesTab === tab;
+        const label = tab.charAt(0).toUpperCase() + tab.slice(1);
+        const icon: keyof typeof Ionicons.glyphMap =
+          tab === 'liked' ? 'heart-outline' : tab === 'saved' ? 'bookmark-outline' : 'create-outline';
+        return (
+          <TouchableOpacity
+            key={tab}
+            activeOpacity={0.7}
+            onPress={() => setMyRecipesTab(tab)}
+            style={[styles.pill, isActive && styles.pillActive]}
+          >
+            <Ionicons
+              name={icon}
+              size={14}
+              color={isActive ? colors.primary : colors.textMuted}
             />
-          }
+            <Text style={[styles.pillText, isActive && styles.pillTextActive]}>
+              {label}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+
+  // ── My Recipes content ──
+
+  const renderMyRecipesContent = () => {
+    if (myRecipesLoading) {
+      return (
+        <ActivityIndicator
+          size="large"
+          color={colors.primary}
+          style={{ marginTop: 30 }}
         />
+      );
+    }
+    if (activeMyRecipes.length === 0) {
+      const emptyMessages: Record<MyRecipesTab, { title: string; subtitle: string }> = {
+        liked: { title: 'No liked recipes', subtitle: 'Recipes you like will appear here' },
+        saved: { title: 'No saved recipes', subtitle: 'Save recipes for quick access' },
+        created: { title: 'No recipes yet', subtitle: 'Tap + to create your first recipe' },
+      };
+      return (
+        <View style={styles.emptyContainer}>
+          <Ionicons
+            name={
+              myRecipesTab === 'liked'
+                ? 'heart-outline'
+                : myRecipesTab === 'saved'
+                  ? 'bookmark-outline'
+                  : 'create-outline'
+            }
+            size={48}
+            color={colors.textMuted}
+          />
+          <Text style={styles.emptyTitle}>{emptyMessages[myRecipesTab].title}</Text>
+          <Text style={styles.emptySubtitle}>{emptyMessages[myRecipesTab].subtitle}</Text>
+        </View>
+      );
+    }
+    return (
+      <FlatList
+        data={activeMyRecipes}
+        keyExtractor={item => item.id}
+        numColumns={2}
+        columnWrapperStyle={styles.gridRow}
+        contentContainerStyle={styles.gridContent}
+        showsVerticalScrollIndicator={false}
+        renderItem={({ item }) => (
+          <RecipeCard
+            recipe={item}
+            onPress={() => goToRecipe(item)}
+            colors={colors}
+          />
+        )}
+        ListFooterComponent={<View style={{ height: 100 }} />}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
+        }
+      />
+    );
+  };
+
+  // ─────────────────────────────────────────────────────────────
+  // Render
+  // ─────────────────────────────────────────────────────────────
+
+  return (
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Recipes</Text>
+        <TouchableOpacity style={styles.addButton} onPress={goToCreate} activeOpacity={0.7}>
+          <Ionicons name="add" size={28} color={colors.backgroundSecondary} />
+        </TouchableOpacity>
+      </View>
+
+      {/* Tab switcher: Browse | My Recipes */}
+      <View style={styles.tabRow}>
+        <TouchableOpacity
+          activeOpacity={0.7}
+          onPress={() => setMainTab('browse')}
+          style={[styles.tab, mainTab === 'browse' && styles.tabActive]}
+        >
+          <Text style={[styles.tabText, mainTab === 'browse' && styles.tabTextActive]}>
+            Browse
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          activeOpacity={0.7}
+          onPress={() => { setMainTab('myRecipes'); loadMyRecipes(); }}
+          style={[styles.tab, mainTab === 'myRecipes' && styles.tabActive]}
+        >
+          <Text style={[styles.tabText, mainTab === 'myRecipes' && styles.tabTextActive]}>
+            My Recipes
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {mainTab === 'browse' ? (
+        <>
+          {/* Search bar */}
+          <View style={styles.searchContainer}>
+            <View style={styles.searchInputContainer}>
+              <Ionicons name="search-outline" size={18} color={colors.textMuted} style={{ marginRight: 8 }} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search recipes..."
+                placeholderTextColor={colors.textMuted}
+                value={searchText}
+                onChangeText={onSearchTextChange}
+                returnKeyType="search"
+              />
+              {searchText.length > 0 && (
+                <TouchableOpacity onPress={clearSearch} activeOpacity={0.6}>
+                  <Ionicons name="close-circle" size={20} color={colors.textMuted} />
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+
+          {/* Browse grid */}
+          {loading && recipes.length === 0 ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={colors.primary} />
+            </View>
+          ) : (
+            <FlatList
+              data={recipes}
+              keyExtractor={(item, index) => `${item.id}-${index}`}
+              numColumns={2}
+              columnWrapperStyle={styles.gridRow}
+              contentContainerStyle={styles.gridContent}
+              showsVerticalScrollIndicator={false}
+              ListHeaderComponent={renderBrowseHeader}
+              ListFooterComponent={renderBrowseFooter}
+              ListEmptyComponent={renderBrowseEmpty}
+              onEndReached={handleLoadMore}
+              onEndReachedThreshold={0.5}
+              refreshControl={
+                <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
+              }
+              renderItem={({ item }) => (
+                <RecipeCard
+                  recipe={item}
+                  onPress={() => goToRecipe(item)}
+                  colors={colors}
+                />
+              )}
+            />
+          )}
+        </>
+      ) : (
+        <>
+          {/* My Recipes sub-tabs */}
+          {renderMyRecipesTabs()}
+          {renderMyRecipesContent()}
+        </>
       )}
+      {/* Filter & Sort Modal */}
+      <Modal visible={showFilterModal} transparent animationType="slide" onRequestClose={() => setShowFilterModal(false)}>
+        <TouchableOpacity style={styles.modalBackdrop} onPress={() => setShowFilterModal(false)} activeOpacity={1} />
+        <View style={styles.filterSheet}>
+          <View style={styles.filterSheetHandle} />
+          <Text style={styles.filterSheetTitle}>Filter & Sort</Text>
+
+          {/* Meal Type */}
+          <Text style={styles.filterSheetLabel}>Meal Type</Text>
+          <View style={styles.filterSheetChipRow}>
+            {MEAL_TYPES.map(item => {
+              const isActive = mealTypeFilter === item;
+              return (
+                <TouchableOpacity key={item} onPress={() => setMealTypeFilter(item)} style={[styles.filterChip, isActive && styles.filterChipActive]}>
+                  <Text style={[styles.filterChipText, isActive && styles.filterChipTextActive]}>{item}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {/* Cuisine */}
+          <Text style={styles.filterSheetLabel}>Cuisine</Text>
+          <View style={styles.filterSheetChipRow}>
+            {CUISINES.map(item => {
+              const isActive = cuisineFilter === item;
+              return (
+                <TouchableOpacity key={item} onPress={() => setCuisineFilter(item)} style={[styles.filterChip, isActive && styles.filterChipActive]}>
+                  <Text style={[styles.filterChipText, isActive && styles.filterChipTextActive]}>{item}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {/* Sort */}
+          <Text style={styles.filterSheetLabel}>Sort By</Text>
+          <View style={styles.filterSheetChipRow}>
+            {[{ key: 'popular' as SortOption, label: 'Popular' }, { key: 'newest' as SortOption, label: 'Newest' }, { key: 'quick' as SortOption, label: 'Quick to Make' }].map(opt => {
+              const isActive = sortBy === opt.key;
+              return (
+                <TouchableOpacity key={opt.key} onPress={() => setSortBy(opt.key)} style={[styles.filterChip, isActive && styles.filterChipActive]}>
+                  <Text style={[styles.filterChipText, isActive && styles.filterChipTextActive]}>{opt.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {/* Actions */}
+          <View style={styles.filterSheetActions}>
+            <TouchableOpacity style={styles.filterSheetClear} onPress={() => { setMealTypeFilter('All'); setCuisineFilter('All'); setSortBy('popular'); }}>
+              <Text style={styles.filterSheetClearText}>Clear All</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.filterSheetApply} onPress={() => setShowFilterModal(false)}>
+              <Text style={styles.filterSheetApplyText}>Show Results</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
 
-// ============================================================
-// MAIN RECIPE HUB SCREEN
-// ============================================================
-export const RecipeHubScreen: React.FC = () => {
-  const { colors } = useThemeStore();
-  const { user } = useAuthStore();
-  const navigation = useNavigation<any>();
-  const styles = createHubStyles(colors);
-  const [activeTab, setActiveTab] = useState<TabMode>('discover');
-  const [discoverState, setDiscoverState] = useState<DiscoverState>(DISCOVER_INITIAL);
-  const [browseState, setBrowseState] = useState<BrowseState>(BROWSE_INITIAL);
-  const [myRecipesState, setMyRecipesState] = useState<MyRecipesState>(MY_RECIPES_INITIAL);
+// ─────────────────────────────────────────────────────────────
+// Styles
+// ─────────────────────────────────────────────────────────────
 
-  const dietaryRestrictions = user?.profile_data?.preferences?.dietary_restrictions || [];
-  const cuisinePreferences = user?.profile_data?.preferences?.cuisine_preferences || [];
-  const cookingSkill = user?.profile_data?.preferences?.cooking_skill || 'intermediate';
-
-  // Ask AI state
-  const [showAskAI, setShowAskAI] = useState(false);
-  const [askAIInput, setAskAIInput] = useState('');
-  const [askAILoading, setAskAILoading] = useState(false);
-  const [askAIResponse, setAskAIResponse] = useState<string | null>(null);
-
-  const handleAskAI = async () => {
-    if (!askAIInput.trim()) return;
-    Keyboard.dismiss();
-    setAskAILoading(true);
-    setAskAIResponse(null);
-    try {
-      const result = await aiService.ask(askAIInput.trim());
-      setAskAIResponse(result.response);
-    } catch (error) {
-      setAskAIResponse('Sorry, I couldn\'t get a response right now. Please try again.');
-    } finally {
-      setAskAILoading(false);
-    }
-  };
-
-  const QUICK_PROMPTS = [
-    'What should I make for dinner tonight?',
-    'Quick high-protein snack ideas',
-    'What can I make with my pantry?',
-    'Easy meal prep ideas for the week',
-  ];
-
-  const tabs: { key: TabMode; label: string }[] = [
-    { key: 'discover', label: 'Discover' },
-    { key: 'browse', label: 'Browse' },
-    { key: 'myrecipes', label: 'My Recipes' },
-  ];
-
-  const handleViewRecipe = (recipe: Recipe) => {
-    navigation.navigate('RecipeDetail', { recipe });
-  };
-
-  const handleCreateRecipe = () => {
-    navigation.navigate('CreateRecipe');
-  };
-
-  const handleEditPreferences = () => {
-    navigation.navigate('Profile', { screen: 'EditPreferences' });
-  };
-
-  return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <View style={styles.container}>
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Recipes</Text>
-          <TouchableOpacity style={styles.addButton} onPress={handleCreateRecipe}>
-            <Text style={styles.addButtonText}>+</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Tab Switcher */}
-        <View style={styles.tabBar}>
-          {tabs.map((tab) => (
-            <TouchableOpacity
-              key={tab.key}
-              style={[styles.tab, activeTab === tab.key && styles.tabActive]}
-              onPress={() => setActiveTab(tab.key)}
-            >
-              <Text style={[styles.tabText, activeTab === tab.key && styles.tabTextActive]}>
-                {tab.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* Content */}
-        <View style={styles.content}>
-          {activeTab === 'discover' && (
-            <DiscoverTab colors={colors} onViewRecipe={handleViewRecipe} dietaryRestrictions={dietaryRestrictions} cuisinePreferences={cuisinePreferences} cookingSkill={cookingSkill} discoverState={discoverState} setDiscoverState={setDiscoverState} />
-          )}
-          {activeTab === 'browse' && (
-            <BrowseTab colors={colors} onViewRecipe={handleViewRecipe} dietaryRestrictions={dietaryRestrictions} onEditPreferences={handleEditPreferences} browseState={browseState} setBrowseState={setBrowseState} />
-          )}
-          {activeTab === 'myrecipes' && (
-            <MyRecipesTab colors={colors} onViewRecipe={handleViewRecipe} myRecipesState={myRecipesState} setMyRecipesState={setMyRecipesState} />
-          )}
-        </View>
-
-        {/* Ask AI Floating Button */}
-        <TouchableOpacity
-          style={styles.askAIFab}
-          onPress={() => {
-            setShowAskAI(true);
-            setAskAIResponse(null);
-            setAskAIInput('');
-          }}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.askAIFabIcon}>AI</Text>
-        </TouchableOpacity>
-
-        {/* Ask AI Modal */}
-        <Modal
-          visible={showAskAI}
-          animationType="slide"
-          transparent={true}
-          onRequestClose={() => setShowAskAI(false)}
-        >
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            style={styles.askAIModalOverlay}
-          >
-            <View style={styles.askAIModal}>
-              {/* Header */}
-              <View style={styles.askAIHeader}>
-                <Text style={styles.askAITitle}>Ask AI Chef</Text>
-                <TouchableOpacity onPress={() => setShowAskAI(false)}>
-                  <Text style={styles.askAIClose}>X</Text>
-                </TouchableOpacity>
-              </View>
-
-              <Text style={styles.askAISubtitle}>
-                Ask me anything about cooking, recipes, or meal ideas. I know what's in your pantry and your preferences!
-              </Text>
-
-              {/* Quick Prompts */}
-              {!askAIResponse && !askAILoading && (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.quickPromptsScroll}>
-                  {QUICK_PROMPTS.map((prompt, i) => (
-                    <TouchableOpacity
-                      key={i}
-                      style={styles.quickPrompt}
-                      onPress={() => {
-                        setAskAIInput(prompt);
-                        // Auto-submit
-                        setAskAILoading(true);
-                        setAskAIResponse(null);
-                        aiService.ask(prompt).then(r => {
-                          setAskAIResponse(r.response);
-                          setAskAILoading(false);
-                        }).catch(() => {
-                          setAskAIResponse('Sorry, something went wrong. Please try again.');
-                          setAskAILoading(false);
-                        });
-                      }}
-                    >
-                      <Text style={styles.quickPromptText}>{prompt}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              )}
-
-              {/* Response Area */}
-              <ScrollView style={styles.askAIResponseArea} contentContainerStyle={{ flexGrow: 1 }}>
-                {askAILoading && (
-                  <View style={styles.askAILoadingContainer}>
-                    <ActivityIndicator size="large" color={colors.primary} />
-                    <Text style={styles.askAILoadingText}>Thinking...</Text>
-                  </View>
-                )}
-                {askAIResponse && (
-                  <View style={styles.askAIResponseBubble}>
-                    <Text style={styles.askAIResponseText}>{askAIResponse}</Text>
-                  </View>
-                )}
-              </ScrollView>
-
-              {/* Input */}
-              <View style={styles.askAIInputRow}>
-                <TextInput
-                  style={styles.askAIInput}
-                  placeholder="What should I cook tonight?"
-                  placeholderTextColor={colors.textMuted}
-                  value={askAIInput}
-                  onChangeText={setAskAIInput}
-                  onSubmitEditing={handleAskAI}
-                  returnKeyType="send"
-                  multiline={false}
-                />
-                <TouchableOpacity
-                  style={[styles.askAISendButton, (!askAIInput.trim() || askAILoading) && { opacity: 0.4 }]}
-                  onPress={handleAskAI}
-                  disabled={!askAIInput.trim() || askAILoading}
-                >
-                  <Text style={styles.askAISendText}>Send</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </KeyboardAvoidingView>
-        </Modal>
-
-      </View>
-    </GestureHandlerRootView>
-  );
-};
-
-// ============================================================
-// STYLES
-// ============================================================
-
-const createHubStyles = (colors: ThemeColors) =>
+const createStyles = (colors: ThemeColors) =>
   StyleSheet.create({
     container: {
       flex: 1,
@@ -1396,10 +833,10 @@ const createHubStyles = (colors: ThemeColors) =>
     },
     header: {
       flexDirection: 'row',
-      alignItems: 'center',
       justifyContent: 'space-between',
+      alignItems: 'center',
       paddingHorizontal: 24,
-      paddingTop: Platform.OS === 'ios' ? 60 : 16,
+      paddingTop: Platform.OS === 'ios' ? 8 : 16,
       paddingBottom: 16,
       backgroundColor: colors.backgroundSecondary,
       borderBottomWidth: 1,
@@ -1418,425 +855,47 @@ const createHubStyles = (colors: ThemeColors) =>
       justifyContent: 'center',
       alignItems: 'center',
     },
-    addButtonText: {
-      fontSize: 28,
-      fontWeight: 'bold',
-      color: colors.backgroundSecondary,
-    },
-    tabBar: {
+
+    // Tab switcher
+    tabRow: {
       flexDirection: 'row',
-      backgroundColor: colors.backgroundSecondary,
       paddingHorizontal: 16,
-      paddingBottom: 12,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.border,
+      paddingVertical: 8,
+      gap: 8,
     },
     tab: {
       flex: 1,
       paddingVertical: 10,
+      borderRadius: 12,
       alignItems: 'center',
-      borderBottomWidth: 2,
-      borderBottomColor: 'transparent',
+      backgroundColor: colors.backgroundSecondary,
+      borderWidth: 1,
+      borderColor: colors.border,
     },
     tabActive: {
-      borderBottomColor: colors.primary,
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
     },
     tabText: {
-      fontSize: 15,
+      fontSize: 14,
       fontWeight: '600',
       color: colors.textMuted,
     },
     tabTextActive: {
-      color: colors.primary,
+      color: '#FFF',
     },
-    content: {
-      flex: 1,
-    },
-    // Ask AI styles
-    askAIFab: {
-      position: 'absolute',
-      bottom: 24,
-      right: 20,
-      width: 56,
-      height: 56,
-      borderRadius: 28,
-      backgroundColor: colors.primary,
-      justifyContent: 'center',
-      alignItems: 'center',
-      shadowColor: colors.shadow,
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.3,
-      shadowRadius: 6,
-      elevation: 6,
-      zIndex: 100,
-    },
-    askAIFabIcon: {
-      fontSize: 16,
-      fontWeight: '800',
-      color: colors.buttonText,
-    },
-    askAIModalOverlay: {
-      flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.5)',
-      justifyContent: 'flex-end',
-    },
-    askAIModal: {
-      backgroundColor: colors.background,
-      borderTopLeftRadius: 24,
-      borderTopRightRadius: 24,
-      paddingHorizontal: 20,
-      paddingTop: 20,
-      paddingBottom: Platform.OS === 'ios' ? 36 : 20,
-      maxHeight: '85%',
-      minHeight: '60%',
-    },
-    askAIHeader: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: 8,
-    },
-    askAITitle: {
-      fontSize: 22,
-      fontWeight: '700',
-      color: colors.text,
-    },
-    askAIClose: {
-      fontSize: 18,
-      fontWeight: '600',
-      color: colors.textMuted,
-      padding: 8,
-    },
-    askAISubtitle: {
-      fontSize: 13,
-      color: colors.textMuted,
-      marginBottom: 16,
-      lineHeight: 18,
-    },
-    quickPromptsScroll: {
-      marginBottom: 16,
-      maxHeight: 40,
-    },
-    quickPrompt: {
-      backgroundColor: colors.primary + '15',
-      borderRadius: 20,
-      paddingHorizontal: 14,
-      paddingVertical: 8,
-      marginRight: 8,
-      borderWidth: 1,
-      borderColor: colors.primary + '30',
-    },
-    quickPromptText: {
-      fontSize: 13,
-      color: colors.primary,
-      fontWeight: '500',
-    },
-    askAIResponseArea: {
-      flex: 1,
-      marginBottom: 12,
-    },
-    askAILoadingContainer: {
-      flex: 1,
-      justifyContent: 'center',
-      alignItems: 'center',
-      paddingVertical: 40,
-    },
-    askAILoadingText: {
-      marginTop: 12,
-      fontSize: 14,
-      color: colors.textMuted,
-    },
-    askAIResponseBubble: {
-      backgroundColor: colors.card,
-      borderRadius: 16,
-      padding: 16,
-      marginTop: 8,
-    },
-    askAIResponseText: {
-      fontSize: 15,
-      color: colors.text,
-      lineHeight: 22,
-    },
-    askAIInputRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-    },
-    askAIInput: {
-      flex: 1,
-      backgroundColor: colors.card,
-      borderRadius: 24,
-      paddingHorizontal: 16,
-      paddingVertical: 12,
-      fontSize: 15,
-      color: colors.text,
-      borderWidth: 1,
-      borderColor: colors.border,
-    },
-    askAISendButton: {
-      backgroundColor: colors.primary,
-      borderRadius: 24,
-      paddingHorizontal: 20,
-      paddingVertical: 12,
-    },
-    askAISendText: {
-      fontSize: 15,
-      fontWeight: '600',
-      color: colors.buttonText,
-    },
-  });
 
-const createDiscoverStyles = (colors: ThemeColors) =>
-  StyleSheet.create({
-    container: {
-      flex: 1,
-    },
-    pantryToggleRow: {
-      position: 'absolute',
-      top: 10,
-      right: 10,
-      flexDirection: 'row',
-      backgroundColor: colors.overlay,
-      borderRadius: 16,
-      padding: 2,
-      zIndex: 10,
-    },
-    pantryToggle: {
-      paddingVertical: 5,
-      paddingHorizontal: 12,
-      borderRadius: 14,
-    },
-    pantryToggleActive: {
-      backgroundColor: colors.primary,
-    },
-    pantryToggleText: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: 'rgba(255,255,255,0.7)',
-    },
-    pantryToggleTextActive: {
-      color: '#FFFFFF',
-    },
-    centerContainer: {
-      flex: 1,
-      justifyContent: 'center',
-      alignItems: 'center',
-      padding: 32,
-    },
-    loadingText: {
-      marginTop: 16,
-      fontSize: 16,
-      color: colors.textMuted,
-    },
-    emptyIcon: {
-      fontSize: 64,
-      marginBottom: 16,
-    },
-    emptyTitle: {
-      fontSize: 22,
-      fontWeight: 'bold',
-      color: colors.text,
-      marginBottom: 8,
-    },
-    emptySubtitle: {
-      fontSize: 15,
-      color: colors.textMuted,
-      textAlign: 'center',
-      marginBottom: 20,
-    },
-    retryButton: {
-      backgroundColor: colors.primary,
-      paddingHorizontal: 24,
-      paddingVertical: 12,
-      borderRadius: 8,
-    },
-    retryButtonText: {
-      color: colors.buttonText,
-      fontSize: 16,
-      fontWeight: '600',
-    },
-    cardContainer: {
-      flex: 1,
-      alignItems: 'center',
-      paddingHorizontal: 10,
-      paddingTop: 4,
-      paddingBottom: 4,
-    },
-    card: {
-      width: screenWidth - 20,
-      flex: 1,
-      borderRadius: 20,
-      backgroundColor: colors.card,
-      overflow: 'hidden',
-      ...Platform.select({
-        ios: {
-          shadowColor: colors.shadow,
-          shadowOffset: { width: 0, height: 8 },
-          shadowOpacity: 0.15,
-          shadowRadius: 20,
-        },
-        android: { elevation: 10 },
-      }),
-    },
-    imageContainer: {
-      flex: 1,
-      borderRadius: 20,
-      overflow: 'hidden',
-    },
-    recipeImage: {
-      width: '100%',
-      height: '100%',
-      resizeMode: 'cover',
-    },
-    imageOverlay: {
-      position: 'absolute',
-      bottom: 0,
-      left: 0,
-      right: 0,
-      paddingHorizontal: 20,
-      paddingTop: 14,
-      paddingBottom: 100,
-      backgroundColor: colors.overlay,
-    },
-    titleRow: {
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-      justifyContent: 'space-between',
-      marginBottom: 6,
-    },
-    recipeTitle: {
-      fontSize: 22,
-      fontWeight: 'bold',
-      color: '#FFFFFF',
-    },
-    recipeSubtitle: {
-      fontSize: 14,
-      color: 'rgba(255,255,255,0.8)',
-      marginTop: 2,
-    },
-    metaRow: {
-      flexDirection: 'row',
-      gap: 14,
-    },
-    metaLabel: {
-      fontSize: 13,
-      color: 'rgba(255,255,255,0.9)',
-    },
-    badgeRow: {
-      flexDirection: 'row',
-      gap: 8,
-      marginLeft: 8,
-      marginTop: 2,
-    },
-    difficultyBadge: {
-      paddingHorizontal: 10,
-      paddingVertical: 3,
-      borderRadius: 10,
-      color: '#FFFFFF',
-      fontSize: 12,
-      fontWeight: '600',
-      overflow: 'hidden',
-    },
-    actionButtons: {
-      position: 'absolute',
-      bottom: 0,
-      left: 0,
-      right: 0,
-      flexDirection: 'row',
-      justifyContent: 'center',
-      alignItems: 'center',
-      paddingVertical: 14,
-      gap: 32,
-    },
-    actionButtonWrapper: {
-      alignItems: 'center',
-      gap: 4,
-    },
-    actionButton: {
-      width: 52,
-      height: 52,
-      borderRadius: 26,
-      justifyContent: 'center',
-      alignItems: 'center',
-      borderWidth: 2,
-      borderColor: 'rgba(255,255,255,0.3)',
-    },
-    actionButtonLabel: {
-      fontSize: 11,
-      fontWeight: '600',
-      color: 'rgba(255,255,255,0.9)',
-      textShadowColor: 'rgba(0,0,0,0.5)',
-      textShadowOffset: { width: 0, height: 1 },
-      textShadowRadius: 2,
-    },
-    skipButton: {
-      backgroundColor: colors.error + 'D9',
-    },
-    saveButton: {
-      backgroundColor: colors.warning + 'D9',
-    },
-    likeButton: {
-      backgroundColor: colors.success + 'D9',
-    },
-    actionButtonText: {
-      fontSize: 20,
-    },
-    overlayLabel: {
-      position: 'absolute',
-      paddingVertical: 10,
-      paddingHorizontal: 20,
-      borderRadius: 12,
-      borderWidth: 4,
-      zIndex: 100,
-    },
-    likeLabel: {
-      top: '35%',
-      right: 30,
-      borderColor: colors.success,
-      backgroundColor: colors.success + '99',
-      transform: [{ rotate: '15deg' }],
-    },
-    nopeLabel: {
-      top: '35%',
-      left: 30,
-      borderColor: colors.error,
-      backgroundColor: colors.error + '99',
-      transform: [{ rotate: '-15deg' }],
-    },
-    saveLabel: {
-      top: '25%',
-      alignSelf: 'center',
-      borderColor: colors.warning,
-      backgroundColor: colors.warning + '99',
-    },
-    overlayText: {
-      fontSize: 32,
-      fontWeight: '900',
-      color: '#FFFFFF',
-      letterSpacing: 4,
-      textShadowColor: 'rgba(0, 0, 0, 0.9)',
-      textShadowOffset: { width: 2, height: 2 },
-      textShadowRadius: 4,
-    },
-  });
-
-const createBrowseStyles = (colors: ThemeColors) =>
-  StyleSheet.create({
-    container: {
-      flex: 1,
-    },
+    // Search
     searchContainer: {
       paddingHorizontal: 16,
-      paddingTop: 12,
-      paddingBottom: 8,
-      gap: 10,
+      paddingVertical: 8,
     },
     searchInputContainer: {
       flexDirection: 'row',
       alignItems: 'center',
       backgroundColor: colors.backgroundSecondary,
       borderRadius: 10,
-      paddingHorizontal: 10,
+      paddingHorizontal: 12,
       borderWidth: 1.5,
       borderColor: colors.primary + '40',
       height: 40,
@@ -1847,245 +906,98 @@ const createBrowseStyles = (colors: ThemeColors) =>
       color: colors.text,
       paddingVertical: 0,
     },
-    clearButton: {
-      fontSize: 16,
-      color: colors.textMuted,
-      padding: 4,
+
+    // Cook Tonight banner
+    cookTonightBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginHorizontal: 16,
+      marginVertical: 8,
+      padding: 12,
+      borderRadius: 12,
+      backgroundColor: colors.primary + '10',
+      gap: 8,
     },
-    filterContainer: {
+    cookTonightText: {
+      flex: 1,
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.primary,
+    },
+
+    // Filter chips
+    filterSection: {
+      marginTop: 4,
+    },
+    filterChipRow: {
+      paddingHorizontal: 16,
+      paddingVertical: 6,
       gap: 8,
     },
     filterChip: {
-      paddingVertical: 6,
       paddingHorizontal: 14,
-      borderRadius: 16,
-      backgroundColor: colors.backgroundSecondary,
+      paddingVertical: 8,
+      borderRadius: 20,
       borderWidth: 1,
       borderColor: colors.border,
-      marginRight: 8,
+      backgroundColor: colors.backgroundSecondary,
+      marginRight: 0,
     },
     filterChipActive: {
-      backgroundColor: colors.primary + '20',
+      backgroundColor: colors.primary,
       borderColor: colors.primary,
     },
     filterChipText: {
       fontSize: 13,
-      fontWeight: '500',
+      fontWeight: '600',
       color: colors.textMuted,
     },
     filterChipTextActive: {
-      color: colors.primary,
+      color: '#FFF',
     },
-    dietaryBanner: {
+
+    // Sort row
+    sortRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
-      backgroundColor: colors.primary + '12',
-      marginHorizontal: 16,
-      marginBottom: 8,
-      paddingVertical: 8,
-      paddingHorizontal: 14,
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: colors.primary + '30',
+      paddingHorizontal: 16,
+      paddingVertical: 6,
+      gap: 8,
     },
-    dietaryBannerText: {
+    sortLabel: {
       fontSize: 13,
-      color: colors.textSecondary,
-      fontWeight: '500',
-      flex: 1,
-    },
-    dietaryBannerLink: {
-      fontSize: 13,
-      color: colors.primary,
-      fontWeight: '600',
-      marginLeft: 8,
-    },
-    expiringBanner: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: colors.warningLight,
-      marginHorizontal: 16,
-      marginBottom: 8,
-      padding: 12,
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: colors.warning,
-    },
-    expiringBannerContent: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-    },
-    expiringBannerIcon: {
-      fontSize: 20,
-      marginRight: 10,
-    },
-    expiringBannerText: {
-      flex: 1,
-    },
-    expiringBannerTitle: {
-      fontSize: 14,
-      fontWeight: '600',
-      color: colors.warningDark,
-      marginBottom: 2,
-    },
-    expiringBannerSubtitle: {
-      fontSize: 12,
-      color: colors.warningDark,
-    },
-    expiringBannerDismiss: {
-      padding: 4,
-      marginLeft: 8,
-    },
-    expiringBannerDismissText: {
-      fontSize: 14,
-      color: colors.warningDark,
-    },
-    loadingContainer: {
-      paddingTop: 80,
-      alignItems: 'center',
-    },
-    emptyContainer: {
-      paddingTop: 60,
-      alignItems: 'center',
-      paddingHorizontal: 32,
-    },
-    emptyIcon: {
-      fontSize: 48,
-      marginBottom: 12,
-    },
-    emptyText: {
-      fontSize: 18,
-      fontWeight: '600',
-      color: colors.text,
-      marginBottom: 6,
-    },
-    emptySubtext: {
-      fontSize: 14,
       color: colors.textMuted,
-      textAlign: 'center',
+      fontWeight: '500',
     },
-    recipeGrid: {
-      paddingHorizontal: 12,
-      paddingBottom: 80,
-    },
-    gridRow: {
-      justifyContent: 'space-between',
-      paddingHorizontal: 4,
-    },
-    recipeCard: {
-      width: (screenWidth - 40) / 2,
-      backgroundColor: colors.backgroundSecondary,
-      borderRadius: 14,
-      marginBottom: 12,
-      overflow: 'hidden',
-      ...Platform.select({
-        ios: {
-          shadowColor: colors.shadow,
-          shadowOffset: { width: 0, height: 1 },
-          shadowOpacity: 0.06,
-          shadowRadius: 6,
-        },
-        android: { elevation: 2 },
-      }),
-    },
-    recipeImageContainer: {
-      height: 120,
-      backgroundColor: colors.border,
-    },
-    recipeImage: {
-      width: '100%',
-      height: '100%',
-      resizeMode: 'cover',
-    },
-    recipeImagePlaceholder: {
-      width: '100%',
-      height: '100%',
+
+    // Loading
+    loadingContainer: {
+      flex: 1,
       justifyContent: 'center',
       alignItems: 'center',
     },
-    placeholderEmoji: {
-      fontSize: 40,
-    },
-    aiBadge: {
-      position: 'absolute',
-      top: 8,
-      right: 8,
-      backgroundColor: colors.secondary,
-      paddingHorizontal: 8,
-      paddingVertical: 3,
-      borderRadius: 8,
-    },
-    aiBadgeText: {
-      color: colors.buttonText,
-      fontSize: 10,
-      fontWeight: '700',
-    },
-    recipeInfo: {
-      padding: 10,
-    },
-    recipeTitle: {
-      fontSize: 14,
-      fontWeight: '600',
-      color: colors.text,
-      marginBottom: 4,
-      lineHeight: 19,
-    },
-    recipeMeta: {
-      flexDirection: 'row',
-      gap: 8,
-      marginBottom: 2,
-    },
-    recipeMetaText: {
-      fontSize: 12,
-      color: colors.textMuted,
-    },
-    calorieText: {
-      fontSize: 12,
-      fontWeight: '600',
-      color: colors.primary,
-    },
-  });
-
-const createMyRecipesStyles = (colors: ThemeColors) =>
-  StyleSheet.create({
-    container: {
-      flex: 1,
-    },
-    searchContainer: {
-      paddingHorizontal: 16,
-      paddingTop: 12,
-      paddingBottom: 8,
-    },
-    searchInputContainer: {
-      flexDirection: 'row',
+    footerLoader: {
+      paddingVertical: 20,
       alignItems: 'center',
-      backgroundColor: colors.backgroundSecondary,
-      borderRadius: 10,
-      paddingHorizontal: 10,
-      borderWidth: 1.5,
-      borderColor: colors.primary + '40',
-      height: 40,
     },
-    searchInput: {
-      flex: 1,
-      fontSize: 14,
-      color: colors.text,
-      paddingVertical: 0,
+
+    // Grid
+    gridContent: {
+      paddingHorizontal: 16,
     },
-    clearButton: {
-      fontSize: 16,
-      color: colors.textMuted,
-      padding: 4,
+    gridRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
     },
-    subTabContainer: {
+
+    // My Recipes tab pills
+    pillContainer: {
       flexDirection: 'row',
       paddingHorizontal: 16,
-      paddingVertical: 12,
+      paddingBottom: 12,
       gap: 8,
     },
-    subTab: {
+    pill: {
       flex: 1,
       flexDirection: 'row',
       alignItems: 'center',
@@ -2097,38 +1009,31 @@ const createMyRecipesStyles = (colors: ThemeColors) =>
       borderColor: colors.border,
       gap: 6,
     },
-    subTabActive: {
+    pillActive: {
       backgroundColor: colors.primary + '15',
       borderColor: colors.primary,
     },
-    subTabIcon: {
-      fontSize: 14,
-    },
-    subTabText: {
+    pillText: {
       fontSize: 13,
       fontWeight: '600',
       color: colors.textMuted,
     },
-    subTabTextActive: {
+    pillTextActive: {
       color: colors.primary,
     },
-    loadingContainer: {
-      paddingTop: 80,
-      alignItems: 'center',
-    },
+
+    // Empty states
     emptyContainer: {
-      paddingTop: 60,
+      paddingTop: 40,
       alignItems: 'center',
       paddingHorizontal: 32,
-    },
-    emptyIcon: {
-      fontSize: 48,
-      marginBottom: 12,
+      paddingBottom: 20,
     },
     emptyTitle: {
       fontSize: 18,
       fontWeight: '600',
       color: colors.text,
+      marginTop: 12,
       marginBottom: 6,
     },
     emptySubtitle: {
@@ -2137,84 +1042,179 @@ const createMyRecipesStyles = (colors: ThemeColors) =>
       textAlign: 'center',
       lineHeight: 20,
     },
-    recipeGrid: {
-      paddingHorizontal: 12,
-      paddingBottom: 80,
-    },
-    gridRow: {
-      justifyContent: 'space-between',
-      paddingHorizontal: 4,
-    },
-    recipeCard: {
-      width: (screenWidth - 40) / 2,
-      backgroundColor: colors.backgroundSecondary,
+
+    // Cook Tonight expanded card
+    cookTonightCard: {
+      marginHorizontal: 16,
+      marginBottom: 8,
+      padding: 16,
       borderRadius: 14,
-      marginBottom: 12,
-      overflow: 'hidden',
-      ...Platform.select({
-        ios: {
-          shadowColor: colors.shadow,
-          shadowOffset: { width: 0, height: 1 },
-          shadowOpacity: 0.06,
-          shadowRadius: 6,
-        },
-        android: { elevation: 2 },
-      }),
+      backgroundColor: colors.backgroundSecondary,
+      borderWidth: 1,
+      borderColor: colors.primary + '25',
     },
-    recipeImageContainer: {
-      height: 120,
-      backgroundColor: colors.border,
-    },
-    recipeImage: {
-      width: '100%',
-      height: '100%',
-      resizeMode: 'cover',
-    },
-    recipeImagePlaceholder: {
-      width: '100%',
-      height: '100%',
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    placeholderEmoji: {
-      fontSize: 40,
-    },
-    aiBadge: {
-      position: 'absolute',
-      top: 8,
-      right: 8,
-      backgroundColor: colors.secondary,
-      paddingHorizontal: 8,
-      paddingVertical: 3,
-      borderRadius: 8,
-    },
-    aiBadgeText: {
-      color: colors.buttonText,
-      fontSize: 10,
+    cookTonightCardTitle: {
+      fontSize: 18,
       fontWeight: '700',
-    },
-    recipeInfo: {
-      padding: 10,
-    },
-    recipeTitle: {
-      fontSize: 14,
-      fontWeight: '600',
       color: colors.text,
-      marginBottom: 4,
+      marginBottom: 6,
+    },
+    cookTonightCardSubtext: {
+      fontSize: 13,
+      color: colors.textSecondary,
       lineHeight: 19,
+      marginBottom: 8,
     },
-    recipeMeta: {
+    cookTonightMeta: {
       flexDirection: 'row',
-      gap: 8,
-      marginBottom: 2,
+      gap: 16,
+      marginBottom: 8,
     },
-    recipeMetaText: {
+    cookTonightMetaItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    cookTonightMetaText: {
       fontSize: 12,
       color: colors.textMuted,
+      fontWeight: '500',
     },
-    calorieText: {
+    cookTonightBuyText: {
+      fontSize: 12,
+      color: colors.warning || '#F59E0B',
+      marginBottom: 10,
+    },
+    cookTonightRefresh: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingTop: 8,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.border,
+    },
+
+    // Filter bar
+    filterBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      gap: 8,
+      flexWrap: 'wrap',
+    },
+    filterButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderRadius: 12,
+      backgroundColor: colors.backgroundSecondary,
+      borderWidth: 1,
+      borderColor: colors.border,
+      gap: 6,
+    },
+    filterButtonText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.textMuted,
+    },
+    filterBadge: {
+      backgroundColor: colors.primary,
+      borderRadius: 10,
+      minWidth: 20,
+      height: 20,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 5,
+    },
+    filterBadgeText: {
+      color: '#FFF',
+      fontSize: 11,
+      fontWeight: '700',
+    },
+    activeFilterPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 16,
+      backgroundColor: colors.primary + '15',
+      gap: 4,
+    },
+    activeFilterPillText: {
       fontSize: 12,
       fontWeight: '600',
       color: colors.primary,
+    },
+
+    // Filter modal
+    modalBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.4)',
+    },
+    filterSheet: {
+      backgroundColor: colors.background,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+      padding: 24,
+      paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+    },
+    filterSheetHandle: {
+      width: 36,
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: colors.border,
+      alignSelf: 'center',
+      marginBottom: 16,
+    },
+    filterSheetTitle: {
+      fontSize: 22,
+      fontWeight: '700',
+      color: colors.text,
+      marginBottom: 20,
+    },
+    filterSheetLabel: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.text,
+      marginBottom: 10,
+      marginTop: 8,
+    },
+    filterSheetChipRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginBottom: 8,
+    },
+    filterSheetActions: {
+      flexDirection: 'row',
+      gap: 12,
+      marginTop: 20,
+    },
+    filterSheetClear: {
+      flex: 1,
+      paddingVertical: 14,
+      borderRadius: 14,
+      borderWidth: 1.5,
+      borderColor: colors.border,
+      alignItems: 'center',
+    },
+    filterSheetClearText: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: colors.textMuted,
+    },
+    filterSheetApply: {
+      flex: 2,
+      paddingVertical: 14,
+      borderRadius: 14,
+      backgroundColor: colors.primary,
+      alignItems: 'center',
+    },
+    filterSheetApplyText: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: '#FFF',
     },
   });

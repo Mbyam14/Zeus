@@ -87,6 +87,12 @@ class PantryService {
     return response.data;
   }
 
+  // Get user's most frequently added items
+  async getFrequentItems(limit: number = 15): Promise<{ item_name: string; category: string; default_unit: string; add_count: number }[]> {
+    const response = await api.get(`/api/pantry/frequent-items?limit=${limit}`);
+    return response.data;
+  }
+
   // Get expiring items
   async getExpiringItems(days: number = 7): Promise<PantryItem[]> {
     const response = await api.get<PantryItem[]>(`/api/pantry/expiring/alerts?days=${days}`);

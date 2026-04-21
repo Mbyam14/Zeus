@@ -51,8 +51,10 @@ class UserPreferences(BaseModel):
     cuisine_preferences: list[str] = Field(default=[], description="Preferred cuisines (e.g., Italian, Mexican, Asian)")
     cooking_skill: str = Field(default="intermediate", pattern="^(beginner|intermediate|advanced)$")
     household_size: int = Field(default=2, ge=1, le=20, description="Number of people to cook for")
-    calorie_target: Optional[int] = Field(None, ge=1000, le=5000, description="Daily calorie target")
+    calorie_target: Optional[int] = Field(None, ge=800, le=8000, description="Daily calorie target")
     protein_target_grams: Optional[int] = Field(None, ge=20, le=500, description="Daily protein target in grams")
+    carb_target_grams: Optional[int] = Field(None, ge=20, le=800, description="Daily carb target in grams")
+    fat_target_grams: Optional[int] = Field(None, ge=10, le=300, description="Daily fat target in grams")
     allergies: list[str] = Field(default=[], description="Food allergies")
     disliked_ingredients: list[str] = Field(default=[], description="Ingredients to avoid")
 
@@ -87,3 +89,43 @@ class UserProfileUpdate(BaseModel):
     """Update user profile including preferences"""
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     preferences: Optional[UserPreferences] = None
+
+
+class BodyStats(BaseModel):
+    """User body stats for TDEE calculation"""
+    sex: Optional[str] = Field(None, pattern="^(male|female)$")
+    age: Optional[int] = Field(None, ge=13, le=120)
+    height_cm: Optional[float] = Field(None, ge=50, le=300)
+    weight_kg: Optional[float] = Field(None, ge=20, le=400)
+    goal_weight_kg: Optional[float] = Field(None, ge=20, le=400)
+    activity_level: Optional[str] = Field(
+        None,
+        pattern="^(sedentary|lightly_active|moderately_active|very_active|extra_active)$"
+    )
+    units: str = Field(default="imperial", pattern="^(imperial|metric)$")
+
+
+class ChangePasswordRequest(BaseModel):
+    """Change password request"""
+    current_password: str
+    new_password: str = Field(..., min_length=8, max_length=72)
+
+
+class NotificationPreferences(BaseModel):
+    """User notification preferences"""
+    meal_reminders: bool = True
+    prep_reminders: bool = False
+    grocery_reminders: bool = True
+    expiring_items: bool = True
+    new_recipes: bool = False
+    weekly_summary: bool = False
+
+
+class DeleteAccountRequest(BaseModel):
+    """Delete account request - requires password confirmation"""
+    password: str
+
+
+class AvatarUpload(BaseModel):
+    """Avatar upload as base64"""
+    image_base64: str = Field(..., description="Base64-encoded JPEG image")

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -131,6 +131,31 @@ export const RecipeDetailScreen: React.FC<RecipeDetailScreenProps> = ({
     return Math.round(value * servingScale);
   };
 
+  // Timer helpers
+  const extractTime = (text: string): number | null => {
+    const patterns = [
+      /(\d+)\s*(?:hour|hr)s?/i,
+      /(\d+)\s*(?:minute|min)s?/i,
+      /(\d+)\s*(?:second|sec)s?/i,
+    ];
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      if (match) {
+        const num = parseInt(match[1]);
+        if (pattern.source.includes('hour')) return num * 3600;
+        if (pattern.source.includes('minute') || pattern.source.includes('min')) return num * 60;
+        if (pattern.source.includes('second')) return num;
+      }
+    }
+    return null;
+  };
+
+  const formatTimer = (seconds: number): string => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
   // Recipe action state
   const [isSaved, setIsSaved] = useState(recipe.is_saved || false);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
@@ -140,6 +165,36 @@ export const RecipeDetailScreen: React.FC<RecipeDetailScreenProps> = ({
   const [cookingMode, setCookingMode] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
   const [showIngredients, setShowIngredients] = useState(false);
+
+  // Timer state
+  const [timerSeconds, setTimerSeconds] = useState<number | null>(null);
+  const [timerRunning, setTimerRunning] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Timer effect
+  useEffect(() => {
+    if (timerRunning && timerSeconds !== null && timerSeconds > 0) {
+      timerRef.current = setInterval(() => {
+        setTimerSeconds(prev => {
+          if (prev === null || prev <= 1) {
+            clearInterval(timerRef.current!);
+            setTimerRunning(false);
+            Alert.alert('Timer Done!', 'Time to move on to the next step.');
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      return () => { if (timerRef.current) clearInterval(timerRef.current); };
+    }
+  }, [timerRunning]);
+
+  // Reset timer when step changes
+  useEffect(() => {
+    setTimerRunning(false);
+    setTimerSeconds(null);
+    if (timerRef.current) clearInterval(timerRef.current);
+  }, [currentStep]);
 
   // Smart AI state
   const [substitutionModal, setSubstitutionModal] = useState<{ ingredient: string; loading: boolean; result: any } | null>(null);
@@ -333,22 +388,24 @@ Shared from Zeus - Your AI Meal Planner`;
             style={styles.backButton}
             onPress={() => navigation.goBack()}
           >
-            <Text style={styles.backButtonText}>←</Text>
+            <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <View style={styles.headerActions}>
             <TouchableOpacity
               style={[styles.headerActionButton, isSaved && styles.headerActionButtonActive]}
               onPress={handleSaveToggle}
             >
-              <Text style={[styles.headerActionText, isSaved && { color: '#FFFFFF' }]}>
-                {isSaved ? '✓' : '📌'}
-              </Text>
+              {isSaved ? (
+                <Ionicons name="checkmark" size={18} color="#FFF" />
+              ) : (
+                <Ionicons name="bookmark-outline" size={18} color="#FFF" />
+              )}
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.headerActionButton}
               onPress={() => setShowOptionsMenu(true)}
             >
-              <Text style={styles.headerActionText}>•••</Text>
+              <Ionicons name="ellipsis-horizontal" size={20} color="#FFF" />
             </TouchableOpacity>
           </View>
         </View>
@@ -387,13 +444,13 @@ Shared from Zeus - Your AI Meal Planner`;
           {/* Stats */}
           <View style={styles.statsRow}>
             <View style={styles.statItem}>
-              <Text style={styles.statIcon}>⏱️</Text>
+              <Ionicons name="time-outline" size={16} color={colors.textMuted} />
               <Text style={styles.statText}>
                 {(recipe.prep_time || 0) + (recipe.cook_time || 0)}m
               </Text>
             </View>
             <View style={styles.statItem}>
-              <Text style={styles.statIcon}>❤️</Text>
+              <Ionicons name="heart" size={16} color={colors.error || '#EF4444'} />
               <Text style={styles.statText}>{recipe.likes_count}</Text>
             </View>
             <View
@@ -439,28 +496,28 @@ Shared from Zeus - Your AI Meal Planner`;
               <View style={styles.macrosRow}>
                 {recipe.calories && (
                   <View style={styles.macroCard}>
-                    <Text style={styles.macroIcon}>🔥</Text>
+                    <Ionicons name="flame-outline" size={18} color={colors.primary} style={styles.macroIconSpacing} />
                     <Text style={styles.macroValue}>{scaleNutrition(recipe.calories)}</Text>
                     <Text style={styles.macroLabel}>Calories</Text>
                   </View>
                 )}
                 {recipe.protein_grams && (
                   <View style={styles.macroCard}>
-                    <Text style={styles.macroIcon}>💪</Text>
+                    <Ionicons name="barbell-outline" size={18} color="#4ECDC4" style={styles.macroIconSpacing} />
                     <Text style={styles.macroValue}>{scaleNutrition(recipe.protein_grams)}g</Text>
                     <Text style={styles.macroLabel}>Protein</Text>
                   </View>
                 )}
                 {recipe.carbs_grams && (
                   <View style={styles.macroCard}>
-                    <Text style={styles.macroIcon}>🍞</Text>
+                    <Ionicons name="nutrition-outline" size={18} color="#F59E0B" style={styles.macroIconSpacing} />
                     <Text style={styles.macroValue}>{scaleNutrition(recipe.carbs_grams)}g</Text>
                     <Text style={styles.macroLabel}>Carbs</Text>
                   </View>
                 )}
                 {recipe.fat_grams && (
                   <View style={styles.macroCard}>
-                    <Text style={styles.macroIcon}>🥑</Text>
+                    <Ionicons name="water-outline" size={18} color="#EF4444" style={styles.macroIconSpacing} />
                     <Text style={styles.macroValue}>{scaleNutrition(recipe.fat_grams)}g</Text>
                     <Text style={styles.macroLabel}>Fat</Text>
                   </View>
@@ -502,7 +559,7 @@ Shared from Zeus - Your AI Meal Planner`;
               onPress={startCookingMode}
               activeOpacity={0.8}
             >
-              <Text style={styles.startCookingIconFull}>👨‍🍳</Text>
+              <Ionicons name="restaurant-outline" size={24} color={colors.buttonText} />
               <Text style={styles.startCookingTextFull}>Start Cooking</Text>
             </TouchableOpacity>
           )}
@@ -540,7 +597,7 @@ Shared from Zeus - Your AI Meal Planner`;
               })
             ) : (
               <View style={styles.emptySection}>
-                <Text style={styles.emptySectionIcon}>📝</Text>
+                <Ionicons name="list-outline" size={32} color={colors.textMuted} style={{ marginBottom: 12 }} />
                 <Text style={styles.emptySectionTitle}>Ingredients Not Available</Text>
                 <Text style={styles.emptySectionText}>
                   This is a quick-generated meal plan recipe. Full ingredient details will be available when you generate the complete recipe.
@@ -563,7 +620,7 @@ Shared from Zeus - Your AI Meal Planner`;
               ))
             ) : (
               <View style={styles.emptySection}>
-                <Text style={styles.emptySectionIcon}>👨‍🍳</Text>
+                <Ionicons name="restaurant-outline" size={32} color={colors.primary} style={{ marginBottom: 12 }} />
                 <Text style={styles.emptySectionTitle}>Instructions Not Available</Text>
                 <Text style={styles.emptySectionText}>
                   Cooking steps will be available when the full recipe is generated. Use the description and nutrition info above as a guide for now.
@@ -597,7 +654,7 @@ Shared from Zeus - Your AI Meal Planner`;
               style={styles.fullImageCloseButton}
               onPress={() => setShowFullImage(false)}
             >
-              <Text style={styles.fullImageCloseText}>✕</Text>
+              <Ionicons name="close" size={22} color="#FFFFFF" />
             </TouchableOpacity>
           </TouchableOpacity>
         </Modal>
@@ -619,17 +676,27 @@ Shared from Zeus - Your AI Meal Planner`;
             <Text style={styles.optionsMenuTitle}>{recipe.title}</Text>
 
             <TouchableOpacity style={styles.optionsMenuItem} onPress={handleSaveToggle}>
-              <Text style={styles.optionsMenuIcon}>{isSaved ? '✓' : '📌'}</Text>
+              <View style={styles.optionsMenuIconContainer}>
+                {isSaved ? (
+                  <Ionicons name="checkmark" size={20} color={colors.text} />
+                ) : (
+                  <Ionicons name="bookmark-outline" size={20} color={colors.text} />
+                )}
+              </View>
               <Text style={styles.optionsMenuText}>{isSaved ? 'Saved — Tap to Remove' : 'Save Recipe'}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.optionsMenuItem} onPress={handleShare}>
-              <Text style={styles.optionsMenuIcon}>📤</Text>
+              <View style={styles.optionsMenuIconContainer}>
+                <Ionicons name="share-outline" size={20} color={colors.text} />
+              </View>
               <Text style={styles.optionsMenuText}>Share Recipe</Text>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.optionsMenuItem} onPress={handleAddToMealPlan}>
-              <Text style={styles.optionsMenuIcon}>📅</Text>
+              <View style={styles.optionsMenuIconContainer}>
+                <Ionicons name="calendar-outline" size={20} color={colors.text} />
+              </View>
               <Text style={styles.optionsMenuText}>Add to Meal Plan</Text>
             </TouchableOpacity>
 
@@ -641,8 +708,43 @@ Shared from Zeus - Your AI Meal Planner`;
                   startCookingMode();
                 }}
               >
-                <Text style={styles.optionsMenuIcon}>👨‍🍳</Text>
+                <View style={styles.optionsMenuIconContainer}>
+                  <Ionicons name="restaurant-outline" size={20} color={colors.text} />
+                </View>
                 <Text style={styles.optionsMenuText}>Start Cooking Mode</Text>
+              </TouchableOpacity>
+            )}
+
+            {user && recipe.user_id === user.id && (
+              <TouchableOpacity
+                style={styles.optionsMenuItem}
+                onPress={() => {
+                  setShowOptionsMenu(false);
+                  Alert.alert(
+                    'Delete Recipe',
+                    `Are you sure you want to delete "${recipe.title}"? This cannot be undone.`,
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Delete',
+                        style: 'destructive',
+                        onPress: async () => {
+                          try {
+                            await recipeService.deleteRecipe(recipe.id);
+                            navigation.goBack();
+                          } catch (err: any) {
+                            Alert.alert('Error', err?.response?.data?.detail || 'Failed to delete recipe');
+                          }
+                        },
+                      },
+                    ]
+                  );
+                }}
+              >
+                <View style={styles.optionsMenuIconContainer}>
+                  <Ionicons name="trash-outline" size={20} color={colors.error} />
+                </View>
+                <Text style={[styles.optionsMenuText, { color: colors.error }]}>Delete Recipe</Text>
               </TouchableOpacity>
             )}
 
@@ -670,7 +772,7 @@ Shared from Zeus - Your AI Meal Planner`;
               style={styles.cookingModeExitButton}
               onPress={exitCookingMode}
             >
-              <Text style={styles.cookingModeExitText}>✕</Text>
+              <Ionicons name="close" size={22} color={colors.text} />
             </TouchableOpacity>
             <Text style={styles.cookingModeTitle}>{recipe.title}</Text>
             <TouchableOpacity
@@ -680,7 +782,7 @@ Shared from Zeus - Your AI Meal Planner`;
               ]}
               onPress={() => setShowIngredients(!showIngredients)}
             >
-              <Text style={styles.ingredientsToggleText}>📋</Text>
+              <Ionicons name="list-outline" size={20} color={showIngredients ? colors.buttonText : colors.primary} />
             </TouchableOpacity>
           </View>
 
@@ -723,18 +825,61 @@ Shared from Zeus - Your AI Meal Planner`;
               </ScrollView>
             </View>
 
-            {/* AI Cooking Tip */}
-            {cookingTip.tip && (
-              <View style={{ backgroundColor: colors.primary + '10', borderRadius: 12, padding: 14, marginTop: 12, marginHorizontal: 16 }}>
-                <Text style={{ fontSize: 13, fontWeight: '600', color: colors.primary, marginBottom: 6 }}>AI Tip</Text>
-                <Text style={{ fontSize: 14, lineHeight: 21, color: colors.text }}>{cookingTip.tip}</Text>
-                <TouchableOpacity onPress={() => setCookingTip({ loading: false, tip: null })} style={{ alignSelf: 'flex-end', marginTop: 6 }}>
-                  <Text style={{ fontSize: 12, color: colors.textMuted }}>Dismiss</Text>
-                </TouchableOpacity>
-              </View>
-            )}
+            {/* Step Timer */}
+            {(() => {
+              const stepText = scaledInstructions?.[currentStep]?.instruction || '';
+              const detectedTime = extractTime(stepText);
+              if (!detectedTime && timerSeconds === null) return null;
 
-            {/* Ask AI + Swipe Hint */}
+              return (
+                <View style={styles.timerContainer}>
+                  {timerSeconds !== null ? (
+                    <>
+                      <Text style={[styles.timerDisplay, timerSeconds === 0 && { color: colors.success }]}>
+                        {formatTimer(timerSeconds)}
+                      </Text>
+                      <View style={styles.timerButtons}>
+                        <TouchableOpacity
+                          style={[styles.timerButton, { backgroundColor: timerRunning ? colors.error + '15' : colors.primary + '15' }]}
+                          onPress={() => {
+                            if (timerRunning) {
+                              setTimerRunning(false);
+                              if (timerRef.current) clearInterval(timerRef.current);
+                            } else if (timerSeconds > 0) {
+                              setTimerRunning(true);
+                            }
+                          }}
+                        >
+                          <Ionicons name={timerRunning ? 'pause' : 'play'} size={18} color={timerRunning ? colors.error : colors.primary} />
+                          <Text style={[styles.timerButtonText, { color: timerRunning ? colors.error : colors.primary }]}>
+                            {timerRunning ? 'Pause' : 'Resume'}
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.timerButton, { backgroundColor: colors.backgroundSecondary }]}
+                          onPress={() => { setTimerRunning(false); setTimerSeconds(null); if (timerRef.current) clearInterval(timerRef.current); }}
+                        >
+                          <Ionicons name="close" size={18} color={colors.textMuted} />
+                          <Text style={[styles.timerButtonText, { color: colors.textMuted }]}>Cancel</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </>
+                  ) : detectedTime ? (
+                    <TouchableOpacity
+                      style={styles.startTimerButton}
+                      onPress={() => { setTimerSeconds(detectedTime); setTimerRunning(true); }}
+                    >
+                      <Ionicons name="timer-outline" size={20} color={colors.primary} />
+                      <Text style={styles.startTimerText}>
+                        Start {detectedTime >= 3600 ? `${Math.floor(detectedTime / 3600)}h ` : ''}{detectedTime >= 60 ? `${Math.floor((detectedTime % 3600) / 60)}m` : `${detectedTime}s`} Timer
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+              );
+            })()}
+
+            {/* Ask AI button + Swipe Hint */}
             <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 16, marginTop: 8 }}>
               <TouchableOpacity
                 onPress={handleCookingTip}
@@ -754,6 +899,28 @@ Shared from Zeus - Your AI Meal Planner`;
             <Text style={styles.swipeHint}>Swipe left or right to navigate</Text>
           </Animated.View>
 
+          {/* AI Cooking Tip - rendered OUTSIDE animated view as an overlay */}
+          {cookingTip.tip && (
+            <View style={{ position: 'absolute', bottom: 100, left: 16, right: 16, backgroundColor: colors.card, borderRadius: 16, padding: 16, shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 8, maxHeight: 250, borderWidth: 1, borderColor: colors.border }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Ionicons name="sparkles" size={16} color={colors.primary} />
+                  <Text style={{ fontSize: 15, fontWeight: '700', color: colors.primary }}>AI Tip</Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => setCookingTip({ loading: false, tip: null })}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  style={{ backgroundColor: colors.backgroundSecondary, width: 28, height: 28, borderRadius: 14, justifyContent: 'center', alignItems: 'center' }}
+                >
+                  <Ionicons name="close" size={16} color={colors.text} />
+                </TouchableOpacity>
+              </View>
+              <ScrollView style={{ maxHeight: 180 }} showsVerticalScrollIndicator={false}>
+                <Text style={{ fontSize: 14, lineHeight: 22, color: colors.text }}>{cookingTip.tip}</Text>
+              </ScrollView>
+            </View>
+          )}
+
           {/* Navigation Buttons */}
           <View style={styles.cookingNavigation}>
             <TouchableOpacity
@@ -764,7 +931,7 @@ Shared from Zeus - Your AI Meal Planner`;
               onPress={goToPreviousStep}
               disabled={currentStep === 0}
             >
-              <Text style={styles.cookingNavButtonIcon}>←</Text>
+              <Ionicons name="arrow-back" size={20} color={colors.text} />
               <Text style={styles.cookingNavButtonText}>Previous</Text>
             </TouchableOpacity>
 
@@ -773,7 +940,7 @@ Shared from Zeus - Your AI Meal Planner`;
                 style={[styles.cookingNavButton, styles.cookingNavButtonDone]}
                 onPress={exitCookingMode}
               >
-                <Text style={styles.cookingNavButtonIcon}>✓</Text>
+                <Ionicons name="checkmark" size={22} color="#FFF" />
                 <Text style={styles.cookingNavButtonTextDone}>Done!</Text>
               </TouchableOpacity>
             ) : (
@@ -782,7 +949,7 @@ Shared from Zeus - Your AI Meal Planner`;
                 onPress={goToNextStep}
               >
                 <Text style={styles.cookingNavButtonTextNext}>Next</Text>
-                <Text style={styles.cookingNavButtonIcon}>→</Text>
+                <Ionicons name="arrow-forward" size={20} color={colors.buttonText} />
               </TouchableOpacity>
             )}
           </View>
@@ -797,7 +964,7 @@ Shared from Zeus - Your AI Meal Planner`;
                     onPress={() => setShowIngredients(false)}
                     style={styles.ingredientsOverlayClose}
                   >
-                    <Text style={styles.ingredientsOverlayCloseText}>✕</Text>
+                    <Ionicons name="close" size={22} color={colors.text} />
                   </TouchableOpacity>
                 </View>
                 <ScrollView style={styles.ingredientsOverlayScroll}>
@@ -965,6 +1132,11 @@ const createStyles = (colors: any) =>
       marginRight: 16,
       width: 30,
       textAlign: 'center',
+    },
+    optionsMenuIconContainer: {
+      marginRight: 16,
+      width: 30,
+      alignItems: 'center',
     },
     optionsMenuText: {
       fontSize: 17,
@@ -1274,6 +1446,9 @@ const createStyles = (colors: any) =>
       fontSize: 20,
       marginBottom: 4,
     },
+    macroIconSpacing: {
+      marginBottom: 4,
+    },
     macroValue: {
       fontSize: 18,
       fontWeight: 'bold',
@@ -1560,4 +1735,12 @@ const createStyles = (colors: any) =>
       flex: 1,
       lineHeight: 24,
     },
+    // Timer styles
+    timerContainer: { alignItems: 'center' as const, marginVertical: 12 },
+    timerDisplay: { fontSize: 48, fontWeight: '700' as const, color: colors.primary, fontVariant: ['tabular-nums' as const] },
+    timerButtons: { flexDirection: 'row' as const, gap: 12, marginTop: 8 },
+    timerButton: { flexDirection: 'row' as const, alignItems: 'center' as const, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, gap: 6 },
+    timerButtonText: { fontSize: 14, fontWeight: '600' as const },
+    startTimerButton: { flexDirection: 'row' as const, alignItems: 'center' as const, backgroundColor: colors.primary + '12', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 14, gap: 8 },
+    startTimerText: { fontSize: 14, fontWeight: '600' as const, color: colors.primary },
   });

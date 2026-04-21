@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from app.schemas.user import UserRegister, UserLogin, UserProfile, UserResponse, Token, RefreshRequest
+from app.schemas.user import UserRegister, UserLogin, UserProfile, UserResponse, Token, RefreshRequest, ChangePasswordRequest, DeleteAccountRequest
 from app.services.auth_service import auth_service
 from app.utils.dependencies import get_current_active_user
 from app.config import settings
@@ -45,3 +45,27 @@ async def update_profile(
     """Update current user's profile information."""
     update_data = profile_data.dict()
     return await auth_service.update_user_profile(current_user.id, update_data)
+
+
+@router.post("/change-password")
+@limiter.limit(settings.rate_limit_auth)
+async def change_password(
+    request: Request,
+    body: ChangePasswordRequest,
+    current_user: UserResponse = Depends(get_current_active_user)
+):
+    """Change user password. Requires current password verification."""
+    await auth_service.change_password(current_user.id, body.current_password, body.new_password)
+    return {"message": "Password changed successfully"}
+
+
+@router.delete("/account")
+@limiter.limit(settings.rate_limit_auth)
+async def delete_account(
+    request: Request,
+    body: DeleteAccountRequest,
+    current_user: UserResponse = Depends(get_current_active_user)
+):
+    """Permanently delete user account and all associated data."""
+    await auth_service.delete_account(current_user.id, body.password)
+    return {"message": "Account deleted successfully"}

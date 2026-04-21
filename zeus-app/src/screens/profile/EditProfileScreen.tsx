@@ -10,366 +10,426 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  SafeAreaView,
+  Image,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { useAuthStore } from '../../store/authStore';
 import { useThemeStore } from '../../store/themeStore';
 import { authService } from '../../services/authService';
+import { userService } from '../../services/userService';
 
-export const EditProfileScreen: React.FC = () => {
-  const navigation = useNavigation();
-  const { user, loadUser } = useAuthStore();
+interface EditProfileScreenProps {
+  navigation: any;
+}
+
+export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({ navigation }) => {
+  const { user, loadUser, logout } = useAuthStore();
   const { colors } = useThemeStore();
 
   const [username, setUsername] = useState(user?.username || '');
   const [email, setEmail] = useState(user?.email || '');
-  const [loading, setSaving] = useState(false);
-  const [errors, setErrors] = useState<{ username?: string; email?: string }>({});
+  const [saving, setSaving] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
-  const validateForm = (): boolean => {
-    const newErrors: { username?: string; email?: string } = {};
+  // Password change
+  const [showPasswordSection, setShowPasswordSection] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [changingPassword, setChangingPassword] = useState(false);
 
-    if (!username.trim()) {
-      newErrors.username = 'Username is required';
-    } else if (username.length < 3) {
-      newErrors.username = 'Username must be at least 3 characters';
-    } else if (!/^[a-zA-Z0-9_]+$/.test(username)) {
-      newErrors.username = 'Username can only contain letters, numbers, and underscores';
+  // Delete account
+  const [showDeleteSection, setShowDeleteSection] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleting, setDeleting] = useState(false);
+
+  const avatarUrl = user?.profile_data?.avatar_url;
+  const hasChanges = username !== user?.username || email !== user?.email;
+
+  const handleSaveProfile = async () => {
+    if (!username.trim() || username.length < 3) {
+      Alert.alert('Error', 'Username must be at least 3 characters');
+      return;
     }
-
-    if (!email.trim()) {
-      newErrors.email = 'Email is required';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      newErrors.email = 'Please enter a valid email address';
+    if (!email.includes('@')) {
+      Alert.alert('Error', 'Please enter a valid email');
+      return;
     }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const handleSave = async () => {
-    if (!validateForm()) return;
 
     try {
       setSaving(true);
-
-      await authService.updateProfile({
-        username: username.trim(),
-        email: email.trim(),
-      });
-
-      // Reload user data to update the store
+      await authService.updateProfile({ username: username.trim(), profile_data: user?.profile_data || {} });
       await loadUser();
-
-      Alert.alert('Success', 'Profile updated successfully', [
-        { text: 'OK', onPress: () => navigation.goBack() },
-      ]);
+      Alert.alert('Success', 'Profile updated');
     } catch (error: any) {
-      console.error('Failed to update profile:', error);
-      const message = error.response?.data?.detail || 'Failed to update profile. Please try again.';
-      Alert.alert('Error', message);
+      Alert.alert('Error', error?.response?.data?.detail || 'Failed to update profile');
     } finally {
       setSaving(false);
     }
   };
 
-  const hasChanges = username !== user?.username || email !== user?.email;
+  const handlePickPhoto = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission Required', 'Please allow photo library access to change your avatar.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.5,
+      base64: true,
+    });
+
+    if (!result.canceled && result.assets[0].base64) {
+      try {
+        setUploadingPhoto(true);
+        await userService.uploadAvatar(result.assets[0].base64);
+        await loadUser();
+      } catch (error: any) {
+        Alert.alert('Error', error?.response?.data?.detail || 'Failed to upload photo');
+      } finally {
+        setUploadingPhoto(false);
+      }
+    }
+  };
+
+  const handleChangePassword = async () => {
+    if (!currentPassword) {
+      Alert.alert('Error', 'Please enter your current password');
+      return;
+    }
+    if (newPassword.length < 8) {
+      Alert.alert('Error', 'New password must be at least 8 characters');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      Alert.alert('Error', 'New passwords do not match');
+      return;
+    }
+
+    try {
+      setChangingPassword(true);
+      await authService.changePassword(currentPassword, newPassword);
+      Alert.alert('Success', 'Password changed successfully');
+      setShowPasswordSection(false);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (error: any) {
+      Alert.alert('Error', error?.response?.data?.detail || 'Failed to change password');
+    } finally {
+      setChangingPassword(false);
+    }
+  };
+
+  const handleDeleteAccount = () => {
+    if (!deletePassword) {
+      Alert.alert('Error', 'Please enter your password to confirm');
+      return;
+    }
+
+    Alert.alert(
+      'Delete Account',
+      'This will permanently delete your account and ALL data (recipes, meal plans, pantry, AI conversations). This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Forever',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setDeleting(true);
+              await authService.deleteAccount(deletePassword);
+              await logout();
+            } catch (error: any) {
+              Alert.alert('Error', error?.response?.data?.detail || 'Failed to delete account');
+              setDeleting(false);
+            }
+          },
+        },
+      ]
+    );
+  };
 
   const styles = createStyles(colors);
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
+    <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Text style={styles.backArrow}>←</Text>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerButton}>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Edit Profile</Text>
         <TouchableOpacity
-          onPress={handleSave}
-          style={[styles.saveButton, !hasChanges && styles.saveButtonDisabled]}
-          disabled={!hasChanges || loading}
+          onPress={handleSaveProfile}
+          disabled={saving || !hasChanges}
+          style={styles.headerButton}
         >
-          {loading ? (
+          {saving ? (
             <ActivityIndicator size="small" color={colors.primary} />
           ) : (
-            <Text style={[styles.saveButtonText, !hasChanges && styles.saveButtonTextDisabled]}>
-              Save
-            </Text>
+            <Ionicons name="checkmark" size={26} color={hasChanges ? colors.primary : colors.textMuted} />
           )}
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.scrollView} keyboardShouldPersistTaps="handled">
-        {/* Avatar Section */}
-        <View style={styles.avatarSection}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>
-              {username?.charAt(0).toUpperCase() || 'U'}
-            </Text>
-          </View>
-          <TouchableOpacity
-            style={styles.changeAvatarButton}
-            onPress={() => Alert.alert('Coming Soon', 'Avatar upload will be available in a future update.')}
-          >
-            <Text style={styles.changeAvatarText}>Change Photo</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Form Fields */}
-        <View style={styles.formSection}>
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Username</Text>
-            <TextInput
-              style={[styles.input, errors.username && styles.inputError]}
-              value={username}
-              onChangeText={(text) => {
-                setUsername(text);
-                if (errors.username) setErrors({ ...errors, username: undefined });
-              }}
-              placeholder="Enter username"
-              placeholderTextColor={colors.textMuted}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            {errors.username && <Text style={styles.errorText}>{errors.username}</Text>}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+          {/* Avatar */}
+          <View style={styles.avatarSection}>
+            <TouchableOpacity onPress={handlePickPhoto} disabled={uploadingPhoto} activeOpacity={0.7}>
+              <View style={styles.avatarRing}>
+                {avatarUrl ? (
+                  <Image source={{ uri: avatarUrl }} style={styles.avatar} />
+                ) : (
+                  <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
+                    <Text style={styles.avatarText}>
+                      {user?.username?.charAt(0).toUpperCase() || 'U'}
+                    </Text>
+                  </View>
+                )}
+                <View style={styles.cameraIcon}>
+                  {uploadingPhoto ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Ionicons name="camera" size={16} color="#fff" />
+                  )}
+                </View>
+              </View>
+            </TouchableOpacity>
+            <Text style={styles.changePhotoText}>Tap to change photo</Text>
           </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Email</Text>
-            <TextInput
-              style={[styles.input, errors.email && styles.inputError]}
-              value={email}
-              onChangeText={(text) => {
-                setEmail(text);
-                if (errors.email) setErrors({ ...errors, email: undefined });
-              }}
-              placeholder="Enter email"
-              placeholderTextColor={colors.textMuted}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            {errors.email && <Text style={styles.errorText}>{errors.email}</Text>}
-          </View>
-        </View>
-
-        {/* Change Password Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>SECURITY</Text>
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => Alert.alert('Coming Soon', 'Password change will be available in a future update.')}
-          >
-            <View style={styles.menuItemLeft}>
-              <Text style={styles.menuItemIcon}>🔐</Text>
-              <Text style={styles.menuItemLabel}>Change Password</Text>
+          {/* Username & Email */}
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>ACCOUNT INFO</Text>
+            <View style={styles.card}>
+              <View style={styles.field}>
+                <Text style={styles.fieldLabel}>Username</Text>
+                <TextInput
+                  style={styles.input}
+                  value={username}
+                  onChangeText={setUsername}
+                  placeholder="Username"
+                  placeholderTextColor={colors.textMuted}
+                  autoCapitalize="none"
+                />
+              </View>
+              <View style={[styles.field, styles.fieldLast]}>
+                <Text style={styles.fieldLabel}>Email</Text>
+                <TextInput
+                  style={styles.input}
+                  value={email}
+                  onChangeText={setEmail}
+                  placeholder="Email"
+                  placeholderTextColor={colors.textMuted}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+              </View>
             </View>
-            <Text style={styles.menuItemArrow}>›</Text>
-          </TouchableOpacity>
-        </View>
+          </View>
 
-        {/* Danger Zone */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>ACCOUNT</Text>
-          <TouchableOpacity
-            style={styles.dangerItem}
-            onPress={() => {
-              Alert.alert(
-                'Delete Account',
-                'Are you sure you want to delete your account? This action cannot be undone.',
-                [
-                  { text: 'Cancel', style: 'cancel' },
-                  {
-                    text: 'Delete',
-                    style: 'destructive',
-                    onPress: () => Alert.alert('Coming Soon', 'Account deletion will be available in a future update.'),
-                  },
-                ]
-              );
-            }}
-          >
-            <View style={styles.menuItemLeft}>
-              <Text style={styles.menuItemIcon}>🗑️</Text>
-              <Text style={styles.dangerItemLabel}>Delete Account</Text>
+          {/* Change Password */}
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>SECURITY</Text>
+            <View style={styles.card}>
+              <TouchableOpacity
+                style={[styles.expandableHeader, showPasswordSection && styles.expandableHeaderOpen]}
+                onPress={() => setShowPasswordSection(!showPasswordSection)}
+              >
+                <View style={styles.expandableLeft}>
+                  <Ionicons name="lock-closed-outline" size={20} color={colors.text} style={{ marginRight: 12 }} />
+                  <Text style={styles.expandableLabel}>Change Password</Text>
+                </View>
+                <Ionicons
+                  name={showPasswordSection ? 'chevron-up' : 'chevron-down'}
+                  size={18}
+                  color={colors.textMuted}
+                />
+              </TouchableOpacity>
+
+              {showPasswordSection && (
+                <View style={styles.expandableContent}>
+                  <TextInput
+                    style={styles.passwordInput}
+                    value={currentPassword}
+                    onChangeText={setCurrentPassword}
+                    placeholder="Current password"
+                    placeholderTextColor={colors.textMuted}
+                    secureTextEntry
+                  />
+                  <TextInput
+                    style={styles.passwordInput}
+                    value={newPassword}
+                    onChangeText={setNewPassword}
+                    placeholder="New password (min 8 characters)"
+                    placeholderTextColor={colors.textMuted}
+                    secureTextEntry
+                  />
+                  <TextInput
+                    style={[styles.passwordInput, { marginBottom: 0 }]}
+                    value={confirmPassword}
+                    onChangeText={setConfirmPassword}
+                    placeholder="Confirm new password"
+                    placeholderTextColor={colors.textMuted}
+                    secureTextEntry
+                  />
+                  <TouchableOpacity
+                    style={styles.actionButton}
+                    onPress={handleChangePassword}
+                    disabled={changingPassword}
+                  >
+                    {changingPassword ? (
+                      <ActivityIndicator size="small" color={colors.buttonText} />
+                    ) : (
+                      <Text style={styles.actionButtonText}>Update Password</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
-            <Text style={styles.menuItemArrow}>›</Text>
-          </TouchableOpacity>
-        </View>
+          </View>
 
-        <View style={styles.bottomSpacer} />
-      </ScrollView>
-    </KeyboardAvoidingView>
+          {/* Delete Account */}
+          <View style={styles.section}>
+            <Text style={[styles.sectionLabel, { color: colors.error }]}>DANGER ZONE</Text>
+            <View style={[styles.card, { borderWidth: 1, borderColor: colors.error + '30' }]}>
+              <TouchableOpacity
+                style={[styles.expandableHeader, showDeleteSection && styles.expandableHeaderOpen]}
+                onPress={() => setShowDeleteSection(!showDeleteSection)}
+              >
+                <View style={styles.expandableLeft}>
+                  <Ionicons name="trash-outline" size={20} color={colors.error} style={{ marginRight: 12 }} />
+                  <Text style={[styles.expandableLabel, { color: colors.error }]}>Delete Account</Text>
+                </View>
+                <Ionicons
+                  name={showDeleteSection ? 'chevron-up' : 'chevron-down'}
+                  size={18}
+                  color={colors.textMuted}
+                />
+              </TouchableOpacity>
+
+              {showDeleteSection && (
+                <View style={styles.expandableContent}>
+                  <Text style={styles.deleteWarning}>
+                    This will permanently delete your account and all associated data. This action cannot be undone.
+                  </Text>
+                  <TextInput
+                    style={styles.passwordInput}
+                    value={deletePassword}
+                    onChangeText={setDeletePassword}
+                    placeholder="Enter your password to confirm"
+                    placeholderTextColor={colors.textMuted}
+                    secureTextEntry
+                  />
+                  <TouchableOpacity
+                    style={[styles.actionButton, { backgroundColor: colors.error }]}
+                    onPress={handleDeleteAccount}
+                    disabled={deleting}
+                  >
+                    {deleting ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Text style={[styles.actionButtonText, { color: '#fff' }]}>Delete My Account</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          </View>
+
+          <View style={{ height: 40 }} />
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 };
 
 const createStyles = (colors: any) =>
   StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: colors.background,
-    },
+    container: { flex: 1, backgroundColor: colors.background },
     header: {
       flexDirection: 'row',
       alignItems: 'center',
-      paddingHorizontal: 16,
-      paddingVertical: 16,
+      justifyContent: 'space-between',
+      paddingHorizontal: 12,
+      paddingVertical: 12,
       backgroundColor: colors.backgroundSecondary,
-      borderBottomWidth: 1,
+      borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.border,
     },
-    backButton: {
-      width: 40,
-      height: 40,
-      justifyContent: 'center',
-      alignItems: 'center',
+    headerButton: {
+      width: 44, height: 44, borderRadius: 22,
+      justifyContent: 'center', alignItems: 'center',
     },
-    backArrow: {
-      fontSize: 24,
-      color: colors.text,
-    },
-    headerTitle: {
-      flex: 1,
-      fontSize: 20,
-      fontWeight: 'bold',
-      color: colors.text,
-      textAlign: 'center',
-    },
-    saveButton: {
-      paddingVertical: 4,
-      paddingHorizontal: 8,
-    },
-    saveButtonDisabled: {
-      opacity: 0.5,
-    },
-    saveButtonText: {
-      fontSize: 16,
-      color: colors.primary,
-      fontWeight: '600',
-    },
-    saveButtonTextDisabled: {
-      color: colors.textMuted,
-    },
-    scrollView: {
-      flex: 1,
-    },
-    avatarSection: {
-      alignItems: 'center',
-      paddingVertical: 32,
-      backgroundColor: colors.backgroundSecondary,
+    headerTitle: { fontSize: 18, fontWeight: '700', color: colors.primary },
+    scrollContent: { padding: 16 },
+    avatarSection: { alignItems: 'center', paddingVertical: 20 },
+    avatarRing: {
+      width: 108, height: 108, borderRadius: 54,
+      borderWidth: 3, borderColor: colors.primary + '30',
+      justifyContent: 'center', alignItems: 'center',
     },
     avatar: {
-      width: 100,
-      height: 100,
-      borderRadius: 50,
-      backgroundColor: colors.primary,
-      justifyContent: 'center',
-      alignItems: 'center',
-      marginBottom: 16,
+      width: 96, height: 96, borderRadius: 48,
+      justifyContent: 'center', alignItems: 'center',
     },
-    avatarText: {
-      fontSize: 40,
-      fontWeight: 'bold',
-      color: colors.buttonText,
+    avatarText: { fontSize: 38, fontWeight: '700', color: colors.buttonText },
+    cameraIcon: {
+      position: 'absolute', bottom: 0, right: 0,
+      width: 32, height: 32, borderRadius: 16,
+      backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center',
+      borderWidth: 2, borderColor: colors.background,
     },
-    changeAvatarButton: {
-      paddingVertical: 8,
-      paddingHorizontal: 16,
+    changePhotoText: { fontSize: 14, color: colors.primary, fontWeight: '500', marginTop: 8 },
+    section: { marginBottom: 8 },
+    sectionLabel: {
+      fontSize: 13, fontWeight: '600', color: colors.textMuted,
+      letterSpacing: 0.5, marginBottom: 8, marginLeft: 4,
     },
-    changeAvatarText: {
-      fontSize: 16,
-      color: colors.primary,
-      fontWeight: '500',
-    },
-    formSection: {
+    card: {
       backgroundColor: colors.backgroundSecondary,
-      paddingHorizontal: 24,
-      paddingVertical: 16,
-      marginTop: 16,
+      borderRadius: 16, overflow: 'hidden',
+      ...Platform.select({
+        ios: { shadowColor: colors.shadow, shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 8 },
+        android: { elevation: 2 },
+      }),
     },
-    inputGroup: {
-      marginBottom: 20,
+    field: {
+      paddingHorizontal: 16, paddingVertical: 14,
+      borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
     },
-    label: {
-      fontSize: 14,
-      fontWeight: '500',
-      color: colors.textSecondary,
-      marginBottom: 8,
+    fieldLast: { borderBottomWidth: 0 },
+    fieldLabel: { fontSize: 13, fontWeight: '600', color: colors.textMuted, marginBottom: 6 },
+    input: { fontSize: 16, color: colors.text, paddingVertical: 0 },
+    expandableHeader: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+      paddingHorizontal: 16, paddingVertical: 16,
     },
-    input: {
-      backgroundColor: colors.inputBackground,
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: 8,
-      padding: 12,
-      fontSize: 16,
-      color: colors.text,
+    expandableHeaderOpen: {
+      borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
     },
-    inputError: {
-      borderColor: colors.error,
+    expandableLeft: { flexDirection: 'row', alignItems: 'center' },
+    expandableLabel: { fontSize: 16, fontWeight: '600', color: colors.text },
+    expandableContent: { padding: 16 },
+    passwordInput: {
+      backgroundColor: colors.background, borderRadius: 12,
+      paddingHorizontal: 14, paddingVertical: Platform.OS === 'ios' ? 14 : 10,
+      fontSize: 15, color: colors.text, marginBottom: 10,
+      borderWidth: 1, borderColor: colors.border,
     },
-    errorText: {
-      fontSize: 12,
-      color: colors.error,
-      marginTop: 4,
+    actionButton: {
+      backgroundColor: colors.primary, borderRadius: 12,
+      paddingVertical: 14, alignItems: 'center', marginTop: 6,
     },
-    section: {
-      marginTop: 24,
-    },
-    sectionTitle: {
-      fontSize: 14,
-      fontWeight: '600',
-      color: colors.textMuted,
-      marginBottom: 8,
-      marginLeft: 24,
-      textTransform: 'uppercase',
-      letterSpacing: 0.5,
-    },
-    menuItem: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingVertical: 16,
-      paddingHorizontal: 24,
-      backgroundColor: colors.backgroundSecondary,
-      borderTopWidth: 1,
-      borderBottomWidth: 1,
-      borderColor: colors.border,
-    },
-    menuItemLeft: {
-      flexDirection: 'row',
-      alignItems: 'center',
-    },
-    menuItemIcon: {
-      fontSize: 20,
-      marginRight: 12,
-    },
-    menuItemLabel: {
-      fontSize: 16,
-      color: colors.text,
-    },
-    menuItemArrow: {
-      fontSize: 24,
-      color: colors.textMuted,
-    },
-    dangerItem: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingVertical: 16,
-      paddingHorizontal: 24,
-      backgroundColor: colors.backgroundSecondary,
-      borderTopWidth: 1,
-      borderBottomWidth: 1,
-      borderColor: colors.border,
-    },
-    dangerItemLabel: {
-      fontSize: 16,
-      color: colors.error,
-    },
-    bottomSpacer: {
-      height: 40,
+    actionButtonText: { fontSize: 16, fontWeight: '600', color: colors.buttonText },
+    deleteWarning: {
+      fontSize: 14, color: colors.error, lineHeight: 20, marginBottom: 12,
     },
   });

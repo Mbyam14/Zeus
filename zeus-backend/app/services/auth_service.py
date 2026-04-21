@@ -143,6 +143,73 @@ class AuthService:
         updated_user = result.data[0]
         return UserResponse(**updated_user)
 
+    async def change_password(self, user_id: str, current_password: str, new_password: str) -> None:
+        """Verify current password and update to new password."""
+        user_result = self.db.table("users").select("password_hash").eq("id", user_id).execute()
+
+        if not user_result.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+
+        if not verify_password(current_password, user_result.data[0]["password_hash"]):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Current password is incorrect"
+            )
+
+        new_hash = get_password_hash(new_password)
+        self.db.table("users").update({"password_hash": new_hash}).eq("id", user_id).execute()
+
+    async def delete_account(self, user_id: str, password: str) -> None:
+        """Delete user account and all associated data after verifying password."""
+        user_result = self.db.table("users").select("password_hash").eq("id", user_id).execute()
+
+        if not user_result.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+
+        if not verify_password(password, user_result.data[0]["password_hash"]):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Password is incorrect"
+            )
+
+        # Delete all user data from related tables
+        tables_to_clean = [
+            "ai_messages",  # via conversation
+            "ai_conversations",
+            "ai_user_memory",
+            "meal_plans",
+            "pantry_items",
+            "recipe_likes",
+            "recipe_saves",
+            "grocery_lists",
+        ]
+
+        # Delete AI messages via conversation IDs first
+        convos = self.db.table("ai_conversations").select("id").eq("user_id", user_id).execute()
+        if convos.data:
+            for convo in convos.data:
+                self.db.table("ai_messages").delete().eq("conversation_id", convo["id"]).execute()
+
+        # Delete from remaining tables
+        for table in tables_to_clean:
+            if table != "ai_messages":  # Already handled
+                try:
+                    self.db.table(table).delete().eq("user_id", user_id).execute()
+                except Exception:
+                    pass  # Table may not exist or have no rows
+
+        # Delete user-created recipes (not system recipes)
+        self.db.table("recipes").delete().eq("user_id", user_id).execute()
+
+        # Finally delete the user
+        self.db.table("users").delete().eq("id", user_id).execute()
+
 
 # Global auth service instance
 auth_service = AuthService()

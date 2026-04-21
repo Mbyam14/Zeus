@@ -42,6 +42,8 @@ export interface UserPreferences {
   household_size: number;
   calorie_target?: number;
   protein_target_grams?: number;
+  carb_target_grams?: number;
+  fat_target_grams?: number;
   allergies: string[];
   disliked_ingredients: string[];
   // Meal planning preferences
@@ -55,4 +57,27 @@ export interface UserPreferences {
 export interface UserProfileUpdate {
   name?: string;
   preferences?: UserPreferences;
+}
+
+export type Sex = 'male' | 'female';
+export type ActivityLevel = 'sedentary' | 'lightly_active' | 'moderately_active' | 'very_active' | 'extra_active';
+export type Units = 'imperial' | 'metric';
+
+export interface BodyStats {
+  sex: Sex | null;
+  age: number | null;
+  height_cm: number | null;
+  weight_kg: number | null;
+  goal_weight_kg: number | null;
+  activity_level: ActivityLevel | null;
+  units: Units;
+}
+
+export interface NotificationPreferences {
+  meal_reminders: boolean;
+  prep_reminders: boolean;
+  grocery_reminders: boolean;
+  expiring_items: boolean;
+  new_recipes: boolean;
+  weekly_summary: boolean;
 }

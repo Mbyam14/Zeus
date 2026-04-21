@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,137 +7,119 @@ import {
   SafeAreaView,
   ScrollView,
   Switch,
+  ActivityIndicator,
+  Alert,
+  Platform,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useThemeStore } from '../../store/themeStore';
+import { userService } from '../../services/userService';
+import { NotificationPreferences } from '../../types/user';
 
-interface NotificationSetting {
-  id: string;
-  label: string;
-  description: string;
-  enabled: boolean;
-}
+const NOTIFICATION_ITEMS: { key: keyof NotificationPreferences; label: string; desc: string; icon: string }[] = [
+  { key: 'meal_reminders', label: 'Meal Reminders', desc: 'Remind you before meal times', icon: 'restaurant-outline' },
+  { key: 'prep_reminders', label: 'Prep Reminders', desc: 'Remind you to prep ingredients', icon: 'time-outline' },
+  { key: 'grocery_reminders', label: 'Grocery Reminders', desc: 'When your grocery list is ready', icon: 'cart-outline' },
+  { key: 'expiring_items', label: 'Expiring Items', desc: 'Pantry items about to expire', icon: 'alert-circle-outline' },
+  { key: 'new_recipes', label: 'New Recipe Suggestions', desc: 'Personalized recipe picks', icon: 'sparkles-outline' },
+  { key: 'weekly_summary', label: 'Weekly Summary', desc: 'Your nutrition & planning recap', icon: 'bar-chart-outline' },
+];
 
 export const NotificationsScreen: React.FC = () => {
   const navigation = useNavigation();
   const { colors } = useThemeStore();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [prefs, setPrefs] = useState<NotificationPreferences>({
+    meal_reminders: true,
+    prep_reminders: false,
+    grocery_reminders: true,
+    expiring_items: true,
+    new_recipes: false,
+    weekly_summary: false,
+  });
 
-  const [settings, setSettings] = useState<NotificationSetting[]>([
-    {
-      id: 'meal_reminders',
-      label: 'Meal Reminders',
-      description: 'Get reminded before meal times',
-      enabled: true,
-    },
-    {
-      id: 'prep_reminders',
-      label: 'Prep Reminders',
-      description: 'Reminders to prepare ingredients ahead',
-      enabled: false,
-    },
-    {
-      id: 'grocery_reminders',
-      label: 'Grocery List Reminders',
-      description: 'Remind me to shop for groceries',
-      enabled: true,
-    },
-    {
-      id: 'expiring_items',
-      label: 'Expiring Items',
-      description: 'Alert when pantry items are expiring',
-      enabled: true,
-    },
-    {
-      id: 'new_recipes',
-      label: 'New Recipe Suggestions',
-      description: 'Get notified about new recipes you might like',
-      enabled: false,
-    },
-    {
-      id: 'weekly_summary',
-      label: 'Weekly Summary',
-      description: 'Receive a weekly meal planning summary',
-      enabled: false,
-    },
-  ]);
+  useEffect(() => {
+    loadPrefs();
+  }, []);
 
-  const toggleSetting = (id: string) => {
-    setSettings(prev =>
-      prev.map(setting =>
-        setting.id === id ? { ...setting, enabled: !setting.enabled } : setting
-      )
-    );
+  const loadPrefs = async () => {
+    try {
+      const data = await userService.getNotificationPreferences();
+      setPrefs(data);
+    } catch (error) {
+      console.error('Failed to load notification prefs:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const togglePref = async (key: keyof NotificationPreferences) => {
+    const updated = { ...prefs, [key]: !prefs[key] };
+    setPrefs(updated);
+
+    try {
+      await userService.updateNotificationPreferences(updated);
+    } catch (error) {
+      // Revert on failure
+      setPrefs(prefs);
+      Alert.alert('Error', 'Failed to save preference');
+    }
   };
 
   const styles = createStyles(colors);
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Text style={styles.backArrow}>←</Text>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Notifications</Text>
-        <View style={{ width: 40 }} />
+        <View style={{ width: 44 }} />
       </View>
 
-      <ScrollView style={styles.scrollView}>
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>PUSH NOTIFICATIONS</Text>
-          <View style={styles.sectionContent}>
-            {settings.map((setting, index) => (
-              <View
-                key={setting.id}
-                style={[
-                  styles.settingItem,
-                  index === settings.length - 1 && styles.lastSettingItem,
-                ]}
-              >
-                <View style={styles.settingTextContainer}>
-                  <Text style={styles.settingLabel}>{setting.label}</Text>
-                  <Text style={styles.settingDescription}>{setting.description}</Text>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <Text style={styles.sectionLabel}>PUSH NOTIFICATIONS</Text>
+        <View style={styles.card}>
+          {NOTIFICATION_ITEMS.map((item, index) => (
+            <View
+              key={item.key}
+              style={[styles.row, index === NOTIFICATION_ITEMS.length - 1 && styles.rowLast]}
+            >
+              <View style={styles.rowLeft}>
+                <View style={[styles.iconCircle, { backgroundColor: colors.primary + '12' }]}>
+                  <Ionicons name={item.icon as any} size={20} color={colors.primary} />
                 </View>
-                <Switch
-                  value={setting.enabled}
-                  onValueChange={() => toggleSetting(setting.id)}
-                  trackColor={{ false: colors.border, true: colors.primary }}
-                  thumbColor={colors.buttonText}
-                />
+                <View style={styles.rowText}>
+                  <Text style={styles.rowLabel}>{item.label}</Text>
+                  <Text style={styles.rowDesc}>{item.desc}</Text>
+                </View>
               </View>
-            ))}
-          </View>
+              <Switch
+                value={prefs[item.key]}
+                onValueChange={() => togglePref(item.key)}
+                trackColor={{ false: colors.border, true: colors.primary + '60' }}
+                thumbColor={prefs[item.key] ? colors.primary : colors.textMuted}
+              />
+            </View>
+          ))}
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>REMINDER TIMES</Text>
-          <View style={styles.sectionContent}>
-            <TouchableOpacity style={styles.settingItem}>
-              <View style={styles.settingTextContainer}>
-                <Text style={styles.settingLabel}>Breakfast Reminder</Text>
-                <Text style={styles.settingDescription}>8:00 AM</Text>
-              </View>
-              <Text style={styles.settingArrow}>›</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.settingItem}>
-              <View style={styles.settingTextContainer}>
-                <Text style={styles.settingLabel}>Lunch Reminder</Text>
-                <Text style={styles.settingDescription}>12:00 PM</Text>
-              </View>
-              <Text style={styles.settingArrow}>›</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.settingItem, styles.lastSettingItem]}>
-              <View style={styles.settingTextContainer}>
-                <Text style={styles.settingLabel}>Dinner Reminder</Text>
-                <Text style={styles.settingDescription}>6:00 PM</Text>
-              </View>
-              <Text style={styles.settingArrow}>›</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <Text style={styles.footerNote}>
-          You can also manage notification permissions in your device settings.
+        <Text style={styles.footnote}>
+          Push notifications require system-level permission. You can manage this in your device settings.
         </Text>
+
+        <View style={{ height: 40 }} />
       </ScrollView>
     </SafeAreaView>
   );
@@ -145,93 +127,44 @@ export const NotificationsScreen: React.FC = () => {
 
 const createStyles = (colors: any) =>
   StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: colors.background,
-    },
+    container: { flex: 1, backgroundColor: colors.background },
+    loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background },
     header: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 16,
-      paddingVertical: 16,
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+      paddingHorizontal: 12, paddingVertical: 12,
       backgroundColor: colors.backgroundSecondary,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.border,
+      borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
     },
-    backButton: {
-      width: 40,
-      height: 40,
-      justifyContent: 'center',
-      alignItems: 'center',
+    backButton: { width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center' },
+    headerTitle: { fontSize: 18, fontWeight: '700', color: colors.primary },
+    scrollContent: { padding: 16 },
+
+    sectionLabel: {
+      fontSize: 13, fontWeight: '600', color: colors.textMuted,
+      letterSpacing: 0.5, marginBottom: 8, marginLeft: 4,
     },
-    backArrow: {
-      fontSize: 24,
-      color: colors.text,
+    card: {
+      backgroundColor: colors.backgroundSecondary, borderRadius: 16, overflow: 'hidden',
+      ...Platform.select({
+        ios: { shadowColor: colors.shadow, shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 8 },
+        android: { elevation: 2 },
+      }),
     },
-    headerTitle: {
-      flex: 1,
-      fontSize: 20,
-      fontWeight: 'bold',
-      color: colors.text,
-      textAlign: 'center',
+    row: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+      paddingVertical: 14, paddingHorizontal: 16,
+      borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
     },
-    scrollView: {
-      flex: 1,
+    rowLast: { borderBottomWidth: 0 },
+    rowLeft: { flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 12 },
+    iconCircle: {
+      width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginRight: 12,
     },
-    section: {
-      marginTop: 24,
-    },
-    sectionTitle: {
-      fontSize: 14,
-      fontWeight: '600',
-      color: colors.textMuted,
-      marginBottom: 8,
-      marginLeft: 24,
-      textTransform: 'uppercase',
-      letterSpacing: 0.5,
-    },
-    sectionContent: {
-      backgroundColor: colors.backgroundSecondary,
-      borderTopWidth: 1,
-      borderBottomWidth: 1,
-      borderColor: colors.border,
-    },
-    settingItem: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingVertical: 16,
-      paddingHorizontal: 24,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.border,
-    },
-    lastSettingItem: {
-      borderBottomWidth: 0,
-    },
-    settingTextContainer: {
-      flex: 1,
-      marginRight: 16,
-    },
-    settingLabel: {
-      fontSize: 16,
-      color: colors.text,
-      fontWeight: '500',
-      marginBottom: 2,
-    },
-    settingDescription: {
-      fontSize: 14,
-      color: colors.textMuted,
-    },
-    settingArrow: {
-      fontSize: 28,
-      color: colors.textMuted,
-      fontWeight: '300',
-    },
-    footerNote: {
-      fontSize: 14,
-      color: colors.textMuted,
-      textAlign: 'center',
-      paddingHorizontal: 32,
-      paddingVertical: 24,
+    rowText: { flex: 1 },
+    rowLabel: { fontSize: 15, fontWeight: '600', color: colors.text },
+    rowDesc: { fontSize: 12, color: colors.textMuted, marginTop: 1 },
+    footnote: {
+      fontSize: 13, color: colors.textMuted, textAlign: 'center',
+      marginTop: 16, paddingHorizontal: 16, lineHeight: 18,
     },
   });

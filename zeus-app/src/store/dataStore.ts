@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MealPlan, Recipe, MacroSummaryResponse } from '../types/mealplan';
+import { Recipe as FeedRecipe } from '../types/recipe';
 import { PantryItem } from '../types/pantry';
 import { GroceryList } from '../types/grocerylist';
 
@@ -12,11 +13,13 @@ interface DataState {
   macroSummary: MacroSummaryResponse | null;
   pantryItems: PantryItem[];
   groceryList: GroceryList | null;
+  recipeFeed: FeedRecipe[];
 
   // Timestamps for staleness checks (ms since epoch)
   mealPlanFetchedAt: number | null;
   pantryFetchedAt: number | null;
   groceryListFetchedAt: number | null;
+  recipeFeedFetchedAt: number | null;
 
   // Week offset for meal plan cache invalidation
   cachedWeekOffset: number | null;
@@ -32,8 +35,9 @@ interface DataState {
   setMealPlan: (plan: MealPlan | null, recipes?: Record<string, Recipe>, macros?: MacroSummaryResponse | null) => void;
   setPantryItems: (items: PantryItem[]) => void;
   setGroceryList: (list: GroceryList | null) => void;
-  isFresh: (key: 'mealPlan' | 'pantry' | 'groceryList', maxAgeMs?: number) => boolean;
-  invalidate: (key: 'mealPlan' | 'pantry' | 'groceryList' | 'all') => void;
+  setRecipeFeed: (recipes: FeedRecipe[]) => void;
+  isFresh: (key: 'mealPlan' | 'pantry' | 'groceryList' | 'recipeFeed', maxAgeMs?: number) => boolean;
+  invalidate: (key: 'mealPlan' | 'pantry' | 'groceryList' | 'recipeFeed' | 'all') => void;
   getCachedWeekOffset: () => number | null;
   setCachedWeekOffset: (offset: number) => void;
   setOffline: (offline: boolean) => void;
@@ -45,6 +49,7 @@ const STALE_THRESHOLDS = {
   mealPlan: 2 * 60 * 1000,   // 2 minutes
   pantry: 10 * 60 * 1000,     // 10 minutes
   groceryList: 5 * 60 * 1000, // 5 minutes
+  recipeFeed: 5 * 60 * 1000,  // 5 minutes
 };
 
 export const useDataStore = create<DataState>()(
@@ -56,9 +61,11 @@ export const useDataStore = create<DataState>()(
       macroSummary: null,
       pantryItems: [],
       groceryList: null,
+      recipeFeed: [],
       mealPlanFetchedAt: null,
       pantryFetchedAt: null,
       groceryListFetchedAt: null,
+      recipeFeedFetchedAt: null,
       cachedWeekOffset: null,
       isOffline: false,
       lastSyncedAt: null,
@@ -87,6 +94,13 @@ export const useDataStore = create<DataState>()(
           lastSyncedAt: Date.now(),
         }),
 
+      setRecipeFeed: (recipes) =>
+        set({
+          recipeFeed: recipes,
+          recipeFeedFetchedAt: Date.now(),
+          lastSyncedAt: Date.now(),
+        }),
+
       isFresh: (key, maxAgeMs) => {
         const state = get();
         const threshold = maxAgeMs ?? STALE_THRESHOLDS[key];
@@ -102,6 +116,9 @@ export const useDataStore = create<DataState>()(
           case 'groceryList':
             fetchedAt = state.groceryListFetchedAt;
             break;
+          case 'recipeFeed':
+            fetchedAt = state.recipeFeedFetchedAt;
+            break;
         }
 
         if (!fetchedAt) return false;
@@ -114,6 +131,7 @@ export const useDataStore = create<DataState>()(
             mealPlanFetchedAt: null,
             pantryFetchedAt: null,
             groceryListFetchedAt: null,
+            recipeFeedFetchedAt: null,
           });
         } else {
           switch (key) {
@@ -125,6 +143,9 @@ export const useDataStore = create<DataState>()(
               break;
             case 'groceryList':
               set({ groceryListFetchedAt: null });
+              break;
+            case 'recipeFeed':
+              set({ recipeFeedFetchedAt: null });
               break;
           }
         }
@@ -148,6 +169,8 @@ export const useDataStore = create<DataState>()(
         mealPlanFetchedAt: state.mealPlanFetchedAt,
         pantryFetchedAt: state.pantryFetchedAt,
         groceryListFetchedAt: state.groceryListFetchedAt,
+        recipeFeed: state.recipeFeed,
+        recipeFeedFetchedAt: state.recipeFeedFetchedAt,
         cachedWeekOffset: state.cachedWeekOffset,
         lastSyncedAt: state.lastSyncedAt,
       }),

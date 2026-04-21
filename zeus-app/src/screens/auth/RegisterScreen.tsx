@@ -10,8 +10,10 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/authStore';
 import { useThemeStore } from '../../store/themeStore';
+import { authService } from '../../services/authService';
 
 interface RegisterScreenProps {
   navigation: any;
@@ -45,6 +47,8 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) =>
     }
 
     try {
+      // Clear any stale tokens before registering to prevent race with auto-login
+      await authService.logout();
       await register({ email, username, password });
       // Navigation will be handled by the auth state change
     } catch (error: any) {
@@ -110,7 +114,7 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) =>
                 style={styles.eyeIcon}
                 onPress={() => setShowPassword(!showPassword)}
               >
-                <Text style={styles.eyeIconText}>{showPassword ? '👁️' : '👁️‍🗨️'}</Text>
+                <Ionicons name={showPassword ? 'eye-outline' : 'eye-off-outline'} size={22} color="#7F8C8D" />
               </TouchableOpacity>
             </View>
           </View>
@@ -131,7 +135,7 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) =>
                 style={styles.eyeIcon}
                 onPress={() => setShowConfirmPassword(!showConfirmPassword)}
               >
-                <Text style={styles.eyeIconText}>{showConfirmPassword ? '👁️' : '👁️‍🗨️'}</Text>
+                <Ionicons name={showConfirmPassword ? 'eye-outline' : 'eye-off-outline'} size={22} color="#7F8C8D" />
               </TouchableOpacity>
             </View>
           </View>
@@ -233,9 +237,6 @@ const createStyles = (colors: any) =>
       position: 'absolute',
       right: 12,
       padding: 8,
-    },
-    eyeIconText: {
-      fontSize: 20,
     },
     registerButton: {
       backgroundColor: colors.primary,

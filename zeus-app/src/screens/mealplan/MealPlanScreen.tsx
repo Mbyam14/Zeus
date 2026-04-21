@@ -9,8 +9,11 @@ import {
   ActivityIndicator,
   Alert,
   Image,
-  Platform,
+  Modal,
+  Dimensions,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { mealPlanService } from '../../services/mealPlanService';
 import {
   MealPlan,
@@ -19,119 +22,131 @@ import {
   MealType,
   MacroSummaryResponse,
   MealSlot,
+  MealTypeConfig,
+  DEFAULT_MEAL_TYPES,
   getRecipeIdFromSlot,
   isRepeatMeal,
-  getOriginalDay
+  getOriginalDay,
 } from '../../types/mealplan';
-import { useThemeStore } from '../../store/themeStore';
+import { useThemeStore, ThemeColors } from '../../store/themeStore';
 import { useDataStore } from '../../store/dataStore';
+import { useOnboardingStore } from '../../store/onboardingStore';
 import { MealPlanSkeleton } from '../../components/SkeletonLoader';
 import { EmptyState } from '../../components/EmptyState';
-import { ErrorBanner } from '../../components/ErrorBanner';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const DAY_CELL_WIDTH = (SCREEN_WIDTH - 32) / 7; // 7 days, 16px padding each side
 
 interface MealPlanScreenProps {
   navigation: any;
 }
 
+const ALL_DAYS: DayOfWeek[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+const DAY_ABBR: Record<string, string> = {
+  monday: 'M', tuesday: 'T', wednesday: 'W', thursday: 'T',
+  friday: 'F', saturday: 'S', sunday: 'S',
+};
+const DAY_LABELS: Record<string, string> = {
+  monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu',
+  friday: 'Fri', saturday: 'Sat', sunday: 'Sun',
+};
+
 export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
   const [mealPlan, setMealPlan] = useState<MealPlan | null>(null);
-  const [recipes, setRecipes] = useState<{ [key: string]: Recipe }>({});
-  const [recipeLoadError, setRecipeLoadError] = useState<string | null>(null);
+  const [recipes, setRecipes] = useState<Record<string, Recipe>>({});
   const [selectedDay, setSelectedDay] = useState<DayOfWeek>('monday');
   const [regeneratingMeal, setRegeneratingMeal] = useState<string | null>(null);
   const [macroSummary, setMacroSummary] = useState<MacroSummaryResponse | null>(null);
-  const [showMacroSummary, setShowMacroSummary] = useState(false);
-  const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set());
   const [weekOffset, setWeekOffset] = useState(0);
   const [showMenu, setShowMenu] = useState(false);
-  const [optimizing, setOptimizing] = useState(false);
+  const [showMealOptions, setShowMealOptions] = useState<string | null>(null); // mealType key
+  const [showCreateSheet, setShowCreateSheet] = useState(false);
+  const [selectedCreateDays, setSelectedCreateDays] = useState<Set<DayOfWeek>>(new Set(ALL_DAYS));
+  const [generating, setGenerating] = useState(false);
 
+  const insets = useSafeAreaInsets();
   const { colors } = useThemeStore();
   const styles = createStyles(colors);
-
-  // Refs to prevent race conditions
   const isMountedRef = useRef(true);
+  const onboardingStep = useOnboardingStore((s) => s.currentStep);
+  const isFirstRun = useOnboardingStore((s) => s.isFirstRun);
+  const advanceOnboarding = useOnboardingStore((s) => s.advanceStep);
+  const dismissOnboarding = useOnboardingStore((s) => s.dismissBanner);
+  const onboardingDismissed = useOnboardingStore((s) => s.dismissed);
   const regeneratingMealsRef = useRef(new Set<string>());
-  const dayScrollRef = useRef<ScrollView>(null);
-  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoShowRef = useRef(false);
 
   useEffect(() => {
     isMountedRef.current = true;
     loadMealPlan();
-
-    return () => {
-      isMountedRef.current = false;
-      // Clean up scroll timeout on unmount
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
-      }
-    };
+    return () => { isMountedRef.current = false; };
   }, [weekOffset]);
 
-  // Reload when returning from edit screen, but only if cache is stale
-  // Also close dropdown menu when navigating away
+  useEffect(() => {
+    if (!loading && !mealPlan && weekOffset === 0 && !autoShowRef.current) {
+      autoShowRef.current = true;
+      // Small delay so the screen renders first
+      const timer = setTimeout(() => {
+        setSelectedCreateDays(new Set(ALL_DAYS));
+        setShowCreateSheet(true);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [loading, mealPlan, weekOffset]);
+
   useFocusEffect(
     useCallback(() => {
       const dataStore = useDataStore.getState();
       if (mealPlan && (!dataStore.isFresh('mealPlan') || dataStore.getCachedWeekOffset() !== weekOffset)) {
         loadMealPlan();
       }
-      return () => {
-        setShowMenu(false);
-      };
+      return () => setShowMenu(false);
     }, [mealPlan?.id, weekOffset])
   );
 
+  // ------- Data Loading -------
+
   const loadMealPlan = async () => {
+    // Show cached data immediately if fresh and matching week
+    const cached = useDataStore.getState();
+    if (cached.mealPlan && cached.isFresh('mealPlan') && cached.getCachedWeekOffset() === weekOffset) {
+      setMealPlan(cached.mealPlan);
+      setRecipes(cached.mealPlanRecipes);
+      setMacroSummary(cached.macroSummary);
+      setLoading(false);
+      return;
+    }
+
     try {
-      if (isMountedRef.current) {
-        setLoading(true);
-      }
-      console.log(`📱 Loading meal plan for week offset ${weekOffset}...`);
+      if (isMountedRef.current) setLoading(true);
       const plan = weekOffset === 0
         ? await mealPlanService.getCurrentWeekMealPlan()
         : await mealPlanService.getMealPlanByWeekOffset(weekOffset);
 
       if (plan) {
-        console.log('✅ Meal plan loaded:', plan.plan_name);
-        console.log('📊 Meal plan ID:', plan.id);
-        console.log('📅 Has meals data:', Object.keys(plan.meals).length > 0);
-        if (isMountedRef.current) {
-          setMealPlan(plan);
-        }
-        // Load recipes and macro summary in parallel
-        await Promise.all([
-          loadRecipes(plan),
-          loadMacroSummary(plan.id),
-        ]);
-        // Update cache
+        if (isMountedRef.current) setMealPlan(plan);
+        await Promise.all([loadRecipes(plan), loadMacroSummary(plan.id)]);
         useDataStore.getState().setMealPlan(plan, recipes, macroSummary);
         useDataStore.getState().setCachedWeekOffset(weekOffset);
 
-        // Set selected day to current day of week (or first day with meals if current day has none)
-        const currentDay = getCurrentDayOfWeek();
-        const daysOrder: DayOfWeek[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
-        const currentDayIndex = daysOrder.indexOf(currentDay);
+        // Advance onboarding when meal plan exists
+        const onboarding = useOnboardingStore.getState();
+        if (onboarding.isFirstRun && onboarding.currentStep === 'meal_plan') {
+          onboarding.advanceStep();
+        }
 
-        console.log('📅 Current day:', currentDay);
+        // Select today or first day with meals
+        const currentDay = getCurrentDayOfWeek();
         if (isMountedRef.current) {
-          // Check if current day has meals, otherwise use first day with meals
           if (plan.meals[currentDay] && Object.keys(plan.meals[currentDay] || {}).length > 0) {
             setSelectedDay(currentDay);
-            scrollToDay(currentDayIndex);
           } else {
             const daysWithMeals = Object.keys(plan.meals) as DayOfWeek[];
-            if (daysWithMeals.length > 0) {
-              const firstDayWithMeals = daysWithMeals[0];
-              setSelectedDay(firstDayWithMeals);
-              scrollToDay(daysOrder.indexOf(firstDayWithMeals));
-            }
+            if (daysWithMeals.length > 0) setSelectedDay(daysWithMeals[0]);
           }
         }
       } else {
-        console.log('ℹ️ No meal plan found for this week');
-        // Clear the meal plan state when no plan exists for this week
         if (isMountedRef.current) {
           setMealPlan(null);
           setRecipes({});
@@ -139,325 +154,63 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
         }
       }
     } catch (error) {
-      console.error('❌ Failed to load meal plan:', error);
-      // Also clear state on error
-      if (isMountedRef.current) {
-        setMealPlan(null);
-        setRecipes({});
-      }
+      if (isMountedRef.current) { setMealPlan(null); setRecipes({}); }
     } finally {
-      if (isMountedRef.current) {
-        setLoading(false);
-      }
+      if (isMountedRef.current) setLoading(false);
     }
-  };
-
-  /**
-   * Safely extract recipe IDs from meal plan with type validation
-   * Handles both old format (string) and new format (object with recipe_id)
-   */
-  const extractRecipeIds = (plan: MealPlan): string[] => {
-    const recipeIds: string[] = [];
-
-    if (!plan.meals || typeof plan.meals !== 'object') {
-      console.warn('⚠️ Invalid meals structure in meal plan');
-      return recipeIds;
-    }
-
-    Object.entries(plan.meals).forEach(([day, dayMeals]) => {
-      // Validate dayMeals is an object
-      if (!dayMeals || typeof dayMeals !== 'object' || Array.isArray(dayMeals)) {
-        console.warn(`⚠️ Invalid meal data for ${day}:`, typeof dayMeals);
-        return;
-      }
-
-      Object.entries(dayMeals).forEach(([mealType, value]) => {
-        // Use helper function to extract recipe ID from either format
-        const recipeId = getRecipeIdFromSlot(value as MealSlot);
-        if (recipeId && recipeId.trim().length > 0) {
-          const trimmedId = recipeId.trim();
-          if (!recipeIds.includes(trimmedId)) {
-            recipeIds.push(trimmedId);
-          }
-        }
-      });
-    });
-
-    return recipeIds;
   };
 
   const loadRecipes = async (plan: MealPlan) => {
-    console.log('🔍 Loading recipes for meal plan:', plan.id);
-    console.log('📅 Meal plan structure:', JSON.stringify(plan.meals, null, 2));
-
-    const recipeMap: { [key: string]: Recipe } = {};
-
-    // Clear any previous error
-    if (isMountedRef.current) {
-      setRecipeLoadError(null);
-    }
-
-    // Safely extract recipe IDs with type validation
-    const recipeIds = extractRecipeIds(plan);
-
-    console.log('📝 Found recipe IDs:', recipeIds);
-    console.log('🔢 Total recipes to load:', recipeIds.length);
-
-    if (recipeIds.length === 0) {
-      console.log('ℹ️ No recipe IDs to load');
-      setRecipes(recipeMap);
-      return;
-    }
-
-    // Load all recipes (uses Promise.allSettled with retry logic)
-    try {
-      const loadedRecipes = await mealPlanService.getRecipes(recipeIds);
-      console.log('✅ Loaded recipes:', loadedRecipes.length);
-
-      loadedRecipes.forEach(recipe => {
-        if (recipe && recipe.id) {
-          console.log(`  - ${recipe.title} (${recipe.id})`);
-          recipeMap[recipe.id] = recipe;
-        } else {
-          console.warn('⚠️ Received invalid recipe object:', recipe);
-        }
+    const recipeIds: string[] = [];
+    Object.values(plan.meals).forEach((dayMeals) => {
+      if (!dayMeals || typeof dayMeals !== 'object') return;
+      Object.values(dayMeals).forEach((slot) => {
+        const id = getRecipeIdFromSlot(slot as MealSlot);
+        if (id && !recipeIds.includes(id)) recipeIds.push(id);
       });
-
-      // Log any missing recipes
-      const loadedIds = loadedRecipes.map(r => r?.id).filter(Boolean);
-      const missingIds = recipeIds.filter(id => !loadedIds.includes(id));
-      if (missingIds.length > 0) {
-        console.warn(`⚠️ Failed to load ${missingIds.length} recipe(s):`, missingIds);
-        if (isMountedRef.current) {
-          setRecipeLoadError(`${missingIds.length} recipe(s) failed to load. Tap to retry.`);
-        }
-      }
-
-      if (isMountedRef.current) {
-        setRecipes(recipeMap);
-      }
-    } catch (error) {
-      console.error('❌ Failed to load recipes:', error);
-      if (isMountedRef.current) {
-        setRecipes(recipeMap); // Set partial results even on error
-        setRecipeLoadError('Failed to load recipes. Tap to retry.');
-      }
-    }
+    });
+    if (recipeIds.length === 0) { setRecipes({}); return; }
+    try {
+      const loaded = await mealPlanService.getRecipes(recipeIds);
+      const map: Record<string, Recipe> = {};
+      loaded.forEach((r) => { if (r?.id) map[r.id] = r; });
+      if (isMountedRef.current) setRecipes(map);
+    } catch { /* partial results OK */ }
   };
 
   const loadMacroSummary = async (mealPlanId: string) => {
     try {
-      console.log('📊 Loading macro summary for meal plan:', mealPlanId);
       const summary = await mealPlanService.getMacroSummary(mealPlanId);
-      if (isMountedRef.current) {
-        setMacroSummary(summary);
-        console.log('✅ Macro summary loaded:', summary.weekly_summary.recipe_count, 'recipes');
-      }
-    } catch (error) {
-      console.error('❌ Failed to load macro summary:', error);
-    }
+      if (isMountedRef.current) setMacroSummary(summary);
+    } catch { /* non-critical */ }
   };
 
-  const toggleDayExpanded = (day: string) => {
-    setExpandedDays(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(day)) {
-        newSet.delete(day);
-      } else {
-        newSet.add(day);
-      }
-      return newSet;
-    });
-  };
-
-  const DAY_LABELS: { [key: string]: string } = {
-    monday: 'Monday',
-    tuesday: 'Tuesday',
-    wednesday: 'Wednesday',
-    thursday: 'Thursday',
-    friday: 'Friday',
-    saturday: 'Saturday',
-    sunday: 'Sunday'
-  };
+  // ------- Helpers -------
 
   const getCurrentDayOfWeek = (): DayOfWeek => {
     const days: DayOfWeek[] = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-    const today = new Date().getDay(); // 0 = Sunday, 1 = Monday, etc.
-    return days[today] as DayOfWeek;
+    return days[new Date().getDay()];
   };
 
-  const scrollToDay = (dayIndex: number) => {
-    // Each day card is approximately 86px wide (70 minWidth + 16 margin)
-    const cardWidth = 86;
-    // Center the card by offsetting by half screen width minus half card width
-    // Approximate screen width calculation, scroll to position
-    const scrollPosition = Math.max(0, (dayIndex * cardWidth) - 100);
-
-    // Clear any existing scroll timeout
-    if (scrollTimeoutRef.current) {
-      clearTimeout(scrollTimeoutRef.current);
-    }
-
-    scrollTimeoutRef.current = setTimeout(() => {
-      if (isMountedRef.current) {
-        dayScrollRef.current?.scrollTo({ x: scrollPosition, animated: true });
-      }
-    }, 100);
+  const getMealTypes = (): MealTypeConfig[] => {
+    return mealPlan?.meal_types || DEFAULT_MEAL_TYPES;
   };
 
-  const handleRegenerateMeal = async (day: DayOfWeek, mealType: MealType) => {
-    if (!mealPlan) return;
-
-    const mealKey = `${day}-${mealType}`;
-
-    // Prevent concurrent regenerations for the same meal (fixes race condition)
-    if (regeneratingMealsRef.current.has(mealKey)) {
-      console.log(`⚠️ Already regenerating ${mealKey}, ignoring duplicate request`);
-      return;
-    }
-
-    try {
-      // Lock this meal
-      regeneratingMealsRef.current.add(mealKey);
-      if (isMountedRef.current) {
-        setRegeneratingMeal(mealKey);
-      }
-
-      const newRecipe = await mealPlanService.regenerateMeal(mealPlan.id, day, mealType);
-
-      if (!isMountedRef.current) {
-        console.log('⚠️ Component unmounted during regeneration, skipping state update');
-        return;
-      }
-
-      // Update local state
-      setRecipes(prev => ({ ...prev, [newRecipe.id]: newRecipe }));
-      setMealPlan(prev => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          meals: {
-            ...prev.meals,
-            [day]: {
-              ...prev.meals[day],
-              [mealType]: newRecipe.id
-            }
-          }
-        };
-      });
-
-      // Reload macro summary to reflect the new meal
-      loadMacroSummary(mealPlan.id);
-
-      Alert.alert('Success', `${mealType} has been regenerated!`);
-    } catch (error) {
-      console.error('Failed to regenerate meal:', error);
-      if (isMountedRef.current) {
-        Alert.alert('Error', 'Failed to regenerate meal. Please try again.');
-      }
-    } finally {
-      // Unlock this meal
-      regeneratingMealsRef.current.delete(mealKey);
-      if (isMountedRef.current) {
-        setRegeneratingMeal(null);
-      }
-    }
-  };
-
-  const handleViewRecipe = (recipeId: string) => {
-    const recipe = recipes[recipeId];
-    if (recipe) {
-      navigation.navigate('RecipeDetail', { recipe });
-    }
-  };
-
-  const handleOptimizeCalories = async () => {
-    if (!mealPlan) return;
-    setOptimizing(true);
-    try {
-      const result = await mealPlanService.optimizeCalories(mealPlan.id);
-      if (result.optimized) {
-        // Reload the meal plan to reflect swaps
-        await loadMealPlan();
-        // Refresh macro summary if it was showing
-        if (macroSummary) {
-          const updated = await mealPlanService.getMacroSummary(mealPlan.id);
-          setMacroSummary(updated);
-        }
-        // Show swap details
-        const swapDetails = result.analysis
-          .filter((a: any) => a.action === 'swapped')
-          .map((a: any) => `${a.day}: ${a.old_recipe} → ${a.new_recipe}`)
-          .join('\n');
-        Alert.alert(
-          'Calories Optimized!',
-          `${result.message}\n\n${swapDetails}`
-        );
-      } else {
-        Alert.alert('No Changes Needed', result.message);
-      }
-    } catch (error) {
-      Alert.alert('Error', 'Failed to optimize calories. Please try again.');
-    } finally {
-      setOptimizing(false);
-    }
-  };
-
-  const handleClearMealPlan = async () => {
-    if (!mealPlan) return;
-
-    Alert.alert(
-      'Clear Meal Plan',
-      `Are you sure you want to delete the meal plan for ${getWeekLabel().toLowerCase()}? This cannot be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await mealPlanService.deleteMealPlan(mealPlan.id);
-              if (isMountedRef.current) {
-                setMealPlan(null);
-                setRecipes({});
-                setMacroSummary(null);
-              }
-            } catch (error) {
-              console.error('Failed to delete meal plan:', error);
-              Alert.alert('Error', 'Failed to delete meal plan. Please try again.');
-            }
-          }
-        }
-      ]
-    );
-  };
-
-  const getDaysOfWeek = (): Array<{ day: DayOfWeek; label: string; date: string; fullDate: Date }> => {
-    const allDays: DayOfWeek[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
-
-    // Use selected_days from meal plan if available, otherwise show all 7 days
-    const days: DayOfWeek[] = mealPlan?.selected_days || allDays;
-
+  const getDaysInfo = () => {
+    const days = mealPlan?.selected_days || ALL_DAYS;
     const today = new Date();
     const monday = new Date(today);
-    // Get Monday of current week (weekday 0 = Sunday, 1 = Monday, etc)
-    const dayOfWeek = today.getDay();
-    const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek; // Adjust for Sunday
-    monday.setDate(today.getDate() + diff);
-    // Apply week offset
-    monday.setDate(monday.getDate() + (weekOffset * 7));
+    const dow = today.getDay();
+    monday.setDate(today.getDate() + (dow === 0 ? -6 : 1 - dow) + weekOffset * 7);
 
-    return days.map((day) => {
-      // Calculate the date for this specific day
-      const dayIndex = allDays.indexOf(day);
+    return ALL_DAYS.map((day) => {
+      const idx = ALL_DAYS.indexOf(day);
       const date = new Date(monday);
-      date.setDate(monday.getDate() + dayIndex);
-      return {
-        day,
-        label: day.slice(0, 3).toUpperCase(),
-        date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        fullDate: date
-      };
+      date.setDate(monday.getDate() + idx);
+      const isInPlan = days.includes(day);
+      const isToday = weekOffset === 0 && day === getCurrentDayOfWeek();
+      const hasMeals = mealPlan?.meals[day] && Object.keys(mealPlan.meals[day] || {}).length > 0;
+      return { day, dateNum: date.getDate(), isInPlan, isToday, hasMeals, fullDate: date };
     });
   };
 
@@ -469,108 +222,110 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
   };
 
   const getWeekDateRange = (): string => {
-    const days = getDaysOfWeek();
-    if (days.length === 0) return '';
-    const start = days[0].fullDate;
-    const end = days[days.length - 1].fullDate;
-    return `${start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${end.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+    const info = getDaysInfo();
+    const start = info[0].fullDate;
+    const end = info[6].fullDate;
+    return `${start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${end.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
   };
 
-  const renderMealCard = (mealType: MealType) => {
-    const dayMeals = mealPlan?.meals[selectedDay];
-    const mealSlot = dayMeals?.[mealType] as MealSlot | undefined;
-    const recipeId = getRecipeIdFromSlot(mealSlot);
-    const recipe = recipeId ? recipes[recipeId] : null;
-    const isRegenerating = regeneratingMeal === `${selectedDay}-${mealType}`;
+  // ------- Daily Nutrition (for selected day) -------
 
-    // Check if this is a repeat/leftover meal
-    const isRepeat = isRepeatMeal(mealSlot);
-    const originalDay = getOriginalDay(mealSlot);
-
-    return (
-      <View key={mealType} style={styles.mealCard}>
-        <View style={styles.mealHeader}>
-          <View style={styles.mealTypeContainer}>
-            <Text style={styles.mealType}>{mealType.charAt(0).toUpperCase() + mealType.slice(1)}</Text>
-            {isRepeat && (
-              <View style={[styles.repeatBadge, originalDay ? styles.leftoverBadge : null]}>
-                <Text style={styles.repeatBadgeText}>
-                  {originalDay ? `Leftover` : 'Repeat'}
-                </Text>
-              </View>
-            )}
-          </View>
-          {recipe && (
-            <TouchableOpacity
-              onPress={() => handleRegenerateMeal(selectedDay, mealType)}
-              disabled={isRegenerating}
-              style={styles.regenerateButton}
-            >
-              {isRegenerating ? (
-                <ActivityIndicator size="small" color={colors.primary} />
-              ) : (
-                <Text style={styles.regenerateText}>🔄</Text>
-              )}
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {recipe ? (
-          <TouchableOpacity
-            style={styles.plannedMeal}
-            onPress={() => handleViewRecipe(recipe.id)}
-          >
-            {recipe.image_url ? (
-              <Image source={{ uri: recipe.image_url }} style={styles.mealImage} />
-            ) : (
-              <View style={styles.mealImagePlaceholder}>
-                <Text style={styles.mealEmoji}>🍽️</Text>
-              </View>
-            )}
-            <View style={styles.mealInfo}>
-              <Text style={styles.mealTitle}>{recipe.title}</Text>
-              {originalDay && (
-                <Text style={styles.leftoverHint}>
-                  From {originalDay.charAt(0).toUpperCase() + originalDay.slice(1)}'s dinner
-                </Text>
-              )}
-              {recipe.calories && (
-                <View style={styles.macroPreview}>
-                  <Text style={styles.macroText}>🔥 {recipe.calories} cal/serving</Text>
-                  {recipe.protein_grams && (
-                    <Text style={styles.macroText}>💪 {recipe.protein_grams}g P</Text>
-                  )}
-                </View>
-              )}
-              <Text style={styles.mealSubtext}>View Recipe →</Text>
-            </View>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity
-            style={styles.emptyMeal}
-            onPress={() => handleRegenerateMeal(selectedDay, mealType)}
-            disabled={isRegenerating}
-          >
-            {isRegenerating ? (
-              <>
-                <ActivityIndicator size="small" color={colors.primary} style={{ marginBottom: 8 }} />
-                <Text style={styles.emptyMealText}>Generating...</Text>
-              </>
-            ) : (
-              <>
-                <Text style={styles.generateMealIcon}>+</Text>
-                <Text style={styles.emptyMealText}>Generate Meal</Text>
-              </>
-            )}
-          </TouchableOpacity>
-        )}
-      </View>
-    );
+  const getDayNutrition = () => {
+    if (!macroSummary?.daily_breakdown?.[selectedDay]) return null;
+    return macroSummary.daily_breakdown[selectedDay];
   };
+
+  const getTargets = () => {
+    const cal = macroSummary?.target_comparison?.calorie_target || 2000;
+    const prot = macroSummary?.target_comparison?.protein_target_grams || 150;
+    return { calories: cal, protein: prot, carbs: Math.round(cal * 0.4 / 4), fat: Math.round(cal * 0.3 / 9) };
+  };
+
+  // ------- Actions -------
+
+  const handleRegenerateMeal = async (mealType: string) => {
+    if (!mealPlan) return;
+    const mealKey = `${selectedDay}-${mealType}`;
+    if (regeneratingMealsRef.current.has(mealKey)) return;
+
+    try {
+      regeneratingMealsRef.current.add(mealKey);
+      if (isMountedRef.current) setRegeneratingMeal(mealKey);
+      const newRecipe = await mealPlanService.regenerateMeal(mealPlan.id, selectedDay, mealType as MealType);
+      if (!isMountedRef.current) return;
+      setRecipes((prev) => ({ ...prev, [newRecipe.id]: newRecipe }));
+      setMealPlan((prev) => {
+        if (!prev) return prev;
+        return { ...prev, meals: { ...prev.meals, [selectedDay]: { ...prev.meals[selectedDay], [mealType]: newRecipe.id } } };
+      });
+      loadMacroSummary(mealPlan.id);
+    } catch {
+      if (isMountedRef.current) Alert.alert('Error', 'Failed to swap meal. Please try again.');
+    } finally {
+      regeneratingMealsRef.current.delete(mealKey);
+      if (isMountedRef.current) setRegeneratingMeal(null);
+    }
+  };
+
+  const handleRemoveMeal = async (mealType: string) => {
+    if (!mealPlan) return;
+    try {
+      const updatedMeals = { ...mealPlan.meals };
+      if (updatedMeals[selectedDay]) {
+        const dayMeals = { ...updatedMeals[selectedDay] } as any;
+        delete dayMeals[mealType];
+        updatedMeals[selectedDay] = dayMeals;
+      }
+      await mealPlanService.updateMealPlanMeals(mealPlan.id, updatedMeals);
+      setMealPlan((prev) => prev ? { ...prev, meals: updatedMeals } : prev);
+      loadMacroSummary(mealPlan.id);
+    } catch {
+      Alert.alert('Error', 'Failed to remove meal.');
+    }
+  };
+
+  const handleClearMealPlan = () => {
+    if (!mealPlan) return;
+    Alert.alert('Clear Meal Plan', 'Delete this meal plan? This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete', style: 'destructive',
+        onPress: async () => {
+          try {
+            await mealPlanService.deleteMealPlan(mealPlan.id);
+            if (isMountedRef.current) { setMealPlan(null); setRecipes({}); setMacroSummary(null); }
+          } catch { Alert.alert('Error', 'Failed to delete meal plan.'); }
+        },
+      },
+    ]);
+  };
+
+  const handleCreateWithAI = async () => {
+    if (selectedCreateDays.size === 0) return;
+    setGenerating(true);
+    try {
+      const days = ALL_DAYS.filter((d) => selectedCreateDays.has(d));
+      await mealPlanService.generateMealPlanForWeek(weekOffset, days);
+      setShowCreateSheet(false);
+      await loadMealPlan();
+    } catch {
+      Alert.alert('Error', 'Failed to generate meal plan. Please try again.');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleBuildManually = () => {
+    const days = ALL_DAYS.filter((d) => selectedCreateDays.has(d));
+    setShowCreateSheet(false);
+    navigation.navigate('MealPlanEdit', { selectedDays: days, weekOffset });
+  };
+
+  // ------- Render -------
 
   if (loading) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { paddingTop: insets.top }]}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Meal Plan</Text>
         </View>
@@ -581,1091 +336,620 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
 
   if (!mealPlan) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { paddingTop: insets.top }]}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Meal Plan</Text>
-          <TouchableOpacity style={styles.addButton} onPress={() => navigation.navigate('DaySelection', { weekOffset })}>
-            <Text style={styles.addButtonText}>+</Text>
-          </TouchableOpacity>
         </View>
-
-        {/* Week Navigation for empty state too */}
-        <View style={styles.weekNavContainer}>
-          <TouchableOpacity
-            style={styles.weekNavButton}
-            onPress={() => setWeekOffset(w => w - 1)}
-          >
-            <Text style={styles.weekNavArrow}>‹</Text>
-          </TouchableOpacity>
-          <View style={styles.weekNavInfo}>
-            <Text style={styles.weekNavLabel}>{getWeekLabel()}</Text>
-            <Text style={styles.weekNavDateRange}>{getWeekDateRange()}</Text>
+        <WeekNav weekOffset={weekOffset} setWeekOffset={setWeekOffset} getWeekLabel={getWeekLabel} getWeekDateRange={getWeekDateRange} colors={colors} />
+        {isFirstRun && onboardingStep === 'meal_plan' && !onboardingDismissed && (
+          <View style={styles.onboardingBanner}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.onboardingTitle}>Step 2: Create Your Meal Plan</Text>
+              <Text style={styles.onboardingText}>
+                Now let Zeus create a personalized meal plan based on your pantry and preferences!
+              </Text>
+            </View>
+            <TouchableOpacity onPress={dismissOnboarding} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Ionicons name="close" size={20} color={colors.textMuted} />
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity
-            style={styles.weekNavButton}
-            onPress={() => setWeekOffset(w => w + 1)}
-          >
-            <Text style={styles.weekNavArrow}>›</Text>
-          </TouchableOpacity>
-        </View>
+        )}
         <EmptyState
           icon="calendar-outline"
           title="No Meal Plan"
           description={weekOffset === 0
-            ? 'Create a personalized meal plan powered by AI that fits your dietary needs and preferences.'
-            : `No meal plan for ${getWeekLabel().toLowerCase()}. Create one to stay on track!`}
+            ? 'Create a meal plan powered by AI that fits your needs.'
+            : `No meal plan for ${getWeekLabel().toLowerCase()}.`}
           actionLabel="Create Meal Plan"
-          onAction={() => navigation.navigate('DaySelection', { weekOffset })}
+          onAction={() => { setSelectedCreateDays(new Set(ALL_DAYS)); setShowCreateSheet(true); }}
         />
+        {renderCreateSheet()}
       </View>
     );
   }
 
-  const daysOfWeek = getDaysOfWeek();
+  const daysInfo = getDaysInfo();
+  const dayNutrition = getDayNutrition();
+  const targets = getTargets();
+  const mealTypes = getMealTypes();
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Meal Plan</Text>
-        <View style={{ zIndex: 101 }}>
-          <TouchableOpacity style={styles.addButton} onPress={() => setShowMenu(!showMenu)}>
-            <Text style={styles.addButtonText}>{showMenu ? '×' : '+'}</Text>
-          </TouchableOpacity>
-
-          {/* Dropdown Menu - anchored below the button */}
-          {showMenu && (
-            <View style={styles.dropdownMenu}>
-              <TouchableOpacity
-                style={styles.dropdownMenuItem}
-                onPress={() => {
-                  setShowMenu(false);
-                  navigation.navigate('DaySelection', { weekOffset });
-                }}
-              >
-                <View style={styles.dropdownMenuIcon}>
-                  <Text style={styles.dropdownMenuIconText}>📅</Text>
-                </View>
-                <Text style={styles.dropdownMenuText}>Create Meal Plan</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.dropdownMenuItem}
-                onPress={() => {
-                  setShowMenu(false);
-                  navigation.navigate('MealPlanEdit', { mealPlan, recipes });
-                }}
-              >
-                <View style={styles.dropdownMenuIcon}>
-                  <Text style={styles.dropdownMenuIconText}>✏️</Text>
-                </View>
-                <Text style={styles.dropdownMenuText}>Edit Meal Plan</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.dropdownMenuItem}
-                onPress={() => {
-                  setShowMenu(false);
-                  handleClearMealPlan();
-                }}
-              >
-                <View style={styles.dropdownMenuIcon}>
-                  <Text style={styles.dropdownMenuIconText}>🗑️</Text>
-                </View>
-                <Text style={[styles.dropdownMenuText, { color: colors.error }]}>Clear Meal Plan</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
+        <TouchableOpacity style={styles.menuButton} onPress={() => setShowMenu(!showMenu)}>
+          <Text style={styles.menuButtonText}>⋯</Text>
+        </TouchableOpacity>
       </View>
 
-      {/* Dropdown Backdrop */}
+      {/* Action Menu Dropdown */}
       {showMenu && (
-        <TouchableOpacity
-          style={styles.dropdownBackdrop}
-          activeOpacity={1}
-          onPress={() => setShowMenu(false)}
-        />
+        <>
+          <TouchableOpacity style={styles.menuBackdrop} onPress={() => setShowMenu(false)} activeOpacity={1} />
+          <View style={[styles.menuDropdown, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); setSelectedCreateDays(new Set(ALL_DAYS)); setShowCreateSheet(true); }}>
+              <Ionicons name="calendar-outline" size={18} color={colors.primary} />
+              <Text style={[styles.menuItemText, { color: colors.text }]}>Create New Plan</Text>
+            </TouchableOpacity>
+            <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
+            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); navigation.navigate('MealPlanEdit', { mealPlan, recipes }); }}>
+              <Ionicons name="create-outline" size={18} color={colors.primary} />
+              <Text style={[styles.menuItemText, { color: colors.text }]}>Edit Meal Plan</Text>
+            </TouchableOpacity>
+            <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
+            <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); handleClearMealPlan(); }}>
+              <Ionicons name="trash-outline" size={18} color={colors.error} />
+              <Text style={[styles.menuItemText, { color: colors.error }]}>Clear Meal Plan</Text>
+            </TouchableOpacity>
+          </View>
+        </>
       )}
 
       {/* Week Navigation */}
-      <View style={styles.weekNavContainer}>
-        <TouchableOpacity
-          style={styles.weekNavButton}
-          onPress={() => setWeekOffset(w => w - 1)}
-        >
-          <Text style={styles.weekNavArrow}>‹</Text>
-        </TouchableOpacity>
-        <View style={styles.weekNavInfo}>
-          <Text style={styles.weekNavLabel}>{getWeekLabel()}</Text>
-          <Text style={styles.weekNavDateRange}>{getWeekDateRange()}</Text>
+      <WeekNav weekOffset={weekOffset} setWeekOffset={setWeekOffset} getWeekLabel={getWeekLabel} getWeekDateRange={getWeekDateRange} colors={colors} />
+
+      {/* Onboarding Guide */}
+      {isFirstRun && onboardingStep === 'meal_plan' && !onboardingDismissed && (
+        <View style={styles.onboardingBanner}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.onboardingTitle}>Step 2: Your Meal Plan</Text>
+            <Text style={styles.onboardingText}>
+              Your AI-powered meal plan is ready! Tap any meal to view the recipe, or swipe through your week. Next up: your grocery list!
+            </Text>
+          </View>
+          <TouchableOpacity onPress={dismissOnboarding} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Ionicons name="close" size={20} color={colors.textMuted} />
+          </TouchableOpacity>
         </View>
-        <TouchableOpacity
-          style={styles.weekNavButton}
-          onPress={() => setWeekOffset(w => w + 1)}
-        >
-          <Text style={styles.weekNavArrow}>›</Text>
-        </TouchableOpacity>
+      )}
+
+      {/* Day Strip — all 7 days visible */}
+      <View style={styles.dayStrip}>
+        {daysInfo.map(({ day, dateNum, isInPlan, isToday, hasMeals }) => (
+          <TouchableOpacity
+            key={day}
+            style={[
+              styles.dayCell,
+              selectedDay === day && styles.dayCellSelected,
+              !isInPlan && styles.dayCellDisabled,
+            ]}
+            onPress={() => isInPlan && setSelectedDay(day)}
+            disabled={!isInPlan}
+          >
+            <Text style={[
+              styles.dayAbbr,
+              selectedDay === day && styles.dayAbbrSelected,
+              !isInPlan && styles.dayAbbrDisabled,
+            ]}>
+              {DAY_LABELS[day]}
+            </Text>
+            <View style={[
+              styles.dayNumCircle,
+              selectedDay === day && { backgroundColor: colors.primary },
+              isToday && selectedDay !== day && { backgroundColor: colors.primary + '20' },
+            ]}>
+              <Text style={[
+                styles.dayNum,
+                selectedDay === day && { color: '#FFF' },
+                isToday && selectedDay !== day && { color: colors.primary },
+                !isInPlan && styles.dayAbbrDisabled,
+              ]}>
+                {dateNum}
+              </Text>
+            </View>
+            {hasMeals && selectedDay !== day && (
+              <View style={[styles.dayDot, { backgroundColor: colors.primary }]} />
+            )}
+          </TouchableOpacity>
+        ))}
       </View>
 
-      <ScrollView>
-        {/* Week Day Selector */}
-        <View style={styles.calendarContainer}>
-          <ScrollView
-            ref={dayScrollRef}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.dayScrollContent}
-          >
-            {daysOfWeek.map(({ day, label, date, fullDate }) => {
-              const today = new Date();
-              const isToday = weekOffset === 0 && day === getCurrentDayOfWeek();
-              return (
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
+        {/* Daily Nutrition Bar */}
+        {dayNutrition && (
+          <View style={styles.nutritionBar}>
+            <NutritionProgress
+              label="Calories"
+              current={dayNutrition.totals.calories}
+              target={targets.calories}
+              unit="cal"
+              color={colors.primary}
+              colors={colors}
+            />
+            <View style={styles.macroRow}>
+              <NutritionProgress
+                label="Protein"
+                current={dayNutrition.totals.protein_grams}
+                target={targets.protein}
+                unit="g"
+                color={colors.proteinColor}
+                compact
+                colors={colors}
+              />
+              <NutritionProgress
+                label="Carbs"
+                current={dayNutrition.totals.carbs_grams}
+                target={targets.carbs}
+                unit="g"
+                color={colors.carbsColor}
+                compact
+                colors={colors}
+              />
+              <NutritionProgress
+                label="Fat"
+                current={dayNutrition.totals.fat_grams}
+                target={targets.fat}
+                unit="g"
+                color={colors.fatColor}
+                compact
+                colors={colors}
+              />
+            </View>
+          </View>
+        )}
+
+        {/* Meal Cards */}
+        <View style={styles.mealsContainer}>
+          {mealTypes.map((mt) => {
+            const dayMeals = mealPlan.meals[selectedDay] as any;
+            const slot = dayMeals?.[mt.key] as MealSlot | undefined;
+            const recipeId = getRecipeIdFromSlot(slot);
+            const recipe = recipeId ? recipes[recipeId] : null;
+            const isRegenerating = regeneratingMeal === `${selectedDay}-${mt.key}`;
+            const isRepeat = isRepeatMeal(slot);
+            const originalDay = getOriginalDay(slot);
+
+            return (
+              <TouchableOpacity
+                key={mt.key}
+                style={styles.mealCard}
+                onPress={() => {
+                  if (recipe) setShowMealOptions(mt.key);
+                  else handleRegenerateMeal(mt.key);
+                }}
+                activeOpacity={0.7}
+                disabled={isRegenerating}
+              >
+                {/* Meal Label Row */}
+                <View style={styles.mealLabelRow}>
+                  <Text style={styles.mealLabel}>{mt.label}</Text>
+                  {mt.time && <Text style={styles.mealTime}>{mt.time}</Text>}
+                  {isRepeat && (
+                    <View style={[styles.repeatBadge, { backgroundColor: colors.primary + '15' }]}>
+                      <Text style={[styles.repeatBadgeText, { color: colors.primary }]}>
+                        {originalDay ? 'Leftover' : 'Repeat'}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                {isRegenerating ? (
+                  <View style={styles.mealLoadingRow}>
+                    <ActivityIndicator size="small" color={colors.primary} />
+                    <Text style={styles.mealLoadingText}>Finding a new recipe...</Text>
+                  </View>
+                ) : recipe ? (
+                  <View style={styles.mealContent}>
+                    {recipe.image_url ? (
+                      <Image source={{ uri: recipe.image_url }} style={styles.mealImage} />
+                    ) : (
+                      <View style={[styles.mealImagePlaceholder, { backgroundColor: colors.backgroundSecondary }]}>
+                        <Ionicons name="restaurant-outline" size={24} color={colors.textMuted} />
+                      </View>
+                    )}
+                    <View style={styles.mealInfo}>
+                      <Text style={styles.mealTitle} numberOfLines={2}>{recipe.title}</Text>
+                      {originalDay && (
+                        <Text style={[styles.mealMeta, { color: colors.primary }]}>
+                          From {originalDay.charAt(0).toUpperCase() + originalDay.slice(1)}
+                        </Text>
+                      )}
+                      <View style={styles.mealStats}>
+                        {recipe.cook_time != null && (
+                          <Text style={styles.mealMeta}>{recipe.prep_time || recipe.cook_time} min</Text>
+                        )}
+                        {recipe.calories != null && (
+                          <Text style={styles.mealMeta}>· {recipe.calories} cal</Text>
+                        )}
+                      </View>
+                    </View>
+                  </View>
+                ) : (
+                  <View style={styles.emptySlot}>
+                    <Text style={styles.emptySlotPlus}>+</Text>
+                    <Text style={styles.emptySlotText}>Add meal</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        {/* Grocery List CTA */}
+        <TouchableOpacity
+          style={styles.groceryCta}
+          onPress={() => navigation.getParent()?.navigate('GroceryList')}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="cart-outline" size={20} color={colors.primary} />
+          <Text style={styles.groceryCtaText}>View Grocery List</Text>
+          <Ionicons name="chevron-forward" size={18} color={colors.primary} />
+        </TouchableOpacity>
+      </ScrollView>
+
+      {/* Meal Options Sheet */}
+      {showMealOptions && (
+        <Modal transparent animationType="fade" onRequestClose={() => setShowMealOptions(null)}>
+          <TouchableOpacity style={styles.sheetBackdrop} onPress={() => setShowMealOptions(null)} activeOpacity={1}>
+            <View style={[styles.optionsSheet, { backgroundColor: colors.card }]}>
+              <TouchableOpacity
+                style={styles.optionItem}
+                onPress={() => {
+                  const mt = showMealOptions;
+                  setShowMealOptions(null);
+                  const dayMeals = mealPlan.meals[selectedDay] as any;
+                  const rid = getRecipeIdFromSlot(dayMeals?.[mt]);
+                  if (rid && recipes[rid]) navigation.navigate('RecipeDetail', { recipe: recipes[rid] });
+                }}
+              >
+                <Ionicons name="eye-outline" size={20} color={colors.text} />
+                <Text style={[styles.optionText, { color: colors.text }]}>View Recipe</Text>
+              </TouchableOpacity>
+              <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
+              <TouchableOpacity
+                style={styles.optionItem}
+                onPress={() => {
+                  const mt = showMealOptions;
+                  setShowMealOptions(null);
+                  handleRegenerateMeal(mt);
+                }}
+              >
+                <Ionicons name="refresh-outline" size={20} color={colors.text} />
+                <Text style={[styles.optionText, { color: colors.text }]}>Swap Meal</Text>
+              </TouchableOpacity>
+              <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
+              <TouchableOpacity
+                style={styles.optionItem}
+                onPress={() => {
+                  const mt = showMealOptions;
+                  setShowMealOptions(null);
+                  handleRemoveMeal(mt);
+                }}
+              >
+                <Ionicons name="trash-outline" size={20} color={colors.error} />
+                <Text style={[styles.optionText, { color: colors.error }]}>Remove Meal</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+      )}
+
+      {/* Create Meal Plan Sheet */}
+      {renderCreateSheet()}
+    </View>
+  );
+
+  function renderCreateSheet() {
+    return (
+      <Modal visible={showCreateSheet} transparent animationType="slide" onRequestClose={() => setShowCreateSheet(false)}>
+        <TouchableOpacity style={styles.sheetBackdrop} onPress={() => !generating && setShowCreateSheet(false)} activeOpacity={1}>
+          <View style={[styles.createSheet, { backgroundColor: colors.background }]}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.createSheetTitle}>Create Meal Plan</Text>
+            <Text style={styles.createSheetSubtitle}>{getWeekLabel()} · {getWeekDateRange()}</Text>
+
+            {/* Day Toggles */}
+            <View style={styles.createDayRow}>
+              {ALL_DAYS.map((day) => (
                 <TouchableOpacity
                   key={day}
                   style={[
-                    styles.dayCard,
-                    selectedDay === day && styles.dayCardSelected,
-                    isToday && selectedDay !== day && styles.dayCardToday,
+                    styles.createDayChip,
+                    selectedCreateDays.has(day) && { backgroundColor: colors.primary },
+                    !selectedCreateDays.has(day) && { backgroundColor: colors.backgroundSecondary, borderColor: colors.border, borderWidth: 1 },
                   ]}
-                  onPress={() => setSelectedDay(day)}
+                  onPress={() => {
+                    setSelectedCreateDays((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(day)) { if (next.size > 1) next.delete(day); }
+                      else next.add(day);
+                      return next;
+                    });
+                  }}
                 >
-                  {isToday && (
-                    <Text style={[
-                      styles.todayLabel,
-                      selectedDay === day && styles.todayLabelSelected,
-                    ]}>TODAY</Text>
-                  )}
-                  <Text
-                    style={[
-                      styles.dayName,
-                      selectedDay === day && styles.dayNameSelected,
-                    ]}
-                  >
-                    {label}
+                  <Text style={[
+                    styles.createDayChipText,
+                    selectedCreateDays.has(day) ? { color: '#FFF' } : { color: colors.textSecondary },
+                  ]}>
+                    {DAY_LABELS[day]}
                   </Text>
-                  <Text
-                    style={[
-                      styles.dayDate,
-                      selectedDay === day && styles.dayDateSelected,
-                    ]}
-                  >
-                    {date}
-                  </Text>
-                  {mealPlan.meals[day] && Object.keys(mealPlan.meals[day] || {}).length > 0 && (
-                    <View style={styles.planIndicator} />
-                  )}
                 </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </View>
+              ))}
+            </View>
 
-        {/* Recipe Load Error Banner */}
-        {recipeLoadError && (
-          <TouchableOpacity
-            style={styles.errorBanner}
-            onPress={() => {
-              setRecipeLoadError(null);
-              if (mealPlan) {
-                loadRecipes(mealPlan);
-              }
-            }}
-          >
-            <Text style={styles.errorBannerText}>{recipeLoadError}</Text>
-          </TouchableOpacity>
-        )}
+            {/* Presets */}
+            <View style={styles.presetRow}>
+              <TouchableOpacity
+                style={[styles.presetChip, { borderColor: colors.border }]}
+                onPress={() => setSelectedCreateDays(new Set(ALL_DAYS))}
+              >
+                <Text style={[styles.presetText, { color: colors.textSecondary }]}>Full Week</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.presetChip, { borderColor: colors.border }]}
+                onPress={() => setSelectedCreateDays(new Set(['monday', 'tuesday', 'wednesday', 'thursday', 'friday'] as DayOfWeek[]))}
+              >
+                <Text style={[styles.presetText, { color: colors.textSecondary }]}>Weekdays</Text>
+              </TouchableOpacity>
+            </View>
 
-        {/* Meals for Selected Day */}
-        <View style={styles.mealsContainer}>
-          {renderMealCard('breakfast')}
-          {renderMealCard('snack')}
-          {renderMealCard('lunch')}
-          {renderMealCard('dinner')}
-        </View>
-
-        {/* Weekly Macro Summary Toggle - Prominent Button */}
-        <TouchableOpacity
-          style={styles.macroToggleButton}
-          onPress={() => setShowMacroSummary(!showMacroSummary)}
-        >
-          <View style={styles.macroToggleContent}>
-            <Text style={styles.macroToggleEmoji}>📊</Text>
-            <View style={styles.macroToggleTextContainer}>
-              <Text style={styles.macroToggleTitle}>
-                {macroSummary?.num_days && macroSummary.num_days !== 7
-                  ? `${macroSummary.num_days}-Day Nutrition Summary`
-                  : 'Weekly Nutrition Summary'}
-              </Text>
-              {macroSummary && !showMacroSummary && (
-                <Text style={styles.macroTogglePreview}>
-                  Avg: {Math.round(macroSummary.weekly_summary.daily_averages.calories)} cal/day
-                </Text>
+            {/* Action Buttons */}
+            <TouchableOpacity
+              style={[styles.createButton, { backgroundColor: colors.primary }, generating && { opacity: 0.6 }]}
+              onPress={handleCreateWithAI}
+              disabled={generating}
+            >
+              {generating ? (
+                <ActivityIndicator size="small" color="#FFF" />
+              ) : (
+                <Text style={styles.createButtonText}>Generate with AI</Text>
               )}
-            </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.createButtonSecondary, { borderColor: colors.border }]}
+              onPress={handleBuildManually}
+              disabled={generating}
+            >
+              <Text style={[styles.createButtonSecondaryText, { color: colors.text }]}>Build Manually</Text>
+            </TouchableOpacity>
           </View>
-          <Text style={styles.macroToggleArrow}>{showMacroSummary ? '▲' : '▼'}</Text>
         </TouchableOpacity>
+      </Modal>
+    );
+  }
+};
 
-        {/* Optimize Calories Button */}
-        <TouchableOpacity
-          style={[styles.optimizeButton, optimizing && { opacity: 0.6 }]}
-          onPress={handleOptimizeCalories}
-          disabled={optimizing}
-        >
-          {optimizing ? (
-            <ActivityIndicator size="small" color={colors.buttonText} />
-          ) : (
-            <Text style={styles.optimizeButtonIcon}>⚡</Text>
-          )}
-          <Text style={styles.optimizeButtonText}>
-            {optimizing ? 'Optimizing...' : 'Optimize Calories'}
-          </Text>
-        </TouchableOpacity>
+// ------- Sub-Components -------
 
-        {/* Weekly Macro Summary */}
-        {showMacroSummary && macroSummary && (
-          <View style={styles.macroSummaryContainer}>
-            {/* Daily Averages - Now First */}
-            <View style={styles.macroCardHighlight}>
-              <Text style={styles.macroCardTitleLarge}>Daily Averages</Text>
-              <View style={styles.macroGridCompact}>
-                <View style={styles.macroItemLarge}>
-                  <Text style={styles.macroValueLarge}>{Math.round(macroSummary.weekly_summary.daily_averages.calories)}</Text>
-                  <Text style={styles.macroLabelSmall}>cal</Text>
-                </View>
-                <View style={styles.macroDivider} />
-                <View style={styles.macroItemLarge}>
-                  <Text style={styles.macroValueLarge}>{macroSummary.weekly_summary.daily_averages.protein_grams}g</Text>
-                  <Text style={styles.macroLabelSmall}>protein</Text>
-                </View>
-                <View style={styles.macroDivider} />
-                <View style={styles.macroItemLarge}>
-                  <Text style={styles.macroValueLarge}>{macroSummary.weekly_summary.daily_averages.carbs_grams}g</Text>
-                  <Text style={styles.macroLabelSmall}>carbs</Text>
-                </View>
-                <View style={styles.macroDivider} />
-                <View style={styles.macroItemLarge}>
-                  <Text style={styles.macroValueLarge}>{macroSummary.weekly_summary.daily_averages.fat_grams}g</Text>
-                  <Text style={styles.macroLabelSmall}>fat</Text>
-                </View>
-              </View>
-            </View>
+const WeekNav: React.FC<{
+  weekOffset: number;
+  setWeekOffset: (fn: (w: number) => number) => void;
+  getWeekLabel: () => string;
+  getWeekDateRange: () => string;
+  colors: ThemeColors;
+}> = ({ weekOffset, setWeekOffset, getWeekLabel, getWeekDateRange, colors }) => (
+  <View style={weekNavStyles.container}>
+    <TouchableOpacity onPress={() => setWeekOffset((w) => w - 1)} style={weekNavStyles.arrow}>
+      <Text style={[weekNavStyles.arrowText, { color: colors.primary }]}>‹</Text>
+    </TouchableOpacity>
+    <View style={weekNavStyles.center}>
+      <Text style={[weekNavStyles.label, { color: colors.text }]}>{getWeekLabel()}</Text>
+      <Text style={[weekNavStyles.range, { color: colors.textMuted }]}>{getWeekDateRange()}</Text>
+    </View>
+    <TouchableOpacity onPress={() => setWeekOffset((w) => w + 1)} style={weekNavStyles.arrow}>
+      <Text style={[weekNavStyles.arrowText, { color: colors.primary }]}>›</Text>
+    </TouchableOpacity>
+  </View>
+);
 
-            {/* Target Comparison (if user has targets set) */}
-            {macroSummary.target_comparison && (
-              <View style={styles.macroCard}>
-                <Text style={styles.macroCardTitle}>vs Your Targets</Text>
-                {macroSummary.target_comparison.calorie_target && (
-                  <View style={styles.targetRow}>
-                    <Text style={styles.targetLabel}>Calories</Text>
-                    <Text style={[
-                      styles.targetValue,
-                      macroSummary.target_comparison.calorie_on_target ? styles.targetOnTrack : styles.targetOff
-                    ]}>
-                      {macroSummary.target_comparison.calorie_daily_avg} / {macroSummary.target_comparison.calorie_target}
-                      {macroSummary.target_comparison.calorie_on_target ? ' ✓' : ''}
-                    </Text>
-                  </View>
-                )}
-                {macroSummary.target_comparison.protein_target_grams && (
-                  <View style={styles.targetRow}>
-                    <Text style={styles.targetLabel}>Protein</Text>
-                    <Text style={[
-                      styles.targetValue,
-                      macroSummary.target_comparison.protein_on_target ? styles.targetOnTrack : styles.targetOff
-                    ]}>
-                      {macroSummary.target_comparison.protein_daily_avg}g / {macroSummary.target_comparison.protein_target_grams}g
-                      {macroSummary.target_comparison.protein_on_target ? ' ✓' : ''}
-                    </Text>
-                  </View>
-                )}
-              </View>
-            )}
+const NutritionProgress: React.FC<{
+  label: string;
+  current: number;
+  target: number;
+  unit: string;
+  color: string;
+  compact?: boolean;
+  colors: ThemeColors;
+}> = ({ label, current, target, unit, color, compact, colors }) => {
+  const pct = Math.min((current / target) * 100, 100);
+  const isOver = current > target;
 
-            {/* Period Overview */}
-            <View style={styles.macroCard}>
-              <Text style={styles.macroCardTitle}>
-                {macroSummary.num_days && macroSummary.num_days !== 7
-                  ? `${macroSummary.num_days}-Day Totals`
-                  : 'Weekly Totals'}
-              </Text>
-              <View style={styles.macroGrid}>
-                <View style={styles.macroItem}>
-                  <Text style={styles.macroValue}>{macroSummary.weekly_summary.weekly_totals.calories.toLocaleString()}</Text>
-                  <Text style={styles.macroLabel}>Calories</Text>
-                </View>
-                <View style={styles.macroItem}>
-                  <Text style={styles.macroValue}>{macroSummary.weekly_summary.weekly_totals.protein_grams}g</Text>
-                  <Text style={styles.macroLabel}>Protein</Text>
-                </View>
-                <View style={styles.macroItem}>
-                  <Text style={styles.macroValue}>{macroSummary.weekly_summary.weekly_totals.carbs_grams}g</Text>
-                  <Text style={styles.macroLabel}>Carbs</Text>
-                </View>
-                <View style={styles.macroItem}>
-                  <Text style={styles.macroValue}>{macroSummary.weekly_summary.weekly_totals.fat_grams}g</Text>
-                  <Text style={styles.macroLabel}>Fat</Text>
-                </View>
-              </View>
-            </View>
+  if (compact) {
+    return (
+      <View style={nutritionStyles.compactContainer}>
+        <View style={nutritionStyles.compactHeader}>
+          <Text style={[nutritionStyles.compactLabel, { color: colors.textMuted }]}>{label}</Text>
+          <Text style={[nutritionStyles.compactValue, { color: colors.text }]}>{Math.round(current)}{unit}</Text>
+        </View>
+        <View style={[nutritionStyles.barBg, { backgroundColor: colors.border }]}>
+          <View style={[nutritionStyles.barFill, { width: `${pct}%`, backgroundColor: isOver ? colors.error : color }]} />
+        </View>
+      </View>
+    );
+  }
 
-            {/* Macro Distribution */}
-            <View style={styles.macroCard}>
-              <Text style={styles.macroCardTitle}>Macro Distribution</Text>
-              <View style={styles.macroDistribution}>
-                <View style={styles.macroBar}>
-                  <View style={[styles.macroBarFill, styles.proteinBar, { flex: macroSummary.weekly_summary.macro_percentages.protein_pct }]} />
-                  <View style={[styles.macroBarFill, styles.carbsBar, { flex: macroSummary.weekly_summary.macro_percentages.carbs_pct }]} />
-                  <View style={[styles.macroBarFill, styles.fatBar, { flex: macroSummary.weekly_summary.macro_percentages.fat_pct }]} />
-                </View>
-                <View style={styles.macroLegend}>
-                  <View style={styles.legendItem}>
-                    <View style={[styles.legendDot, styles.proteinBar]} />
-                    <Text style={styles.legendText}>Protein {macroSummary.weekly_summary.macro_percentages.protein_pct}%</Text>
-                  </View>
-                  <View style={styles.legendItem}>
-                    <View style={[styles.legendDot, styles.carbsBar]} />
-                    <Text style={styles.legendText}>Carbs {macroSummary.weekly_summary.macro_percentages.carbs_pct}%</Text>
-                  </View>
-                  <View style={styles.legendItem}>
-                    <View style={[styles.legendDot, styles.fatBar]} />
-                    <Text style={styles.legendText}>Fat {macroSummary.weekly_summary.macro_percentages.fat_pct}%</Text>
-                  </View>
-                </View>
-              </View>
-            </View>
-
-            {/* Daily Breakdown Section */}
-            <View style={styles.macroCard}>
-              <Text style={styles.macroCardTitle}>Daily Breakdown</Text>
-              {['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].map((day) => {
-                const dayData = macroSummary.daily_breakdown[day];
-                const isExpanded = expandedDays.has(day);
-
-                if (!dayData) return null;
-
-                return (
-                  <View key={day}>
-                    <TouchableOpacity
-                      style={styles.dayBreakdownHeader}
-                      onPress={() => toggleDayExpanded(day)}
-                    >
-                      <Text style={styles.dayBreakdownTitle}>{DAY_LABELS[day]}</Text>
-                      <View style={styles.dayBreakdownSummary}>
-                        <Text style={styles.dayBreakdownCalories}>{dayData.totals.calories} cal</Text>
-                        <Text style={styles.dayBreakdownArrow}>{isExpanded ? '▲' : '▼'}</Text>
-                      </View>
-                    </TouchableOpacity>
-
-                    {isExpanded && (
-                      <View style={styles.dayBreakdownContent}>
-                        <View style={styles.dayMacroRow}>
-                          <View style={styles.dayMacroItem}>
-                            <Text style={styles.dayMacroValue}>{dayData.totals.protein_grams}g</Text>
-                            <Text style={styles.dayMacroLabel}>Protein</Text>
-                          </View>
-                          <View style={styles.dayMacroItem}>
-                            <Text style={styles.dayMacroValue}>{dayData.totals.carbs_grams}g</Text>
-                            <Text style={styles.dayMacroLabel}>Carbs</Text>
-                          </View>
-                          <View style={styles.dayMacroItem}>
-                            <Text style={styles.dayMacroValue}>{dayData.totals.fat_grams}g</Text>
-                            <Text style={styles.dayMacroLabel}>Fat</Text>
-                          </View>
-                          <View style={styles.dayMacroItem}>
-                            <Text style={styles.dayMacroValue}>{dayData.meal_count}</Text>
-                            <Text style={styles.dayMacroLabel}>Meals</Text>
-                          </View>
-                        </View>
-                        <View style={styles.dayMacroBarSmall}>
-                          <View style={[styles.macroBarFill, styles.proteinBar, { flex: dayData.macro_percentages.protein_pct }]} />
-                          <View style={[styles.macroBarFill, styles.carbsBar, { flex: dayData.macro_percentages.carbs_pct }]} />
-                          <View style={[styles.macroBarFill, styles.fatBar, { flex: dayData.macro_percentages.fat_pct }]} />
-                        </View>
-                      </View>
-                    )}
-                  </View>
-                );
-              })}
-            </View>
-
-            {/* Validation Warnings */}
-            {macroSummary.validation_warnings.length > 0 && (
-              <View style={styles.warningsCard}>
-                <Text style={styles.warningsTitle}>Nutrition Notes</Text>
-                {macroSummary.validation_warnings.slice(0, 3).map((warning, index) => (
-                  <Text key={index} style={styles.warningText}>{warning}</Text>
-                ))}
-              </View>
-            )}
-          </View>
-        )}
-
-        <View style={{ height: 20 }} />
-      </ScrollView>
+  return (
+    <View style={nutritionStyles.container}>
+      <View style={nutritionStyles.header}>
+        <Text style={[nutritionStyles.label, { color: colors.textMuted }]}>{label}</Text>
+        <Text style={[nutritionStyles.value, { color: colors.text }]}>
+          <Text style={{ fontWeight: '700' }}>{Math.round(current)}</Text>
+          <Text style={{ color: colors.textMuted }}> / {target} {unit}</Text>
+        </Text>
+      </View>
+      <View style={[nutritionStyles.barBgLarge, { backgroundColor: colors.border }]}>
+        <View style={[nutritionStyles.barFillLarge, { width: `${pct}%`, backgroundColor: isOver ? colors.error : color }]} />
+      </View>
     </View>
   );
 };
 
-const createStyles = (colors: any) => StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: colors.textMuted,
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 32,
-  },
-  emptyIcon: {
-    fontSize: 56,
-    marginBottom: 16,
-  },
-  emptyTitle: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: colors.text,
-    marginBottom: 12,
-    letterSpacing: -0.5,
-  },
-  emptyDescription: {
-    fontSize: 16,
-    color: colors.textMuted,
-    textAlign: 'center',
-    marginBottom: 36,
-    lineHeight: 24,
-    fontWeight: '400',
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingTop: Platform.OS === 'ios' ? 60 : 16,
-    paddingBottom: 16,
-    backgroundColor: colors.backgroundSecondary,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    zIndex: 100,
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: colors.primary,
-  },
-  addButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  addButtonText: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: colors.backgroundSecondary,
-  },
-  dropdownMenu: {
-    position: 'absolute',
-    top: '100%',
-    right: 0,
-    marginTop: 16,
-    backgroundColor: colors.card,
-    borderRadius: 12,
-    shadowColor: colors.shadow,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 8,
-    overflow: 'hidden',
-    minWidth: 200,
-    zIndex: 101,
-  },
-  dropdownMenuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  dropdownMenuIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  dropdownMenuIconText: {
-    fontSize: 18,
-  },
-  dropdownMenuText: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: colors.text,
-  },
-  dropdownBackdrop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 99,
-  },
-  // Week Navigation Styles
-  weekNavContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    backgroundColor: colors.card,
-    marginHorizontal: 16,
-    marginTop: 12,
-    borderRadius: 16,
-    shadowColor: colors.shadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  weekNavButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  weekNavArrow: {
-    fontSize: 24,
-    color: colors.primary,
-    fontWeight: '600',
-  },
-  weekNavInfo: {
-    flex: 1,
-    alignItems: 'center',
-    paddingHorizontal: 12,
-  },
-  weekNavLabel: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: colors.text,
-    letterSpacing: -0.3,
-  },
-  weekNavDateRange: {
-    fontSize: 13,
-    color: colors.textMuted,
-    marginTop: 3,
-    fontWeight: '500',
-  },
-  calendarContainer: {
-    backgroundColor: 'transparent',
-    paddingVertical: 16,
-    marginBottom: 8,
-  },
-  dayScrollContent: {
-    paddingHorizontal: 16,
-  },
-  dayCard: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginHorizontal: 6,
-    paddingVertical: 14,
-    paddingHorizontal: 14,
-    borderRadius: 16,
-    backgroundColor: colors.card,
-    minWidth: 64,
-    shadowColor: colors.shadow,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 1,
-  },
-  dayCardSelected: {
-    backgroundColor: colors.primary,
-    shadowColor: colors.primary,
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  dayCardToday: {
-    borderWidth: 2,
-    borderColor: colors.primary,
-  },
-  todayLabel: {
-    fontSize: 8,
-    fontWeight: '700',
-    color: colors.primary,
-    letterSpacing: 0.5,
-    marginBottom: 2,
-  },
-  todayLabelSelected: {
-    color: colors.buttonText,
-  },
-  dayName: {
-    fontSize: 12,
-    color: colors.textMuted,
-    marginBottom: 4,
-    fontWeight: '600',
-  },
-  dayNameSelected: {
-    color: colors.buttonText,
-  },
-  dayDate: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: colors.text,
-  },
-  dayDateSelected: {
-    color: colors.buttonText,
-  },
-  planIndicator: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.secondary,
-    marginTop: 4,
-  },
-  mealsContainer: {
-    paddingHorizontal: 16,
-    paddingBottom: 24,
-  },
-  errorBanner: {
-    backgroundColor: colors.warningLight,
-    marginHorizontal: 16,
-    marginBottom: 12,
-    padding: 12,
-    borderRadius: 8,
-    borderLeftWidth: 4,
-    borderLeftColor: colors.warning,
-  },
-  errorBannerText: {
-    color: colors.warningDark,
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  mealCard: {
-    backgroundColor: colors.card,
-    borderRadius: 20,
-    padding: 18,
-    marginBottom: 14,
-    shadowColor: colors.shadow,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 4,
-  },
-  mealHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 14,
-  },
-  mealTypeContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  mealType: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-  },
-  repeatBadge: {
-    backgroundColor: colors.success + '20',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  leftoverBadge: {
-    backgroundColor: colors.warningLight,
-  },
-  repeatBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.success,
-  },
-  leftoverHint: {
-    fontSize: 12,
-    color: colors.textMuted,
-    fontStyle: 'italic',
-    marginBottom: 4,
-  },
-  regenerateButton: {
-    padding: 4,
-  },
-  regenerateText: {
-    fontSize: 18,
-  },
-  plannedMeal: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  mealImage: {
-    width: 64,
-    height: 64,
-    borderRadius: 14,
-    marginRight: 14,
-  },
-  mealImagePlaceholder: {
-    width: 64,
-    height: 64,
-    borderRadius: 14,
-    backgroundColor: colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 14,
-  },
-  mealEmoji: {
-    fontSize: 30,
-  },
-  mealInfo: {
-    flex: 1,
-  },
-  mealTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: 6,
-    letterSpacing: -0.2,
-  },
-  macroPreview: {
-    flexDirection: 'row',
-    gap: 16,
-    marginBottom: 4,
-  },
-  macroText: {
-    fontSize: 13,
-    color: colors.textMuted,
-    fontWeight: '500',
-  },
-  mealSubtext: {
-    fontSize: 14,
-    color: colors.primary,
-    fontWeight: '600',
-  },
-  emptyMeal: {
-    paddingVertical: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: colors.primary + '40',
-    borderStyle: 'dashed',
-    borderRadius: 12,
-    backgroundColor: colors.primary + '08',
-    minHeight: 80,
-  },
-  emptyMealText: {
-    fontSize: 14,
-    color: colors.primary,
-    fontWeight: '600',
-  },
-  generateMealIcon: {
-    fontSize: 28,
-    color: colors.primary,
-    fontWeight: '300',
-    marginBottom: 4,
-  },
-  // Macro Summary Styles - Prominent Button
-  optimizeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginHorizontal: 16,
-    marginBottom: 8,
-    padding: 12,
-    backgroundColor: colors.card,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.primary + '40',
-    gap: 8,
-  },
-  optimizeButtonIcon: {
-    fontSize: 18,
-  },
-  optimizeButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.primary,
-  },
-  macroToggleButton: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginHorizontal: 16,
-    marginTop: 8,
-    marginBottom: 12,
-    padding: 16,
-    backgroundColor: colors.primary,
-    borderRadius: 12,
-    shadowColor: colors.shadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  macroToggleContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  macroToggleEmoji: {
-    fontSize: 24,
-    marginRight: 12,
-  },
-  macroToggleTextContainer: {
-    flex: 1,
-  },
-  macroToggleTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.buttonText,
-  },
-  macroTogglePreview: {
-    fontSize: 13,
-    color: colors.buttonText,
-    opacity: 0.85,
-    marginTop: 2,
-  },
-  macroToggleArrow: {
-    fontSize: 14,
-    color: colors.buttonText,
-    marginLeft: 8,
-  },
-  macroSummaryContainer: {
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-  },
-  macroCard: {
-    backgroundColor: colors.card,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-  },
-  macroCardHighlight: {
-    backgroundColor: colors.primary,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-  },
-  macroCardTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.text,
-    marginBottom: 12,
-  },
-  macroCardTitleLarge: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.buttonText,
-    textAlign: 'center',
-    marginBottom: 12,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  macroGridCompact: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-  },
-  macroItemLarge: {
-    alignItems: 'center',
-    flex: 1,
-  },
-  macroValueLarge: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: colors.buttonText,
-  },
-  macroLabelSmall: {
-    fontSize: 11,
-    color: colors.buttonText,
-    opacity: 0.85,
-    marginTop: 2,
-    textTransform: 'uppercase',
-  },
-  macroDivider: {
-    width: 1,
-    height: 30,
-    backgroundColor: colors.buttonText,
-    opacity: 0.3,
-  },
-  macroGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
-  macroItem: {
-    width: '48%',
-    alignItems: 'center',
-    paddingVertical: 8,
-    marginBottom: 8,
-  },
-  macroValue: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: colors.text,
-  },
-  macroLabel: {
-    fontSize: 12,
-    color: colors.textMuted,
-    marginTop: 4,
-  },
-  macroDistribution: {
-    marginTop: 8,
-  },
-  macroBar: {
-    flexDirection: 'row',
-    height: 16,
-    borderRadius: 8,
-    overflow: 'hidden',
-    backgroundColor: colors.border,
-  },
-  macroBarFill: {
-    height: '100%',
-  },
-  proteinBar: {
-    backgroundColor: colors.proteinColor,
-  },
-  carbsBar: {
-    backgroundColor: colors.carbsColor,
-  },
-  fatBar: {
-    backgroundColor: colors.fatColor,
-  },
-  macroLegend: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginTop: 12,
-  },
-  legendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  legendDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginRight: 6,
-  },
-  legendText: {
-    fontSize: 12,
-    color: colors.textMuted,
-  },
-  targetRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  targetLabel: {
-    fontSize: 14,
-    color: colors.text,
-  },
-  targetValue: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  targetOnTrack: {
-    color: colors.proteinColor,
-  },
-  targetOff: {
-    color: colors.textMuted,
-  },
-  warningsCard: {
-    backgroundColor: colors.card,
-    borderRadius: 12,
-    padding: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: colors.carbsColor,
-  },
-  warningsTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.text,
-    marginBottom: 8,
-  },
-  warningText: {
-    fontSize: 12,
-    color: colors.textMuted,
-    marginBottom: 4,
-  },
-  // Daily Breakdown Styles
-  dayBreakdownHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  dayBreakdownTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  dayBreakdownSummary: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  dayBreakdownCalories: {
-    fontSize: 14,
-    color: colors.textMuted,
-    marginRight: 8,
-  },
-  dayBreakdownArrow: {
-    fontSize: 12,
-    color: colors.textMuted,
-  },
-  dayBreakdownContent: {
-    paddingVertical: 12,
-    paddingLeft: 8,
-    backgroundColor: colors.background,
-    borderRadius: 8,
-    marginTop: 8,
-    marginBottom: 8,
-  },
-  dayMacroRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginBottom: 10,
-  },
-  dayMacroItem: {
-    alignItems: 'center',
-  },
-  dayMacroValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  dayMacroLabel: {
-    fontSize: 11,
-    color: colors.textMuted,
-    marginTop: 2,
-  },
-  dayMacroBarSmall: {
-    flexDirection: 'row',
-    height: 8,
-    borderRadius: 4,
-    overflow: 'hidden',
-    backgroundColor: colors.border,
-    marginHorizontal: 8,
-  },
+// ------- Styles -------
+
+const weekNavStyles = StyleSheet.create({
+  container: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8 },
+  arrow: { padding: 8, width: 44, alignItems: 'center' },
+  arrowText: { fontSize: 28, fontWeight: '300' },
+  center: { alignItems: 'center', flex: 1 },
+  label: { fontSize: 16, fontWeight: '600' },
+  range: { fontSize: 13, marginTop: 2 },
 });
+
+const nutritionStyles = StyleSheet.create({
+  container: { marginBottom: 12 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  label: { fontSize: 13, fontWeight: '500' },
+  value: { fontSize: 14 },
+  barBgLarge: { height: 8, borderRadius: 4, overflow: 'hidden' },
+  barFillLarge: { height: 8, borderRadius: 4 },
+  compactContainer: { flex: 1 },
+  compactHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
+  compactLabel: { fontSize: 11, fontWeight: '500' },
+  compactValue: { fontSize: 12, fontWeight: '600' },
+  barBg: { height: 5, borderRadius: 3, overflow: 'hidden' },
+  barFill: { height: 5, borderRadius: 3 },
+});
+
+const createStyles = (colors: ThemeColors) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.background },
+    header: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+      paddingHorizontal: 20, paddingBottom: 12, paddingTop: 8,
+      backgroundColor: colors.backgroundSecondary,
+      borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
+    },
+    headerTitle: { fontSize: 28, fontWeight: '700', color: colors.primary },
+    menuButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.background, alignItems: 'center', justifyContent: 'center' },
+    menuButtonText: { fontSize: 22, fontWeight: '700', color: colors.text, marginTop: -2 },
+    menuBackdrop: { ...StyleSheet.absoluteFillObject, zIndex: 99 },
+    menuDropdown: {
+      position: 'absolute', top: 56, right: 16, borderRadius: 14, borderWidth: 1, zIndex: 100,
+      elevation: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 8, minWidth: 210,
+    },
+    menuItem: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, gap: 12 },
+    menuItemIcon: { fontSize: 18 },
+    menuItemText: { fontSize: 15 },
+    menuDivider: { height: StyleSheet.hairlineWidth },
+
+    // Day strip
+    dayStrip: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 10, justifyContent: 'space-between' },
+    dayCell: { alignItems: 'center', width: DAY_CELL_WIDTH, paddingVertical: 4 },
+    dayCellSelected: {},
+    dayCellDisabled: { opacity: 0.3 },
+    dayAbbr: { fontSize: 12, fontWeight: '500', color: colors.textMuted, marginBottom: 4 },
+    dayAbbrSelected: { color: colors.primary, fontWeight: '700' },
+    dayAbbrDisabled: { color: colors.textMuted },
+    dayNumCircle: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+    dayNum: { fontSize: 15, fontWeight: '600', color: colors.text },
+    dayDot: { width: 5, height: 5, borderRadius: 3, marginTop: 4 },
+
+    // Nutrition
+    nutritionBar: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 4 },
+    macroRow: { flexDirection: 'row', gap: 12, marginTop: 4 },
+
+    // Meals
+    mealsContainer: { paddingHorizontal: 16, paddingTop: 8 },
+    mealCard: {
+      backgroundColor: colors.card, borderRadius: 16, padding: 14, marginBottom: 10,
+      borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border,
+    },
+    mealLabelRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 8 },
+    mealLabel: { fontSize: 13, fontWeight: '700', color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 },
+    mealTime: { fontSize: 12, color: colors.textMuted },
+    repeatBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
+    repeatBadgeText: { fontSize: 11, fontWeight: '600' },
+    mealContent: { flexDirection: 'row', gap: 12, alignItems: 'center' },
+    mealImage: { width: 64, height: 64, borderRadius: 12 },
+    mealImagePlaceholder: { width: 64, height: 64, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+    mealInfo: { flex: 1 },
+    mealTitle: { fontSize: 16, fontWeight: '600', color: colors.text, marginBottom: 4 },
+    mealStats: { flexDirection: 'row', gap: 4 },
+    mealMeta: { fontSize: 13, color: colors.textMuted },
+    mealLoadingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
+    mealLoadingText: { fontSize: 14, color: colors.textMuted },
+    emptySlot: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
+    emptySlotPlus: { fontSize: 22, fontWeight: '300', color: colors.primary },
+    emptySlotText: { fontSize: 14, color: colors.textMuted },
+
+    // Grocery CTA
+    groceryCta: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginHorizontal: 16,
+      marginTop: 8,
+      marginBottom: 8,
+      paddingVertical: 14,
+      borderRadius: 14,
+      borderWidth: 1.5,
+      borderColor: colors.primary,
+      gap: 8,
+    },
+    groceryCtaText: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: colors.primary,
+    },
+
+    // Options sheet
+    sheetBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+    optionsSheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 40, paddingTop: 12 },
+    optionItem: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, gap: 14 },
+    optionIcon: { fontSize: 20 },
+    optionText: { fontSize: 16 },
+
+    // Create sheet
+    createSheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 },
+    sheetHandle: { width: 36, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginBottom: 16 },
+    createSheetTitle: { fontSize: 22, fontWeight: '700', color: colors.text, marginBottom: 4 },
+    createSheetSubtitle: { fontSize: 14, color: colors.textMuted, marginBottom: 20 },
+    createDayRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
+    createDayChip: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+    createDayChipText: { fontSize: 13, fontWeight: '600' },
+    presetRow: { flexDirection: 'row', gap: 10, marginBottom: 24 },
+    presetChip: { borderWidth: 1, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8 },
+    presetText: { fontSize: 13 },
+    createButton: { borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginBottom: 10 },
+    createButtonText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
+    createButtonSecondary: { borderWidth: 1, borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
+    createButtonSecondaryText: { fontSize: 16, fontWeight: '600' },
+
+    // Onboarding
+    onboardingBanner: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      marginHorizontal: 16,
+      marginTop: 4,
+      marginBottom: 4,
+      padding: 14,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.primary + '30',
+      backgroundColor: colors.primary + '12',
+      gap: 12,
+    },
+    onboardingTitle: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: colors.primary,
+      marginBottom: 4,
+    },
+    onboardingText: {
+      fontSize: 13,
+      lineHeight: 19,
+      color: colors.textSecondary,
+    },
+  });

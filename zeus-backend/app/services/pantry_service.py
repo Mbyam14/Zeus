@@ -261,7 +261,7 @@ class PantryService:
             # Call Claude Vision API with timeout
             logger.info(f"Calling Claude Vision for pantry image analysis (timeout: {IMAGE_ANALYSIS_TIMEOUT}s)")
 
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             response_text = await asyncio.wait_for(
                 loop.run_in_executor(
                     self.executor,

@@ -69,6 +69,7 @@ export interface IngredientLibraryItem {
   name: string;
   category: PantryCategory;
   common_units: string[];
+  default_unit?: string;
 }
 
 // Image Analysis Types

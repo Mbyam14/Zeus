@@ -7,7 +7,6 @@ class AuthService {
     const response = await api.post<AuthToken>('/api/auth/register', data);
     const authToken = response.data;
 
-    // Store tokens securely
     await SecureStore.setItemAsync('auth_token', authToken.access_token);
     if (authToken.refresh_token) {
       await SecureStore.setItemAsync('refresh_token', authToken.refresh_token);
@@ -20,7 +19,6 @@ class AuthService {
     const response = await api.post<AuthToken>('/api/auth/login', data);
     const authToken = response.data;
 
-    // Store tokens securely
     await SecureStore.setItemAsync('auth_token', authToken.access_token);
     if (authToken.refresh_token) {
       await SecureStore.setItemAsync('refresh_token', authToken.refresh_token);
@@ -42,6 +40,19 @@ class AuthService {
   async updateProfile(data: any): Promise<User> {
     const response = await api.put<User>('/api/auth/profile', data);
     return response.data;
+  }
+
+  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    await api.post('/api/auth/change-password', {
+      current_password: currentPassword,
+      new_password: newPassword,
+    });
+  }
+
+  async deleteAccount(password: string): Promise<void> {
+    await api.delete('/api/auth/account', {
+      data: { password },
+    });
   }
 
   async getStoredToken(): Promise<string | null> {

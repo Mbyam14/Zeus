@@ -13,13 +13,9 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { pantryService } from '../../services/pantryService';
 import { IngredientLibraryItem, PantryCategory, PantryItem } from '../../types/pantry';
+import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../store/themeStore';
-
-const CATEGORY_EMOJIS: Record<PantryCategory, string> = {
-  Produce: '🥬', Dairy: '🥛', Protein: '🍗', Grains: '🌾',
-  Spices: '🌶️', Condiments: '🧂', Beverages: '☕', Frozen: '🧊',
-  'Canned & Jarred': '🥫', Baking: '🧁', 'Oils & Vinegars': '🫒', Snacks: '🍿', Other: '📦',
-};
+import { CATEGORY_ICONS } from '../../constants/categoryIcons';
 
 export const IngredientSearchScreen: React.FC = () => {
   const navigation = useNavigation();
@@ -124,9 +120,7 @@ export const IngredientSearchScreen: React.FC = () => {
     return (
       <View style={styles.ingredientRow}>
         <View style={styles.ingredientInfo}>
-          <Text style={styles.ingredientEmoji}>
-            {CATEGORY_EMOJIS[item.category] || '📦'}
-          </Text>
+          <Ionicons name={(CATEGORY_ICONS[item.category] || 'cube-outline') as any} size={20} color={colors.textMuted} style={styles.ingredientEmoji} />
           <View style={styles.ingredientTextContainer}>
             <Text style={styles.ingredientName}>{item.name}</Text>
             <Text style={styles.ingredientCategory}>{item.category}</Text>

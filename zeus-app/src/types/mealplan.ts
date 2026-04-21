@@ -73,6 +73,7 @@ export interface MealPlan {
   plan_name: string;
   week_start_date: string;
   selected_days?: DayOfWeek[]; // Dynamic day selection (if not present, assume all 7 days)
+  meal_types?: MealTypeConfig[]; // Custom meal types for this plan
   meals: {
     monday?: DayMeals;
     tuesday?: DayMeals;
@@ -123,7 +124,22 @@ export interface UserPreferences {
 }
 
 export type DayOfWeek = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
-export type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack';
+export type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack' | string;
+
+// Custom meal slot configuration (per plan)
+export interface MealTypeConfig {
+  key: string;        // e.g. 'breakfast', 'morning_snack', 'pre_workout'
+  label: string;      // e.g. 'Breakfast', 'Morning Snack', 'Pre-Workout'
+  time?: string;      // Optional e.g. '8:00 AM'
+  order: number;      // Display order
+}
+
+export const DEFAULT_MEAL_TYPES: MealTypeConfig[] = [
+  { key: 'breakfast', label: 'Breakfast', order: 0 },
+  { key: 'snack', label: 'Snack', order: 1 },
+  { key: 'lunch', label: 'Lunch', order: 2 },
+  { key: 'dinner', label: 'Dinner', order: 3 },
+];
 
 // Helper function to extract recipe_id from either old (string) or new (object) format
 export const getRecipeIdFromSlot = (slot: MealSlot | undefined): string | undefined => {

@@ -21,6 +21,8 @@ import { PantryItem, PantryCategory, PantryItemCreate, IngredientLibraryItem, De
 import { pantryService } from '../../services/pantryService';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../store/themeStore';
+import { CATEGORY_ICONS } from '../../constants/categoryIcons';
+import { useOnboardingStore } from '../../store/onboardingStore';
 import { PantryItemSkeleton } from '../../components/SkeletonLoader';
 import { EmptyState } from '../../components/EmptyState';
 import { smartAIService, CookTonightResult } from '../../services/smartAIService';
@@ -31,11 +33,7 @@ const CATEGORIES: PantryCategory[] = [
 
 const UNITS = ['cups', 'tbsp', 'tsp', 'fl oz', 'pieces', 'items', 'cans', 'boxes', 'cloves', 'heads', 'lbs', 'oz', 'Custom'];
 
-const CATEGORY_EMOJIS: Record<PantryCategory, string> = {
-  Produce: '🥬', Dairy: '🥛', Protein: '🍗', Grains: '🌾',
-  Spices: '🌶️', Condiments: '🧂', Beverages: '☕', Frozen: '🧊',
-  'Canned & Jarred': '🥫', Baking: '🧁', 'Oils & Vinegars': '🫒', Snacks: '🍿', Other: '📦'
-};
+// Category emojis replaced by CATEGORY_ICONS (Ionicons)
 
 // Common pantry staples for quick-add
 interface QuickAddItem {
@@ -44,10 +42,10 @@ interface QuickAddItem {
   defaultUnit: string;
 }
 
-const QUICK_ADD_ITEMS: { category: string; emoji: string; items: QuickAddItem[] }[] = [
+const QUICK_ADD_ITEMS: { category: string; icon: string; items: QuickAddItem[] }[] = [
   {
     category: 'Dairy & Eggs',
-    emoji: '🥛',
+    icon: 'water-outline',
     items: [
       { name: 'Eggs', category: 'Dairy', defaultUnit: 'pieces' },
       { name: 'Milk', category: 'Dairy', defaultUnit: 'cups' },
@@ -60,7 +58,7 @@ const QUICK_ADD_ITEMS: { category: string; emoji: string; items: QuickAddItem[] 
   },
   {
     category: 'Produce',
-    emoji: '🥬',
+    icon: 'leaf-outline',
     items: [
       { name: 'Onions', category: 'Produce', defaultUnit: 'pieces' },
       { name: 'Garlic', category: 'Produce', defaultUnit: 'cloves' },
@@ -76,7 +74,7 @@ const QUICK_ADD_ITEMS: { category: string; emoji: string; items: QuickAddItem[] 
   },
   {
     category: 'Proteins',
-    emoji: '🍗',
+    icon: 'fish-outline',
     items: [
       { name: 'Chicken Breast', category: 'Protein', defaultUnit: 'lbs' },
       { name: 'Ground Beef', category: 'Protein', defaultUnit: 'lbs' },
@@ -88,24 +86,24 @@ const QUICK_ADD_ITEMS: { category: string; emoji: string; items: QuickAddItem[] 
   },
   {
     category: 'Pantry Staples',
-    emoji: '🥫',
+    icon: 'file-tray-stacked-outline',
     items: [
-      { name: 'Olive Oil', category: 'Pantry', defaultUnit: 'cups' },
-      { name: 'Vegetable Oil', category: 'Pantry', defaultUnit: 'cups' },
-      { name: 'All-Purpose Flour', category: 'Grains', defaultUnit: 'cups' },
-      { name: 'Sugar', category: 'Pantry', defaultUnit: 'cups' },
-      { name: 'Brown Sugar', category: 'Pantry', defaultUnit: 'cups' },
+      { name: 'Olive Oil', category: 'Oils & Vinegars', defaultUnit: 'cups' },
+      { name: 'Vegetable Oil', category: 'Oils & Vinegars', defaultUnit: 'cups' },
+      { name: 'All-Purpose Flour', category: 'Baking', defaultUnit: 'cups' },
+      { name: 'Sugar', category: 'Baking', defaultUnit: 'cups' },
+      { name: 'Brown Sugar', category: 'Baking', defaultUnit: 'cups' },
       { name: 'Rice', category: 'Grains', defaultUnit: 'cups' },
       { name: 'Pasta', category: 'Grains', defaultUnit: 'oz' },
       { name: 'Bread', category: 'Grains', defaultUnit: 'pieces' },
-      { name: 'Chicken Broth', category: 'Pantry', defaultUnit: 'cups' },
-      { name: 'Canned Tomatoes', category: 'Pantry', defaultUnit: 'cans' },
-      { name: 'Beans', category: 'Pantry', defaultUnit: 'cans' },
+      { name: 'Chicken Broth', category: 'Canned & Jarred', defaultUnit: 'cups' },
+      { name: 'Canned Tomatoes', category: 'Canned & Jarred', defaultUnit: 'cans' },
+      { name: 'Beans', category: 'Canned & Jarred', defaultUnit: 'cans' },
     ]
   },
   {
     category: 'Spices & Seasonings',
-    emoji: '🌶️',
+    icon: 'flame-outline',
     items: [
       { name: 'Salt', category: 'Spices', defaultUnit: 'tsp' },
       { name: 'Black Pepper', category: 'Spices', defaultUnit: 'tsp' },
@@ -119,7 +117,7 @@ const QUICK_ADD_ITEMS: { category: string; emoji: string; items: QuickAddItem[] 
   },
   {
     category: 'Condiments',
-    emoji: '🧂',
+    icon: 'beaker-outline',
     items: [
       { name: 'Soy Sauce', category: 'Condiments', defaultUnit: 'tbsp' },
       { name: 'Hot Sauce', category: 'Condiments', defaultUnit: 'tbsp' },
@@ -129,6 +127,81 @@ const QUICK_ADD_ITEMS: { category: string; emoji: string; items: QuickAddItem[] 
       { name: 'Honey', category: 'Condiments', defaultUnit: 'tbsp' },
       { name: 'Vinegar', category: 'Condiments', defaultUnit: 'tbsp' },
     ]
+  },
+];
+
+const STARTER_PACKS: { name: string; icon: string; color: string; description: string; items: { item_name: string; category: PantryCategory; unit: string }[] }[] = [
+  {
+    name: 'The Basics',
+    icon: 'home-outline',
+    color: '#3B82F6',
+    description: 'What every kitchen needs',
+    items: [
+      { item_name: 'Salt', category: 'Spices', unit: 'tsp' },
+      { item_name: 'Black Pepper', category: 'Spices', unit: 'tsp' },
+      { item_name: 'Olive Oil', category: 'Oils & Vinegars', unit: 'cups' },
+      { item_name: 'Butter', category: 'Dairy', unit: 'tbsp' },
+      { item_name: 'Eggs', category: 'Dairy', unit: 'pieces' },
+      { item_name: 'Milk', category: 'Dairy', unit: 'cups' },
+      { item_name: 'Flour', category: 'Baking', unit: 'cups' },
+      { item_name: 'Sugar', category: 'Baking', unit: 'cups' },
+      { item_name: 'Garlic', category: 'Produce', unit: 'cloves' },
+      { item_name: 'Onions', category: 'Produce', unit: 'pieces' },
+      { item_name: 'Rice', category: 'Grains', unit: 'cups' },
+      { item_name: 'Pasta', category: 'Grains', unit: 'oz' },
+    ],
+  },
+  {
+    name: 'Spice Rack',
+    icon: 'flame-outline',
+    color: '#EF4444',
+    description: 'Essential seasonings',
+    items: [
+      { item_name: 'Garlic Powder', category: 'Spices', unit: 'tsp' },
+      { item_name: 'Onion Powder', category: 'Spices', unit: 'tsp' },
+      { item_name: 'Paprika', category: 'Spices', unit: 'tsp' },
+      { item_name: 'Cumin', category: 'Spices', unit: 'tsp' },
+      { item_name: 'Italian Seasoning', category: 'Spices', unit: 'tsp' },
+      { item_name: 'Chili Powder', category: 'Spices', unit: 'tsp' },
+      { item_name: 'Cinnamon', category: 'Spices', unit: 'tsp' },
+      { item_name: 'Oregano', category: 'Spices', unit: 'tsp' },
+      { item_name: 'Bay Leaves', category: 'Spices', unit: 'pieces' },
+      { item_name: 'Red Pepper Flakes', category: 'Spices', unit: 'tsp' },
+    ],
+  },
+  {
+    name: 'Healthy Kitchen',
+    icon: 'leaf-outline',
+    color: '#22C55E',
+    description: 'Clean eating staples',
+    items: [
+      { item_name: 'Chicken Breast', category: 'Protein', unit: 'lbs' },
+      { item_name: 'Greek Yogurt', category: 'Dairy', unit: 'cups' },
+      { item_name: 'Spinach', category: 'Produce', unit: 'oz' },
+      { item_name: 'Quinoa', category: 'Grains', unit: 'cups' },
+      { item_name: 'Avocado', category: 'Produce', unit: 'pieces' },
+      { item_name: 'Almonds', category: 'Snacks', unit: 'oz' },
+      { item_name: 'Salmon', category: 'Protein', unit: 'lbs' },
+      { item_name: 'Sweet Potatoes', category: 'Produce', unit: 'pieces' },
+      { item_name: 'Brown Rice', category: 'Grains', unit: 'cups' },
+      { item_name: 'Lemon', category: 'Produce', unit: 'pieces' },
+    ],
+  },
+  {
+    name: 'Condiment Station',
+    icon: 'flask-outline',
+    color: '#F59E0B',
+    description: 'Sauces & flavor boosters',
+    items: [
+      { item_name: 'Soy Sauce', category: 'Condiments', unit: 'tbsp' },
+      { item_name: 'Hot Sauce', category: 'Condiments', unit: 'tbsp' },
+      { item_name: 'Ketchup', category: 'Condiments', unit: 'tbsp' },
+      { item_name: 'Mustard', category: 'Condiments', unit: 'tbsp' },
+      { item_name: 'Mayonnaise', category: 'Condiments', unit: 'tbsp' },
+      { item_name: 'Honey', category: 'Condiments', unit: 'tbsp' },
+      { item_name: 'Vinegar', category: 'Condiments', unit: 'tbsp' },
+      { item_name: 'Worcestershire Sauce', category: 'Condiments', unit: 'tbsp' },
+    ],
   },
 ];
 
@@ -146,6 +219,11 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
   const [editingItem, setEditingItem] = useState<PantryItem | null>(null);
 
   const { colors } = useThemeStore();
+  const onboardingStep = useOnboardingStore((s) => s.currentStep);
+  const isFirstRun = useOnboardingStore((s) => s.isFirstRun);
+  const advanceOnboarding = useOnboardingStore((s) => s.advanceStep);
+  const dismissBanner = useOnboardingStore((s) => s.dismissBanner);
+  const onboardingDismissed = useOnboardingStore((s) => s.dismissed);
   const styles = createStyles(colors);
   const [newItem, setNewItem] = useState<PantryItemCreate>({
     item_name: '',
@@ -166,34 +244,28 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
   const [showQuickAddModal, setShowQuickAddModal] = useState(false);
   const [selectedQuickItems, setSelectedQuickItems] = useState<Set<string>>(new Set());
   const [addingQuickItems, setAddingQuickItems] = useState(false);
+  const [frequentItems, setFrequentItems] = useState<{ item_name: string; category: string; default_unit: string; add_count: number }[]>([]);
   const [showAddDropdown, setShowAddDropdown] = useState(false);
+  const [addingPack, setAddingPack] = useState<string | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [expiringItems, setExpiringItems] = useState<PantryItem[]>([]);
   const [showExpiringBanner, setShowExpiringBanner] = useState(false);
-
-  // Cook Tonight
-  const [cookTonightModal, setCookTonightModal] = useState(false);
-  const [cookTonightLoading, setCookTonightLoading] = useState(false);
-  const [cookTonightResult, setCookTonightResult] = useState<CookTonightResult | null>(null);
-
-  const handleCookTonight = async () => {
-    setCookTonightModal(true);
-    setCookTonightLoading(true);
-    setCookTonightResult(null);
-    try {
-      const result = await smartAIService.getCookTonightSuggestion(30);
-      setCookTonightResult(result);
-    } catch {
-      setCookTonightResult({ suggestion: null, message: 'Failed to get suggestion. Try again.' });
-    } finally {
-      setCookTonightLoading(false);
-    }
-  };
+  const [inlineAddText, setInlineAddText] = useState('');
+  const [inlineAddLoading, setInlineAddLoading] = useState(false);
+  const [showBatchAddModal, setShowBatchAddModal] = useState(false);
+  const [batchAddText, setBatchAddText] = useState('');
+  const [batchAddLoading, setBatchAddLoading] = useState(false);
 
   useEffect(() => {
     loadPantryItems();
   }, [selectedCategory, searchQuery]);
+
+  useEffect(() => {
+    if (showQuickAddModal) {
+      pantryService.getFrequentItems(15).then(setFrequentItems).catch(() => {});
+    }
+  }, [showQuickAddModal]);
 
   // Reload pantry when screen comes into focus (e.g., returning from ImageReviewScreen)
   useFocusEffect(
@@ -226,6 +298,13 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
       });
       console.log(`✅ Loaded ${items.length} pantry items`);
       setPantryItems(items);
+      // Advance onboarding after user adds pantry items
+      if (items.length > 0) {
+        const { isFirstRun, currentStep, advanceStep } = useOnboardingStore.getState();
+        if (isFirstRun && currentStep === 'pantry') {
+          advanceStep();
+        }
+      }
     } catch (error) {
       Alert.alert('Error', 'Failed to load pantry items');
       console.error('❌ Load pantry items error:', error);
@@ -271,6 +350,19 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
         });
       });
 
+      // Also add selected frequent items
+      frequentItems.forEach(item => {
+        if (selectedQuickItems.has(item.item_name) && !itemsToAdd.find(i => i.item_name === item.item_name)) {
+          itemsToAdd.push({
+            item_name: item.item_name,
+            quantity: 1,
+            unit: item.default_unit || 'pieces',
+            category: (item.category as any) || 'Other',
+            expires_at: undefined,
+          });
+        }
+      });
+
       await pantryService.bulkAddPantryItems(itemsToAdd);
       Alert.alert('Success!', `Added ${itemsToAdd.length} item${itemsToAdd.length > 1 ? 's' : ''} to your pantry.`);
       setShowQuickAddModal(false);
@@ -281,6 +373,102 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
       Alert.alert('Error', 'Failed to add items. Please try again.');
     } finally {
       setAddingQuickItems(false);
+    }
+  };
+
+  const handleInlineAdd = async () => {
+    const name = inlineAddText.trim();
+    if (!name || inlineAddLoading) return;
+
+    setInlineAddLoading(true);
+    try {
+      // Try to match against ingredient library for auto-categorization
+      const suggestions = await pantryService.searchIngredients(name);
+      const match = suggestions.length > 0 ? suggestions[0] : null;
+
+      await pantryService.createPantryItem({
+        item_name: match ? match.name : name,
+        quantity: 1,
+        unit: match?.default_unit || match?.common_units?.[0] || 'pieces',
+        category: (match?.category as PantryCategory) || 'Other',
+        expires_at: undefined,
+      });
+
+      setInlineAddText('');
+      loadPantryItems();
+    } catch (error) {
+      Alert.alert('Error', 'Failed to add item');
+    } finally {
+      setInlineAddLoading(false);
+    }
+  };
+
+  const handleBatchAdd = async () => {
+    const text = batchAddText.trim();
+    if (!text) return;
+
+    setBatchAddLoading(true);
+    try {
+      // Parse comma-separated or newline-separated items
+      const itemNames = text
+        .split(/[,\n]+/)
+        .map(s => s.trim())
+        .filter(s => s.length > 0);
+
+      if (itemNames.length === 0) return;
+
+      // Try to auto-categorize each item using ingredient library
+      const itemsToAdd: PantryItemCreate[] = [];
+      for (const name of itemNames) {
+        try {
+          const suggestions = await pantryService.searchIngredients(name, undefined, 1);
+          const match = suggestions.length > 0 ? suggestions[0] : null;
+          itemsToAdd.push({
+            item_name: match ? match.name : name,
+            quantity: 1,
+            unit: match?.default_unit || match?.common_units?.[0] || 'pieces',
+            category: (match?.category as PantryCategory) || 'Other',
+            expires_at: undefined,
+          });
+        } catch {
+          itemsToAdd.push({
+            item_name: name,
+            quantity: 1,
+            unit: 'pieces',
+            category: 'Other',
+            expires_at: undefined,
+          });
+        }
+      }
+
+      await pantryService.bulkAddPantryItems(itemsToAdd);
+      Alert.alert('Added!', `${itemsToAdd.length} item${itemsToAdd.length !== 1 ? 's' : ''} added to your pantry.`);
+      setShowBatchAddModal(false);
+      setBatchAddText('');
+      loadPantryItems();
+    } catch (error) {
+      Alert.alert('Error', 'Failed to add items. Please try again.');
+    } finally {
+      setBatchAddLoading(false);
+    }
+  };
+
+  const handleAddStarterPack = async (pack: typeof STARTER_PACKS[0]) => {
+    setAddingPack(pack.name);
+    try {
+      const itemsToAdd: PantryItemCreate[] = pack.items.map(item => ({
+        item_name: item.item_name,
+        quantity: 1,
+        unit: item.unit,
+        category: item.category,
+        expires_at: undefined,
+      }));
+      await pantryService.bulkAddPantryItems(itemsToAdd);
+      loadPantryItems();
+    } catch (error) {
+      Alert.alert('Error', 'Failed to add items. Please try again.');
+    } finally {
+      setAddingPack(null);
     }
   };
 
@@ -449,10 +637,28 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
     setShowDatePicker(true);
   };
 
-  const handlePhotoUpload = () => {
+  const handleScanItems = () => {
     Alert.alert(
       'Scan Pantry Items',
       'Take a photo of your fridge, pantry, or cabinet to automatically detect items.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Take Photo',
+          onPress: () => launchCamera()
+        },
+        {
+          text: 'Choose from Gallery',
+          onPress: () => launchGallery()
+        }
+      ]
+    );
+  };
+
+  const handleScanReceipt = () => {
+    Alert.alert(
+      'Scan Grocery Receipt',
+      'Take a photo of your grocery receipt to automatically add purchased items.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -675,9 +881,10 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
 
   const renderSectionHeader = ({ section }: { section: { title: PantryCategory } }) => (
     <View style={styles.sectionHeader}>
-      <Text style={styles.sectionTitle}>
-        {CATEGORY_EMOJIS[section.title]} {section.title}
-      </Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        <Ionicons name={(CATEGORY_ICONS[section.title as string] || 'cube-outline') as any} size={16} color={colors.textMuted} />
+        <Text style={styles.sectionTitle}>{section.title}</Text>
+      </View>
       <Text style={styles.sectionCount}>
         {groupedItems().find(s => s.title === section.title)?.data.length || 0}
       </Text>
@@ -685,13 +892,48 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
   );
 
   const renderEmptyState = () => (
-    <EmptyState
-      icon="cube-outline"
-      title="Your Pantry is Empty"
-      description="Add items to your pantry so Zeus can suggest recipes based on what you have and build smarter grocery lists."
-      actionLabel="Add Items"
-      onAction={() => setShowAddDropdown(true)}
-    />
+    <ScrollView contentContainerStyle={styles.starterContainer} showsVerticalScrollIndicator={false}>
+      <View style={styles.starterHeader}>
+        <Ionicons name="basket-outline" size={48} color={colors.primary} />
+        <Text style={styles.starterTitle}>Stock Your Kitchen</Text>
+        <Text style={styles.starterSubtitle}>
+          Tap a starter pack to instantly add common items. Remove anything you don't have later — it's easier than adding one by one!
+        </Text>
+      </View>
+
+      <View style={styles.starterGrid}>
+        {STARTER_PACKS.map((pack) => (
+          <TouchableOpacity
+            key={pack.name}
+            style={[styles.starterCard, { borderColor: pack.color + '40' }]}
+            onPress={() => handleAddStarterPack(pack)}
+            disabled={addingPack !== null}
+            activeOpacity={0.7}
+          >
+            {addingPack === pack.name ? (
+              <ActivityIndicator size="small" color={pack.color} />
+            ) : (
+              <View style={[styles.starterIconCircle, { backgroundColor: pack.color + '15' }]}>
+                <Ionicons name={pack.icon as any} size={24} color={pack.color} />
+              </View>
+            )}
+            <Text style={styles.starterCardTitle}>{pack.name}</Text>
+            <Text style={styles.starterCardDesc}>{pack.description}</Text>
+            <Text style={[styles.starterCardCount, { color: pack.color }]}>
+              {pack.items.length} items
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <TouchableOpacity
+        style={styles.starterSkipButton}
+        onPress={() => setShowAddDropdown(true)}
+      >
+        <Text style={styles.starterSkipText}>Or add items manually</Text>
+        <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+      </TouchableOpacity>
+    </ScrollView>
   );
 
   return (
@@ -743,7 +985,7 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
               onPress={() => {
                 if (!analyzingImage) {
                   setShowAddDropdown(false);
-                  handlePhotoUpload();
+                  handleScanItems();
                 }
               }}
               disabled={analyzingImage}
@@ -759,6 +1001,26 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
             </TouchableOpacity>
 
             <TouchableOpacity
+              style={[styles.dropdownMenuItem, analyzingImage && styles.dropdownMenuItemDisabled]}
+              onPress={() => {
+                if (!analyzingImage) {
+                  setShowAddDropdown(false);
+                  handleScanReceipt();
+                }
+              }}
+              disabled={analyzingImage}
+            >
+              <View style={styles.dropdownMenuIcon}>
+                {analyzingImage ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Text style={styles.dropdownMenuIconText}>🧾</Text>
+                )}
+              </View>
+              <Text style={styles.dropdownMenuText}>Scan Receipt</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
               style={styles.dropdownMenuItem}
               onPress={() => {
                 setShowAddDropdown(false);
@@ -770,6 +1032,19 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
                 <Text style={styles.dropdownMenuIconText}>✏️</Text>
               </View>
               <Text style={styles.dropdownMenuText}>Add Manually</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.dropdownMenuItem}
+              onPress={() => {
+                setShowAddDropdown(false);
+                setShowBatchAddModal(true);
+              }}
+            >
+              <View style={styles.dropdownMenuIcon}>
+                <Text style={styles.dropdownMenuIconText}>📝</Text>
+              </View>
+              <Text style={styles.dropdownMenuText}>Batch Add</Text>
             </TouchableOpacity>
 
             {pantryItems.length > 0 && (
@@ -824,6 +1099,23 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
       </View>
       )}
 
+      {/* Onboarding Guide */}
+      {isFirstRun && onboardingStep === 'pantry' && !onboardingDismissed && (
+        <View style={[styles.onboardingBanner, { backgroundColor: colors.primary + '12', borderColor: colors.primary + '30' }]}>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.onboardingTitle, { color: colors.primary }]}>
+              Step 1: Stock Your Pantry
+            </Text>
+            <Text style={[styles.onboardingText, { color: colors.textSecondary }]}>
+              Add what you have at home so Zeus can create personalized meal plans. Use Quick Add for common items!
+            </Text>
+          </View>
+          <TouchableOpacity onPress={dismissBanner} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Ionicons name="close" size={20} color={colors.textMuted} />
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* Dropdown Backdrop */}
       {showAddDropdown && (
         <TouchableOpacity
@@ -867,9 +1159,12 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
               style={[styles.filterPill, selectedCategory === category && styles.filterPillActive]}
               onPress={() => setSelectedCategory(category)}
             >
-              <Text style={[styles.filterPillText, selectedCategory === category && styles.filterPillTextActive]}>
-                {CATEGORY_EMOJIS[category]} {category}
-              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <Ionicons name={(CATEGORY_ICONS[category as string] || 'cube-outline') as any} size={14} color={selectedCategory === category ? colors.background : colors.textMuted} />
+                <Text style={[styles.filterPillText, selectedCategory === category && styles.filterPillTextActive]}>
+                  {category}
+                </Text>
+              </View>
             </TouchableOpacity>
           ))}
         </ScrollView>
@@ -913,16 +1208,46 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
       ) : pantryItems.length === 0 ? (
         renderEmptyState()
       ) : (
-        <SectionList
-          sections={groupedItems()}
-          renderItem={renderPantryItem}
-          renderSectionHeader={renderSectionHeader}
-          keyExtractor={item => item.id}
-          contentContainerStyle={[styles.listContent, selectionMode && { paddingBottom: 100 }]}
-          stickySectionHeadersEnabled={false}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="interactive"
-        />
+        <>
+          {/* Inline Quick Add */}
+          <View style={styles.inlineAddBar}>
+            <TextInput
+              style={styles.inlineAddInput}
+              placeholder="Quick add item..."
+              placeholderTextColor={colors.textMuted}
+              value={inlineAddText}
+              onChangeText={setInlineAddText}
+              onSubmitEditing={handleInlineAdd}
+              returnKeyType="done"
+              autoComplete="off"
+              textContentType="none"
+            />
+            <TouchableOpacity
+              style={[
+                styles.inlineAddButton,
+                { backgroundColor: inlineAddText.trim() ? colors.primary : colors.border },
+              ]}
+              onPress={handleInlineAdd}
+              disabled={!inlineAddText.trim() || inlineAddLoading}
+            >
+              {inlineAddLoading ? (
+                <ActivityIndicator size="small" color="#FFF" />
+              ) : (
+                <Ionicons name="add" size={22} color="#FFF" />
+              )}
+            </TouchableOpacity>
+          </View>
+          <SectionList
+            sections={groupedItems()}
+            renderItem={renderPantryItem}
+            renderSectionHeader={renderSectionHeader}
+            keyExtractor={item => item.id}
+            contentContainerStyle={[styles.listContent, selectionMode && { paddingBottom: 100 }]}
+            stickySectionHeadersEnabled={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
+          />
+        </>
       )}
 
       {/* Selection Mode Bottom Bar */}
@@ -974,11 +1299,50 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
             </Text>
 
             <ScrollView style={styles.quickAddScroll} showsVerticalScrollIndicator={false}>
+              {/* Your Staples */}
+              {frequentItems.length > 0 && (
+                <View style={styles.quickAddCategory}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                    <Ionicons name="star" size={18} color={colors.primary} />
+                    <Text style={styles.quickAddCategoryTitle}>Your Staples</Text>
+                  </View>
+                  <View style={styles.quickAddItemsGrid}>
+                    {frequentItems.map((item) => (
+                      <TouchableOpacity
+                        key={`frequent-${item.item_name}`}
+                        style={[
+                          styles.quickAddItem,
+                          selectedQuickItems.has(item.item_name) && styles.quickAddItemSelected
+                        ]}
+                        onPress={() => {
+                          setSelectedQuickItems(prev => {
+                            const next = new Set(prev);
+                            if (next.has(item.item_name)) next.delete(item.item_name);
+                            else next.add(item.item_name);
+                            return next;
+                          });
+                        }}
+                      >
+                        <Text style={[
+                          styles.quickAddItemText,
+                          selectedQuickItems.has(item.item_name) && styles.quickAddItemTextSelected
+                        ]}>
+                          {item.item_name}
+                        </Text>
+                        {selectedQuickItems.has(item.item_name) && (
+                          <Ionicons name="checkmark-circle" size={18} color={colors.primary} />
+                        )}
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              )}
               {QUICK_ADD_ITEMS.map((category, categoryIndex) => (
                 <View key={categoryIndex} style={styles.quickAddCategory}>
-                  <Text style={styles.quickAddCategoryTitle}>
-                    {category.emoji} {category.category}
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Ionicons name={(category.icon || 'cube-outline') as any} size={16} color={colors.textMuted} />
+                    <Text style={styles.quickAddCategoryTitle}>{category.category}</Text>
+                  </View>
                   <View style={styles.quickAddItemsGrid}>
                     {category.items.map((item, itemIndex) => (
                       <TouchableOpacity
@@ -1028,6 +1392,46 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
         </View>
       </Modal>
 
+      {/* Batch Add Modal */}
+      <Modal visible={showBatchAddModal} transparent animationType="slide" onRequestClose={() => !batchAddLoading && setShowBatchAddModal(false)}>
+        <KeyboardAvoidingView style={{ flex: 1, justifyContent: 'flex-end' }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <TouchableOpacity style={{ flex: 1 }} onPress={() => !batchAddLoading && setShowBatchAddModal(false)} activeOpacity={1} />
+          <View style={[styles.batchAddSheet, { backgroundColor: colors.background }]}>
+            <View style={styles.batchAddHandle} />
+            <Text style={styles.batchAddTitle}>Batch Add Items</Text>
+            <Text style={styles.batchAddSubtitle}>
+              Type multiple items separated by commas or new lines. They'll be auto-categorized!
+            </Text>
+            <TextInput
+              style={[styles.batchAddInput, { backgroundColor: colors.backgroundSecondary, borderColor: colors.border, color: colors.text }]}
+              placeholder={"eggs, milk, chicken breast,\nrice, olive oil, garlic..."}
+              placeholderTextColor={colors.textMuted}
+              value={batchAddText}
+              onChangeText={setBatchAddText}
+              multiline
+              numberOfLines={6}
+              textAlignVertical="top"
+              autoFocus
+              autoComplete="off"
+              textContentType="none"
+            />
+            <TouchableOpacity
+              style={[styles.batchAddButton, { backgroundColor: batchAddText.trim() ? colors.primary : colors.border }]}
+              onPress={handleBatchAdd}
+              disabled={!batchAddText.trim() || batchAddLoading}
+            >
+              {batchAddLoading ? (
+                <ActivityIndicator size="small" color="#FFF" />
+              ) : (
+                <Text style={styles.batchAddButtonText}>
+                  Add {batchAddText.trim() ? batchAddText.split(/[,\n]+/).filter(s => s.trim()).length : 0} Items
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
       <Modal visible={showAddModal} animationType="slide" transparent={true} onRequestClose={() => { setShowAddModal(false); resetForm(); }}>
         <KeyboardAvoidingView
           behavior="padding"
@@ -1066,9 +1470,10 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
                         style={styles.suggestionItem}
                         onPress={() => handleSelectIngredient(suggestion)}
                       >
-                        <Text style={styles.suggestionText}>
-                          {CATEGORY_EMOJIS[suggestion.category]} {suggestion.name}
-                        </Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                          <Ionicons name={(CATEGORY_ICONS[suggestion.category as string] || 'cube-outline') as any} size={14} color={colors.textMuted} />
+                          <Text style={styles.suggestionText}>{suggestion.name}</Text>
+                        </View>
                         <Text style={styles.suggestionCategory}>{suggestion.category}</Text>
                       </TouchableOpacity>
                     ))}
@@ -1085,9 +1490,10 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
                     setShowCategoryPicker(true);
                   }}
                 >
-                  <Text style={styles.dropdownText}>
-                    {CATEGORY_EMOJIS[newItem.category]} {newItem.category}
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <Ionicons name={(CATEGORY_ICONS[newItem.category as string] || 'cube-outline') as any} size={14} color={colors.textMuted} />
+                    <Text style={styles.dropdownText}>{newItem.category}</Text>
+                  </View>
                   <Text style={styles.dropdownArrow}>▼</Text>
                 </TouchableOpacity>
               </View>
@@ -1209,9 +1615,10 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
                       setShowCategoryPicker(false);
                     }}
                   >
-                    <Text style={styles.pickerOptionText}>
-                      {CATEGORY_EMOJIS[category]} {category}
-                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Ionicons name={(CATEGORY_ICONS[category as string] || 'cube-outline') as any} size={16} color={colors.textMuted} />
+                      <Text style={styles.pickerOptionText}>{category}</Text>
+                    </View>
                     {newItem.category === category && <Text style={styles.pickerCheck}>✓</Text>}
                   </TouchableOpacity>
                 ))}
@@ -1300,105 +1707,6 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* Cook Tonight FAB */}
-      {pantryItems.length > 0 && !selectionMode && (
-        <TouchableOpacity
-          style={{
-            position: 'absolute', bottom: 24, right: 20,
-            backgroundColor: colors.primary, borderRadius: 28,
-            paddingHorizontal: 20, paddingVertical: 14,
-            flexDirection: 'row', alignItems: 'center', gap: 8,
-            shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.25, shadowRadius: 8, elevation: 6,
-          }}
-          onPress={handleCookTonight}
-          activeOpacity={0.8}
-        >
-          <Ionicons name="sparkles" size={20} color="#FFF" />
-          <Text style={{ color: '#FFF', fontSize: 15, fontWeight: '700' }}>Cook Tonight</Text>
-        </TouchableOpacity>
-      )}
-
-      {/* Cook Tonight Modal */}
-      <Modal visible={cookTonightModal} transparent animationType="slide" onRequestClose={() => setCookTonightModal(false)}>
-        <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' }}>
-          <View style={{ backgroundColor: colors.background, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '75%' }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Ionicons name="sparkles" size={22} color={colors.primary} />
-                <Text style={{ fontSize: 20, fontWeight: '700', color: colors.text }}>Cook Tonight</Text>
-              </View>
-              <TouchableOpacity onPress={() => setCookTonightModal(false)}>
-                <Ionicons name="close" size={24} color={colors.textMuted} />
-              </TouchableOpacity>
-            </View>
-
-            {cookTonightLoading ? (
-              <View style={{ alignItems: 'center', paddingVertical: 40 }}>
-                <ActivityIndicator size="large" color={colors.primary} />
-                <Text style={{ marginTop: 14, color: colors.textMuted, fontSize: 15 }}>Finding the perfect recipe...</Text>
-                <Text style={{ marginTop: 6, color: colors.textMuted, fontSize: 13 }}>Based on your pantry and what's expiring</Text>
-              </View>
-            ) : cookTonightResult?.suggestion ? (
-              <ScrollView showsVerticalScrollIndicator={false}>
-                <Text style={{ fontSize: 22, fontWeight: '700', color: colors.text, marginBottom: 6 }}>
-                  {cookTonightResult.suggestion.recipe_title}
-                </Text>
-                <Text style={{ fontSize: 14, color: colors.primary, marginBottom: 12, lineHeight: 20 }}>
-                  {cookTonightResult.suggestion.why}
-                </Text>
-
-                <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
-                  {cookTonightResult.suggestion.prep_time_minutes && (
-                    <View style={{ backgroundColor: colors.backgroundSecondary, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                      <Ionicons name="time-outline" size={16} color={colors.textMuted} />
-                      <Text style={{ fontSize: 13, color: colors.text, fontWeight: '500' }}>{cookTonightResult.suggestion.prep_time_minutes} min</Text>
-                    </View>
-                  )}
-                  {cookTonightResult.suggestion.calories_estimate && (
-                    <View style={{ backgroundColor: colors.backgroundSecondary, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                      <Ionicons name="flame-outline" size={16} color={colors.textMuted} />
-                      <Text style={{ fontSize: 13, color: colors.text, fontWeight: '500' }}>{cookTonightResult.suggestion.calories_estimate} cal</Text>
-                    </View>
-                  )}
-                </View>
-
-                {cookTonightResult.suggestion.pantry_items_used?.length > 0 && (
-                  <View style={{ marginBottom: 14 }}>
-                    <Text style={{ fontSize: 14, fontWeight: '600', color: colors.text, marginBottom: 6 }}>From your pantry:</Text>
-                    <Text style={{ fontSize: 14, color: colors.textSecondary }}>{cookTonightResult.suggestion.pantry_items_used.join(', ')}</Text>
-                  </View>
-                )}
-
-                {cookTonightResult.suggestion.items_to_buy?.length > 0 && (
-                  <View style={{ marginBottom: 14 }}>
-                    <Text style={{ fontSize: 14, fontWeight: '600', color: colors.text, marginBottom: 6 }}>You'll need:</Text>
-                    <Text style={{ fontSize: 14, color: colors.error }}>{cookTonightResult.suggestion.items_to_buy.join(', ')}</Text>
-                  </View>
-                )}
-
-                {cookTonightResult.suggestion.quick_instructions?.length > 0 && (
-                  <View style={{ marginBottom: 14 }}>
-                    <Text style={{ fontSize: 14, fontWeight: '600', color: colors.text, marginBottom: 8 }}>Quick steps:</Text>
-                    {cookTonightResult.suggestion.quick_instructions.map((step, i) => (
-                      <View key={i} style={{ flexDirection: 'row', marginBottom: 8, gap: 8 }}>
-                        <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center' }}>
-                          <Text style={{ color: '#FFF', fontSize: 12, fontWeight: '700' }}>{i + 1}</Text>
-                        </View>
-                        <Text style={{ flex: 1, fontSize: 14, lineHeight: 20, color: colors.text }}>{step}</Text>
-                      </View>
-                    ))}
-                  </View>
-                )}
-              </ScrollView>
-            ) : (
-              <Text style={{ color: colors.textMuted, textAlign: 'center', paddingVertical: 20, fontSize: 15 }}>
-                {cookTonightResult?.message || 'Add items to your pantry to get suggestions!'}
-              </Text>
-            )}
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 };
@@ -1523,4 +1831,170 @@ const createStyles = (colors: any) => StyleSheet.create({
   expiringBannerButtonText: { color: '#FFF', fontSize: 12, fontWeight: '600' },
   expiringBannerDismiss: { padding: 4, marginLeft: 6 },
   expiringBannerDismissText: { fontSize: 14, color: colors.warningDark },
+  onboardingBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 4,
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    gap: 12,
+  },
+  onboardingTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  onboardingText: {
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  // Inline Quick Add
+  inlineAddBar: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    gap: 8,
+  },
+  inlineAddInput: {
+    flex: 1,
+    height: 42,
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    fontSize: 15,
+    color: colors.text,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  inlineAddButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  // Starter Packs
+  starterContainer: {
+    padding: 20,
+    paddingBottom: 40,
+  },
+  starterHeader: {
+    alignItems: 'center' as const,
+    marginBottom: 24,
+    paddingTop: 20,
+  },
+  starterTitle: {
+    fontSize: 24,
+    fontWeight: '800' as const,
+    color: colors.text,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  starterSubtitle: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    textAlign: 'center' as const,
+    lineHeight: 20,
+    paddingHorizontal: 10,
+  },
+  starterGrid: {
+    flexDirection: 'row' as const,
+    flexWrap: 'wrap' as const,
+    gap: 12,
+  },
+  starterCard: {
+    width: '47%' as any,
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1.5,
+    alignItems: 'center' as const,
+    minHeight: 150,
+    justifyContent: 'center' as const,
+  },
+  starterIconCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+    marginBottom: 10,
+  },
+  starterCardTitle: {
+    fontSize: 15,
+    fontWeight: '700' as const,
+    color: colors.text,
+    marginBottom: 4,
+    textAlign: 'center' as const,
+  },
+  starterCardDesc: {
+    fontSize: 12,
+    color: colors.textMuted,
+    textAlign: 'center' as const,
+    marginBottom: 6,
+  },
+  starterCardCount: {
+    fontSize: 12,
+    fontWeight: '700' as const,
+  },
+  starterSkipButton: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    marginTop: 20,
+    gap: 4,
+  },
+  starterSkipText: {
+    fontSize: 14,
+    color: colors.textMuted,
+  },
+  // Batch Add
+  batchAddSheet: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    paddingBottom: 40,
+  },
+  batchAddHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.border,
+    alignSelf: 'center' as const,
+    marginBottom: 16,
+  },
+  batchAddTitle: {
+    fontSize: 22,
+    fontWeight: '700' as const,
+    color: colors.text,
+    marginBottom: 4,
+  },
+  batchAddSubtitle: {
+    fontSize: 14,
+    color: colors.textMuted,
+    marginBottom: 16,
+    lineHeight: 20,
+  },
+  batchAddInput: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
+    fontSize: 15,
+    minHeight: 120,
+    marginBottom: 16,
+  },
+  batchAddButton: {
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center' as const,
+  },
+  batchAddButtonText: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '700' as const,
+  },
 });

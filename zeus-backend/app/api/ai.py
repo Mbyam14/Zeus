@@ -13,6 +13,7 @@ from app.utils.dependencies import get_current_active_user
 from app.database import get_database
 from app.config import settings
 import logging
+from app.services.ai_memory_service import ai_memory_service
 
 logger = logging.getLogger(__name__)
 
@@ -170,30 +171,31 @@ async def ask_ai(
         calorie_target = preferences.get("calorie_target") or "Not set"
         liked_text = ", ".join(liked_titles[:8]) if liked_titles else "None yet"
 
-        system_prompt = f"""You are a helpful cooking assistant for a meal planning app called Zeus.
-You have context about the user to give personalized advice.
+        system_prompt = f"""You are Zeus AI Chef — a warm, knowledgeable personal cooking assistant.
+You know the user's kitchen inside and out.
 
-USER CONTEXT:
-- Pantry items: {pantry_text}
+USER'S KITCHEN:
+- Pantry: {pantry_text}
 - Dietary restrictions: {dietary}
 - Allergies: {allergies}
-- Preferred cuisines: {cuisines}
+- Favorite cuisines: {cuisines}
 - Cooking skill: {skill}
-- Household size: {household} people
+- Cooking for: {household} people
 - Daily calorie target: {calorie_target}
-- Recently liked recipes: {liked_text}
+- Recipes they've enjoyed: {liked_text}
 
-GUIDELINES:
-- Give specific, actionable recipe ideas or cooking advice
-- When suggesting recipes, mention which pantry items they'd use
-- Respect dietary restrictions and allergies absolutely
-- Keep responses concise but helpful (2-4 paragraphs max)
-- If suggesting a recipe, include a brief ingredient list and quick instructions
-- Format with clear sections using bold text and bullet points
-- Don't use emojis excessively"""
+RESPONSE STYLE:
+- Be conversational and personalized — reference their pantry items, skill level, and preferences by name
+- Start with a direct answer, then expand
+- When suggesting a recipe: give a name, brief why it suits them, key ingredients (note which are already in their pantry), and 3-5 quick steps
+- Use **bold** for headers and key terms, bullet points for lists
+- If they ask about techniques, explain at their skill level ({skill})
+- Keep it focused — 2-3 paragraphs max, no fluff
+- Suggest calorie-conscious options when they have a target set
+- Never suggest ingredients they're allergic to ({allergies})"""
 
         import asyncio
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         response_text = await asyncio.wait_for(
             loop.run_in_executor(
                 ai_service.executor,
@@ -207,6 +209,12 @@ GUIDELINES:
             ),
             timeout=30
         )
+
+        # Silent learning
+        asyncio.create_task(ai_memory_service.learn_from_interaction(
+            str(current_user.id), "ask_ai",
+            {"user_question": body.message, "ai_response": response_text[:300]},
+        ))
 
         return {
             "response": response_text,
@@ -309,7 +317,7 @@ Provide 2-3 substitution options. For each, explain:
 Respond in JSON: {{"substitutions": [{{"substitute": "...", "quantity": "...", "impact": "...", "adjustments": "..."}}]}}"""
 
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         response_text = await asyncio.wait_for(
             loop.run_in_executor(
                 ai_service.executor,
@@ -331,6 +339,13 @@ Respond in JSON: {{"substitutions": [{{"substitute": "...", "quantity": "...", "
         result["original_ingredient"] = body.ingredient_name
 
         cache.set(cache_key, result, TTL_AI_RESPONSE)
+
+        # Silent learning
+        asyncio.create_task(ai_memory_service.learn_from_interaction(
+            str(current_user.id), "substitution",
+            {"recipe": recipe["title"], "ingredient": body.ingredient_name, "reason": body.reason},
+        ))
+
         return result
 
     except asyncio.TimeoutError:
@@ -408,7 +423,7 @@ Respond in JSON:
 }}"""
 
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         response_text = await asyncio.wait_for(
             loop.run_in_executor(
                 ai_service.executor,
@@ -427,6 +442,13 @@ Respond in JSON:
             suggestion = {"recipe_title": "Custom suggestion", "quick_instructions": [response_text]}
 
         suggestion["expiring_items_count"] = len(expiring_soon)
+
+        # Silent learning
+        asyncio.create_task(ai_memory_service.learn_from_interaction(
+            str(current_user.id), "cook_tonight",
+            {"meal_type": body.meal_type, "suggestion": suggestion.get("recipe_title", ""), "pantry_count": len(pantry_items)},
+        ))
+
         return {"suggestion": suggestion, "message": None}
 
     except asyncio.TimeoutError:
@@ -468,7 +490,7 @@ Give a helpful, concise answer (2-3 short paragraphs max). Include:
 - Visual/sensory cues to know when it's done right"""
 
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         response_text = await asyncio.wait_for(
             loop.run_in_executor(
                 ai_service.executor,
@@ -485,6 +507,13 @@ Give a helpful, concise answer (2-3 short paragraphs max). Include:
             "tip": response_text,
         }
         cache.set(cache_key, result, TTL_AI_RESPONSE)
+
+        # Silent learning
+        asyncio.create_task(ai_memory_service.learn_from_interaction(
+            str(current_user.id), "cooking_tip",
+            {"recipe": body.recipe_title, "step": body.step_number, "question": body.question or "general"},
+        ))
+
         return result
 
     except asyncio.TimeoutError:

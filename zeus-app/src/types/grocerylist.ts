@@ -23,25 +23,9 @@ export type GroceryCategory =
   | 'Other';
 
 /**
- * Category emoji mapping for UI display
+ * Category icon mapping for UI display (re-exported from constants)
  */
-export const CATEGORY_EMOJIS: Record<string, string> = {
-  Produce: '🥬',
-  Dairy: '🥛',
-  Protein: '🍗',
-  Grains: '🌾',
-  Spices: '🌶️',
-  Condiments: '🍯',
-  Beverages: '🥤',
-  Frozen: '❄️',
-  'Canned & Jarred': '🥫',
-  Baking: '🧁',
-  'Oils & Vinegars': '🫒',
-  Snacks: '🍿',
-  Other: '📦',
-  // Keep old value as fallback for existing data
-  Pantry: '🥫',
-};
+export { CATEGORY_ICONS } from '../constants/categoryIcons';
 
 /**
  * Category color mapping for UI display

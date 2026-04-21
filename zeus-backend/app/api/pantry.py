@@ -8,6 +8,7 @@ from app.schemas.pantry import (
 from app.schemas.user import UserResponse
 from app.services.pantry_service import pantry_service
 from app.utils.dependencies import get_current_active_user
+from app.database import get_database
 
 router = APIRouter(prefix="/api/pantry", tags=["Pantry"])
 
@@ -55,6 +56,78 @@ async def get_my_pantry_items(
         expired=expired
     )
     return await pantry_service.get_user_pantry_items(current_user.id, filters)
+
+
+@router.get("/frequent-items")
+async def get_frequent_items(
+    limit: int = 15,
+    current_user: UserResponse = Depends(get_current_active_user),
+):
+    """Get user's most frequently added pantry items for quick re-adding."""
+    db = get_database()
+
+    # Query all pantry items ever added by user, group by name
+    result = db.table("pantry_items").select(
+        "item_name, category, unit"
+    ).eq("user_id", str(current_user.id)).execute()
+
+    if not result.data:
+        return []
+
+    # Count frequency of each item name
+    from collections import Counter
+    name_counts = Counter()
+    item_details = {}
+    for item in result.data:
+        name = item["item_name"].strip().lower()
+        name_counts[name] += 1
+        if name not in item_details:
+            item_details[name] = {
+                "item_name": item["item_name"].strip(),
+                "category": item.get("category", "Other"),
+                "unit": item.get("unit", "pieces"),
+            }
+
+    # Return top N by frequency
+    top_items = []
+    for name, count in name_counts.most_common(limit):
+        details = item_details[name]
+        top_items.append({
+            "item_name": details["item_name"],
+            "category": details["category"],
+            "default_unit": details["unit"],
+            "add_count": count,
+        })
+
+    return top_items
+
+
+@router.get("/ingredients/search", response_model=List[dict])
+async def search_ingredients(
+    query: str = Query("", description="Search term (empty returns all)"),
+    category: Optional[PantryCategory] = Query(None, description="Filter by category"),
+    limit: int = Query(20, ge=1, le=50, description="Max results to return"),
+    current_user: UserResponse = Depends(get_current_active_user)
+):
+    """
+    Search ingredient library for autocomplete.
+
+    Returns matching ingredients with their categories and common units.
+    """
+    return await pantry_service.search_ingredient_library(query, category, limit)
+
+
+@router.get("/expiring/alerts", response_model=List[PantryItemResponse])
+async def get_expiring_items(
+    days: int = Query(7, ge=1, le=30, description="Days threshold for expiration alert"),
+    current_user: UserResponse = Depends(get_current_active_user)
+):
+    """
+    Get items expiring within the specified days threshold.
+
+    Default is 7 days. Useful for expiration alerts.
+    """
+    return await pantry_service.get_expiring_items(current_user.id, days)
 
 
 @router.get("/{item_id}", response_model=PantryItemResponse)
@@ -118,34 +191,6 @@ async def bulk_add_pantry_items(
     Useful for adding items from a photo scan (future feature).
     """
     return await pantry_service.bulk_add_pantry_items(bulk_data, current_user.id)
-
-
-@router.get("/ingredients/search", response_model=List[dict])
-async def search_ingredients(
-    query: str = Query("", description="Search term (empty returns all)"),
-    category: Optional[PantryCategory] = Query(None, description="Filter by category"),
-    limit: int = Query(20, ge=1, le=50, description="Max results to return"),
-    current_user: UserResponse = Depends(get_current_active_user)
-):
-    """
-    Search ingredient library for autocomplete.
-
-    Returns matching ingredients with their categories and common units.
-    """
-    return await pantry_service.search_ingredient_library(query, category, limit)
-
-
-@router.get("/expiring/alerts", response_model=List[PantryItemResponse])
-async def get_expiring_items(
-    days: int = Query(7, ge=1, le=30, description="Days threshold for expiration alert"),
-    current_user: UserResponse = Depends(get_current_active_user)
-):
-    """
-    Get items expiring within the specified days threshold.
-
-    Default is 7 days. Useful for expiration alerts.
-    """
-    return await pantry_service.get_expiring_items(current_user.id, days)
 
 
 @router.post("/analyze-image", response_model=ImageAnalysisResponse)

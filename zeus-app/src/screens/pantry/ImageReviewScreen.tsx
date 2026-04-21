@@ -14,15 +14,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+import { Ionicons } from '@expo/vector-icons';
 import { DetectedPantryItem, PantryItemCreate, PantryCategory } from '../../types/pantry';
 import { pantryService } from '../../services/pantryService';
 import { useThemeStore } from '../../store/themeStore';
-
-const CATEGORY_EMOJIS: Record<PantryCategory, string> = {
-  Produce: '🥬', Dairy: '🥛', Protein: '🍗', Grains: '🌾',
-  Spices: '🌶️', Condiments: '🧂', Beverages: '☕', Frozen: '🧊',
-  Pantry: '🥫', Other: '📦'
-};
+import { CATEGORY_ICONS } from '../../constants/categoryIcons';
 
 interface ImageReviewScreenProps {
   route: {
@@ -255,7 +251,7 @@ export const ImageReviewScreen: React.FC<ImageReviewScreenProps> = ({
 
             <View style={styles.itemContent}>
               <View style={styles.itemHeader}>
-                <Text style={styles.itemEmoji}>{CATEGORY_EMOJIS[item.category]}</Text>
+                <Ionicons name={(CATEGORY_ICONS[item.category] || 'cube-outline') as any} size={18} color={colors.textMuted} />
                 <Text style={styles.itemName}>{item.item_name}</Text>
                 {item.already_in_pantry && (
                   <View style={styles.existingBadge}>

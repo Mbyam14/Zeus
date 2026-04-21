@@ -47,7 +47,7 @@ class AIService:
         timeout: int
     ) -> str:
         """Call Claude API with timeout handling"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         try:
             # Run the synchronous API call in a thread pool with timeout
@@ -568,7 +568,7 @@ class AIService:
         )
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             response_text = await asyncio.wait_for(
                 loop.run_in_executor(
                     self.executor,
