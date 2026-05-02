@@ -27,12 +27,11 @@ const ENV: Record<string, EnvConfig> = {
   },
   preview: {
     // UPDATE THIS with your deployed backend URL (e.g., Railway)
-    API_BASE_URL: 'https://zeus-production-a904.up.railway.app',
+    API_BASE_URL: 'https://zeus-production-850d.up.railway.app',
     API_TIMEOUT: 15000,
   },
   production: {
-    // UPDATE THIS with your production backend URL
-    API_BASE_URL: 'https://zeus-production-a904.up.railway.app',
+    API_BASE_URL: 'https://zeus-production-850d.up.railway.app',
     API_TIMEOUT: 15000,
   },
 };

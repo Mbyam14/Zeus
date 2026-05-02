@@ -9,7 +9,6 @@
     "web": "expo start --web"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.70.1",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/datetimepicker": "8.4.4",
     "@react-navigation/bottom-tabs": "^7.8.1",
@@ -22,6 +21,7 @@
     "expo-linear-gradient": "^15.0.8",
     "expo-secure-store": "^15.0.7",
     "expo-status-bar": "~3.0.8",
+    "expo-updates": "~29.0.17",
     "nativewind": "^4.2.1",
     "react": "19.1.0",
     "react-native": "0.81.5",
