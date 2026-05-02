@@ -43,11 +43,6 @@ def generate_icon(size, path):
     bolt_size = size * 0.28
     draw_lightning(draw, cx, cy, bolt_size, '#FFFFFF')
 
-    # Small dot below bolt for style
-    dot_r = int(size * 0.03)
-    dot_y = int(cy + bolt_size * 0.62)
-    draw.ellipse([cx - dot_r, dot_y - dot_r, cx + dot_r, dot_y + dot_r], fill='rgba(255,255,255,180)')
-
     img = img.convert('RGB')
     img.save(path, 'PNG', quality=100)
     print(f'Saved {path} ({size}x{size})')
