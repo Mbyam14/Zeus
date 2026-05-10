@@ -123,21 +123,18 @@ export const MealPlanEditScreen: React.FC<MealPlanBuilderProps> = ({ navigation,
     { key: 'Snack', label: 'Snack' },
   ];
 
-  // Load recipes for the picker
+  // Load recipes for the picker — no dietary filter so manual selection always has results
   const loadRecipes = useCallback(async (query?: string, mealType?: string | null) => {
     setLoadingRecipes(true);
     try {
-      const rawRestrictions = user?.profile_data?.preferences?.dietary_restrictions;
-      const dietaryRestrictions = Array.isArray(rawRestrictions) ? rawRestrictions : [];
       const recipes = await recipeService.getAllRecipes(
-        50, 0, query || undefined, mealType || undefined,
-        dietaryRestrictions.length > 0 ? dietaryRestrictions : undefined,
+        100, 0, query || undefined, mealType || undefined,
       );
       setAllRecipes(recipes);
     } catch (err) {
       console.error('[MealPlanEdit] loadRecipes error:', err);
     } finally { setLoadingRecipes(false); }
-  }, [user]);
+  }, []);
 
   useEffect(() => { loadRecipes(); }, []);
 
