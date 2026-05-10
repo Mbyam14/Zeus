@@ -65,6 +65,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
+              autoComplete="off"
+              textContentType="none"
             />
           </View>
 
@@ -79,6 +81,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
                 placeholderTextColor="#7F8C8D"
                 secureTextEntry={!showPassword}
                 autoCapitalize="none"
+                autoComplete="off"
+                textContentType="none"
               />
               <TouchableOpacity
                 style={styles.eyeIcon}

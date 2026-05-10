@@ -4,17 +4,24 @@ Recipe Shortlist Service
 Queries the recipe database to find candidates matching user preferences,
 filters out allergens/disliked ingredients, and scores/ranks results
 for meal plan generation.
+
+Scoring system (max ~100 pts per recipe):
+  Nutrition match:   25 pts  (Gaussian decay — harsh on poor matches)
+  User preference:   25 pts  (liked=25, cuisine=12, dietary style=8)
+  Pantry coverage:   20 pts  (non-linear curve, not dominant)
+  Practical fit:     15 pts  (cook time, difficulty, servings)
+  Quality signals:   10 pts  (popularity, completeness)
+  Freshness penalty: -15..0  (recently used recipes penalized)
+  Jitter:             0..4   (prevents identical plans)
 """
 
 import math
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Set
 
 from app.database import get_database
 from app.utils.ingredient_matching import (
     calculate_pantry_coverage,
-    is_trivial_ingredient,
-    normalize_ingredient_name,
     prepare_pantry_lookup,
 )
 
@@ -33,6 +40,7 @@ class RecipeShortlistService:
         exclude_recipe_ids: Optional[List[str]] = None,
         target_per_meal_type: int = 35,
         pantry_items: Optional[List[dict]] = None,
+        recently_used_recipe_ids: Optional[List[str]] = None,
     ) -> Dict[str, List[Dict[str, Any]]]:
         """
         Shortlist recipe candidates for meal plan generation.
@@ -45,71 +53,69 @@ class RecipeShortlistService:
 
         calorie_target = preferences.get("calorie_target") or 2000
         protein_target = preferences.get("protein_target_grams") or 150
+        fat_target = preferences.get("fat_target_grams") or round(calorie_target * 0.3 / 9)
         distribution = preferences.get("meal_calorie_distribution", {
             "breakfast": 20, "snack": 10, "lunch": 30, "dinner": 40
         })
-        # Backward compat: if old 3-meal distribution, add snack
         if "snack" not in distribution:
-            distribution = {
-                "breakfast": 20, "snack": 10, "lunch": 30, "dinner": 40
-            }
+            distribution = {"breakfast": 20, "snack": 10, "lunch": 30, "dinner": 40}
 
         allergies = preferences.get("allergies", [])
         disliked = preferences.get("disliked_ingredients", [])
+        liked_recipe_ids = set(preferences.get("liked_recipe_ids", []))
+        recently_used = set(recently_used_recipe_ids or [])
 
-        # Pre-normalize pantry items once for all candidates
         pantry_lookup = prepare_pantry_lookup(pantry_items) if pantry_items else {}
         if pantry_lookup:
-            logger.info(f"Pantry-aware scoring enabled with {len(pantry_lookup)} pantry items")
+            logger.info(f"Pantry-aware scoring with {len(pantry_lookup)} pantry items")
 
         result = {}
 
         for meal_type in meal_types:
-            # Calculate per-meal nutrition targets
             pct = distribution.get(meal_type, 33) / 100
             meal_cal_target = int(calorie_target * pct)
             meal_protein_target = protein_target * pct
+            meal_fat_target = fat_target * pct
 
-            # Query DB with filters
+            # Single broad query — no dietary/cuisine/calorie filtering at DB level.
+            # Scoring handles all preference matching in Python, which is fast and
+            # avoids multiple round-trips to Supabase (each blocks the event loop).
             raw_candidates = await self._query_candidates(
                 meal_type=meal_type.capitalize(),
-                preferences=preferences,
+                preferences={},
                 exclude_recipe_ids=exclude_recipe_ids,
-                limit=200,
+                meal_cal_target=0,
+                limit=300,
+                relaxed=True,
             )
 
-            # If too few results, retry with relaxed filters
             if len(raw_candidates) < 5:
-                logger.warning(
-                    f"Only {len(raw_candidates)} {meal_type} candidates, relaxing filters"
-                )
-                raw_candidates = await self._query_candidates(
-                    meal_type=meal_type.capitalize(),
-                    preferences=preferences,
-                    exclude_recipe_ids=exclude_recipe_ids,
-                    limit=200,
-                    relaxed=True,
-                )
+                logger.warning(f"Only {len(raw_candidates)} {meal_type} candidates from DB")
 
-            # Filter out recipes with empty ingredients (incomplete data)
             raw_candidates = [
                 r for r in raw_candidates
                 if r.get("ingredients") and len(r["ingredients"]) > 0
             ]
 
-            # Filter out allergens/disliked ingredients
-            filtered = self._filter_by_excluded_ingredients(
-                raw_candidates, allergies, disliked
-            )
+            filtered = self._filter_by_excluded_ingredients(raw_candidates, allergies, disliked)
 
-            # Score and rank
-            household_size = preferences.get("household_size", 2)
-            liked_recipe_ids = set(preferences.get("liked_recipe_ids", []))
             scored = self._score_candidates(
-                filtered, meal_cal_target, meal_protein_target, pantry_lookup, household_size, liked_recipe_ids
+                candidates=filtered,
+                meal_cal_target=meal_cal_target,
+                meal_protein_target=meal_protein_target,
+                meal_fat_target=meal_fat_target,
+                pantry_lookup=pantry_lookup,
+                household_size=preferences.get("household_size", 2),
+                liked_recipe_ids=liked_recipe_ids,
+                recently_used=recently_used,
+                preferred_cook_time=preferences.get("preferred_cook_time", "moderate"),
+                cooking_skill=preferences.get("cooking_skill", "intermediate"),
+                cuisine_prefs=preferences.get("cuisine_preferences", []),
+                budget_friendly=preferences.get("budget_friendly", False),
             )
 
-            result[meal_type] = scored[:target_per_meal_type]
+            diverse = self._enforce_diversity(scored, target_per_meal_type)
+            result[meal_type] = diverse
 
         return result
 
@@ -118,7 +124,8 @@ class RecipeShortlistService:
         meal_type: str,
         preferences: dict,
         exclude_recipe_ids: Optional[List[str]] = None,
-        limit: int = 200,
+        meal_cal_target: int = 600,
+        limit: int = 300,
         relaxed: bool = False,
     ) -> List[Dict[str, Any]]:
         """Query Supabase for recipe candidates with server-side filters."""
@@ -128,44 +135,41 @@ class RecipeShortlistService:
             "likes_count, image_url, is_ai_generated, prep_time, cook_time, servings"
         )
 
-        # Filter by meal type
         query = query.contains("meal_type", [meal_type])
-
-        # Only include recipes with complete data (image + ingredients)
         query = query.not_.is_("image_url", "null")
 
-        # Dietary restrictions (ALL must match)
+        # Calorie range filter at DB level — wide range (25%–250%) to pre-eliminate junk
+        # but not so tight it kills variety. Scoring handles the rest.
+        if meal_cal_target > 0 and not relaxed:
+            cal_min = max(50, int(meal_cal_target * 0.25))
+            cal_max = int(meal_cal_target * 2.5)
+            query = query.gte("calories", cal_min).lte("calories", cal_max)
+
         dietary_restrictions = preferences.get("dietary_restrictions", [])
         if dietary_restrictions:
             query = query.contains("dietary_tags", dietary_restrictions)
 
         if not relaxed:
-            # Difficulty based on cooking skill
             cooking_skill = preferences.get("cooking_skill", "intermediate")
+            # Softer than before: beginners can see Medium too
             if cooking_skill == "beginner":
-                query = query.eq("difficulty", "Easy")
-            elif cooking_skill == "intermediate":
                 query = query.in_("difficulty", ["Easy", "Medium"])
 
-            # Cuisine preferences
             cuisine_prefs = preferences.get("cuisine_preferences", [])
             if cuisine_prefs:
                 query = query.in_("cuisine_type", cuisine_prefs)
 
-            # Recipe source preference
             source_pref = preferences.get("recipe_source_preference", "mixed")
             if source_pref == "vetted_only":
                 query = query.eq("is_ai_generated", False)
             elif source_pref == "ai_only":
                 query = query.eq("is_ai_generated", True)
 
-        # Exclude specific recipe IDs
         if exclude_recipe_ids:
             for rid in exclude_recipe_ids:
                 query = query.neq("id", rid)
 
-        # Order by popularity and limit
-        query = query.order("likes_count", desc=True)
+        # No pre-sort by likes — scoring decides importance, not popularity bias
         query = query.limit(limit)
 
         result = query.execute()
@@ -185,136 +189,201 @@ class RecipeShortlistService:
         filtered = []
         for recipe in candidates:
             ingredients = recipe.get("ingredients") or []
-            # Build combined text of all ingredient names
             ingredient_text = " ".join(
                 (ing.get("name", "") if isinstance(ing, dict) else str(ing)).lower()
                 for ing in ingredients
             )
-            has_excluded = any(excl in ingredient_text for excl in excluded)
-            if not has_excluded:
+            if not any(excl in ingredient_text for excl in excluded):
                 filtered.append(recipe)
         return filtered
 
     def _score_candidates(
         self,
         candidates: List[Dict[str, Any]],
-        target_calories: int,
-        target_protein: float,
+        meal_cal_target: int,
+        meal_protein_target: float,
+        meal_fat_target: float,
         pantry_lookup: Optional[Dict[str, dict]] = None,
         household_size: int = 2,
-        liked_recipe_ids: Optional[set] = None,
+        liked_recipe_ids: Optional[Set[str]] = None,
+        recently_used: Optional[Set[str]] = None,
+        preferred_cook_time: str = "moderate",
+        cooking_skill: str = "intermediate",
+        cuisine_prefs: Optional[List[str]] = None,
+        budget_friendly: bool = False,
     ) -> List[Dict[str, Any]]:
-        """Score and rank candidates. Pantry coverage is THE dominant factor.
+        """
+        Score candidates using a weighted multi-factor system.
 
-        Priority order:
-        1. Pantry coverage (use what user already has) — 0-100 points
-        2. Dietary compliance (handled by query filters, not scored here)
-        3. Nutrition targets — 0-15 each for cal/protein
-        4. User preferences (liked, serving size) — 0-15 each
-        5. Quality signals (image, popularity, cook time) — small bonuses
-
-        Scoring breakdown:
-        - Pantry coverage: 0-100 (THE dominant factor)
-        - Calorie proximity: 0-15
-        - Protein proximity: 0-15
-        - User liked recipe: 0 or 15
-        - Serving size match: 0-10
-        - Has image: 0 or 5
-        - Popularity: 0-5
-        - Not AI-generated: 0 or 3
-        - Shorter cook time: 0-3
-        - Randomness jitter: 0-8 (prevents identical plans every time)
+        Max ~100 pts. Freshness penalty can go negative.
         """
         import random
         from datetime import datetime
 
-        # Seed with current hour so plans vary throughout the day
         rng = random.Random(int(datetime.now().strftime("%Y%m%d%H")))
+        liked_ids = liked_recipe_ids or set()
+        recent = recently_used or set()
+
+        # Cook time budget in minutes
+        cook_budget = {"quick": 30, "moderate": 60, "patient": 120}.get(preferred_cook_time, 60)
 
         for recipe in candidates:
             score = 0.0
+            recipe_id = recipe.get("id", "")
+            cal = recipe.get("calories") or 0
+            prot = float(recipe.get("protein_grams") or 0)
+            fat = float(recipe.get("fat_grams") or 0)
 
-            # === TIER 1: Pantry coverage (0-100 points) — DOMINANT ===
+            # ── NUTRITION (0–25 pts) ──────────────────────────────────────────
+            # Gaussian decay: e^(-4 * diff²) — 10% off = 85% of max, 30% off = 30%, 60% off = 2%
+            if cal > 0 and meal_cal_target > 0:
+                cal_diff_pct = abs(cal - meal_cal_target) / meal_cal_target
+                score += 12 * math.exp(-4 * cal_diff_pct ** 2)
+
+            if prot > 0 and meal_protein_target > 0:
+                prot_diff_pct = abs(prot - meal_protein_target) / meal_protein_target
+                score += 8 * math.exp(-4 * prot_diff_pct ** 2)
+
+            if fat > 0 and meal_fat_target > 0:
+                fat_diff_pct = abs(fat - meal_fat_target) / meal_fat_target
+                score += 5 * math.exp(-4 * fat_diff_pct ** 2)
+
+            # ── USER PREFERENCE (0–25 pts) ────────────────────────────────────
+            if recipe_id in liked_ids:
+                score += 25  # Strongest signal — user explicitly liked this
+                recipe["_liked"] = True
+
+            cuisine = (recipe.get("cuisine_type") or "").lower()
+            if cuisine_prefs and cuisine in [c.lower() for c in cuisine_prefs]:
+                score += 12
+
+            # High-protein preference alignment
+            if meal_protein_target > 40 and prot >= meal_protein_target * 0.75:
+                score += 5
+
+            if budget_friendly:
+                num_ings = len(recipe.get("ingredients") or [])
+                if num_ings <= 8:
+                    score += 8
+                elif num_ings <= 12:
+                    score += 4
+
+            # ── PANTRY COVERAGE (0–20 pts, non-linear) ───────────────────────
+            # coverage^0.6 curve: 100% pantry = 20pts, 50% = 14pts, 20% = 8pts
+            # Prevents simple 2-ingredient recipes from dominating
             ingredients = recipe.get("ingredients") or []
             if pantry_lookup and ingredients:
-                coverage, matched, total = calculate_pantry_coverage(
-                    ingredients, pantry_lookup
-                )
-                score += coverage * 100
+                coverage, matched, total = calculate_pantry_coverage(ingredients, pantry_lookup)
+                pantry_score = (coverage ** 0.6) * 20
+                score += pantry_score
                 recipe["_pantry_coverage"] = round(coverage * 100)
                 recipe["_pantry_matched"] = matched
                 recipe["_pantry_total"] = total
 
-            # === TIER 2: Nutrition targets (0-15 each) ===
-            cal = recipe.get("calories") or 0
-            if cal > 0 and target_calories > 0:
-                cal_diff_pct = abs(cal - target_calories) / target_calories
-                score += max(0, 15 * (1 - cal_diff_pct))
-
-            prot = float(recipe.get("protein_grams") or 0)
-            if prot > 0 and target_protein > 0:
-                prot_diff_pct = abs(prot - target_protein) / target_protein
-                score += max(0, 15 * (1 - prot_diff_pct))
-
-            # === TIER 3: User preferences ===
-            # Liked by user (0 or 15 points)
-            if liked_recipe_ids and recipe.get("id") in liked_recipe_ids:
-                score += 15
-                recipe["_liked"] = True
-
-            # Serving size match (0-10 points)
-            recipe_servings = recipe.get("servings") or 4
-            if household_size > 0:
-                serving_diff = abs(recipe_servings - household_size)
-                if serving_diff == 0:
-                    score += 10
-                elif serving_diff <= 1:
-                    score += 6
-                elif serving_diff <= 2:
-                    score += 3
-
-            # === TIER 4: Quality signals (small bonuses) ===
-            if recipe.get("image_url"):
-                score += 5
-
-            likes = recipe.get("likes_count", 0) or 0
-            score += min(5, math.log2(likes + 1))
-
-            if not recipe.get("is_ai_generated", False):
-                score += 3
-
+            # ── PRACTICAL FIT (0–15 pts) ──────────────────────────────────────
             total_time = (recipe.get("prep_time") or 0) + (recipe.get("cook_time") or 0)
             if total_time > 0:
-                score += max(0, 3 * (1 - total_time / 120))
+                if total_time <= cook_budget:
+                    score += 8
+                elif total_time <= cook_budget * 1.5:
+                    score += 4
+                # Over 1.5x budget = 0 points
 
-            # === TIER 5: Randomness jitter (prevents identical plans) ===
-            score += rng.uniform(0, 8)
+            difficulty = (recipe.get("difficulty") or "").lower()
+            skill_scores = {
+                ("beginner", "easy"): 4, ("beginner", "medium"): 2, ("beginner", "hard"): 0,
+                ("intermediate", "easy"): 3, ("intermediate", "medium"): 4, ("intermediate", "hard"): 2,
+                ("advanced", "easy"): 2, ("advanced", "medium"): 3, ("advanced", "hard"): 4,
+            }
+            score += skill_scores.get((cooking_skill, difficulty), 2)
+
+            recipe_servings = recipe.get("servings") or 4
+            serving_diff = abs(recipe_servings - household_size)
+            if serving_diff == 0:
+                score += 3
+            elif serving_diff <= 1:
+                score += 2
+            elif serving_diff <= 2:
+                score += 1
+
+            # ── QUALITY SIGNALS (0–10 pts) ────────────────────────────────────
+            likes = recipe.get("likes_count", 0) or 0
+            # log10 scale: 10 likes ≈ 1.25pt, 100 = 2.5pt, 1000 = 3.75pt, cap at 5pt
+            score += min(5, math.log10(likes + 1) * (5 / 4))
+
+            if cal > 0 and prot > 0:
+                score += 3  # Complete nutrition data
+
+            if not recipe.get("is_ai_generated", False):
+                score += 2  # Vetted recipe bonus
+
+            # ── FRESHNESS PENALTY (-15..0) ────────────────────────────────────
+            if recipe_id in recent:
+                score -= 15
+
+            # ── SMALL JITTER (0–4 pts) ────────────────────────────────────────
+            score += rng.uniform(0, 4)
 
             recipe["_score"] = round(score, 2)
 
         candidates.sort(key=lambda r: r.get("_score", 0), reverse=True)
 
-        # Log top candidates for debugging
         if pantry_lookup and candidates:
-            top5 = candidates[:5]
-            for r in top5:
+            for r in candidates[:5]:
                 logger.info(
-                    f"  Top candidate: {r.get('title', '?')} "
+                    f"  Top: {r.get('title', '?')[:40]} "
                     f"score={r.get('_score', 0)} "
-                    f"pantry={r.get('_pantry_coverage', 0)}% "
-                    f"({r.get('_pantry_matched', 0)}/{r.get('_pantry_total', 0)} ingredients)"
+                    f"pantry={r.get('_pantry_coverage', 'N/A')}% "
+                    f"liked={'YES' if r.get('_liked') else 'no'}"
                 )
 
         return candidates
+
+    def _enforce_diversity(
+        self,
+        scored: List[Dict[str, Any]],
+        target_count: int,
+    ) -> List[Dict[str, Any]]:
+        """
+        Enforce cuisine diversity in the top N candidates.
+        No single cuisine > 40% of the shortlist.
+        """
+        if not scored or target_count <= 3:
+            return scored[:target_count]
+
+        max_per_cuisine = max(1, int(target_count * 0.4))
+        result = []
+        cuisine_count: Dict[str, int] = {}
+        overflow = []
+
+        for recipe in scored:
+            cuisine = (recipe.get("cuisine_type") or "unknown").lower()
+            if cuisine_count.get(cuisine, 0) < max_per_cuisine:
+                result.append(recipe)
+                cuisine_count[cuisine] = cuisine_count.get(cuisine, 0) + 1
+                if len(result) >= target_count:
+                    break
+            else:
+                overflow.append(recipe)
+
+        # Fill remaining from overflow if needed
+        for recipe in overflow:
+            if len(result) >= target_count:
+                break
+            result.append(recipe)
+
+        return result
 
     async def pick_top_for_slot(
         self,
         preferences: dict,
         meal_type: str,
         exclude_recipe_ids: Optional[List[str]] = None,
+        pantry_items: Optional[List[dict]] = None,
+        recently_used_recipe_ids: Optional[List[str]] = None,
     ) -> Optional[str]:
         """
-        Pick the best single recipe for a slot (no Claude needed).
+        Pick the best single recipe for a slot (no AI needed).
         Used for fill-remaining and regenerate-meal.
         Returns recipe ID or None.
         """
@@ -324,17 +393,17 @@ class RecipeShortlistService:
             meal_types=[meal_type],
             exclude_recipe_ids=exclude_recipe_ids,
             target_per_meal_type=10,
+            pantry_items=pantry_items,
+            recently_used_recipe_ids=recently_used_recipe_ids,
         )
 
         slot_candidates = candidates.get(meal_type, [])
         if not slot_candidates:
             return None
 
-        # Add some randomness to top candidates to avoid always picking the same one
         import random
-        top_n = min(5, len(slot_candidates))
-        pick = random.choice(slot_candidates[:top_n])
-        return pick["id"]
+        top_n = min(3, len(slot_candidates))
+        return random.choice(slot_candidates[:top_n])["id"]
 
 
 # Global instance

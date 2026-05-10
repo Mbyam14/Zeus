@@ -73,7 +73,8 @@ class RecipeService {
     search?: string,
     mealType?: string,
     dietaryTags?: string[],
-    cuisineType?: string
+    cuisineType?: string,
+    maxDifficulty?: string
   ): Promise<Recipe[]> {
     const params = new URLSearchParams();
     params.append('limit', limit.toString());
@@ -81,6 +82,7 @@ class RecipeService {
     if (search) params.append('search', search);
     if (mealType) params.append('meal_type', mealType);
     if (cuisineType) params.append('cuisine_type', cuisineType);
+    if (maxDifficulty) params.append('max_difficulty', maxDifficulty);
     if (dietaryTags) {
       dietaryTags.forEach(tag => params.append('dietary_tags', tag));
     }

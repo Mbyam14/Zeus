@@ -20,7 +20,6 @@ import { ProfileStackParamList } from '../../navigation/ProfileNavigator';
 type ProfileScreenNavigationProp = StackNavigationProp<ProfileStackParamList, 'ProfileMain'>;
 
 interface MenuItem {
-  icon: string;
   ionicon: string;
   label: string;
   subtitle: string;
@@ -34,6 +33,7 @@ export const ProfileScreen: React.FC = () => {
   const navigation = useNavigation<ProfileScreenNavigationProp>();
 
   const avatarUrl = user?.profile_data?.avatar_url;
+  const userPrefs = user?.profile_data?.preferences || {} as any;
   const memberSince = user?.created_at
     ? new Date(user.created_at).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
     : '';
@@ -49,30 +49,30 @@ export const ProfileScreen: React.FC = () => {
     {
       title: 'HEALTH & NUTRITION',
       items: [
-        { icon: '📊', ionicon: 'barbell-outline', label: 'Body & Goals', subtitle: 'Stats, TDEE & macro targets', screen: 'BodyStats', iconBg: colors.primary },
-        { icon: '🎯', ionicon: 'restaurant-outline', label: 'Meal Preferences', subtitle: 'Diet, cuisine & planning', screen: 'EditPreferences', iconBg: colors.warning },
-        { icon: '⚠️', ionicon: 'warning-outline', label: 'Allergies & Dislikes', subtitle: 'Foods to avoid', screen: 'Allergies', iconBg: colors.error },
+        { ionicon: 'bar-chart-outline', label: 'Body & Goals', subtitle: 'Stats, TDEE & macro targets', screen: 'BodyStats', iconBg: colors.primary },
+        { ionicon: 'options-outline', label: 'Food Preferences', subtitle: 'Dietary needs, cuisines, skill level', screen: 'EditPreferences', iconBg: colors.warning },
+        { ionicon: 'warning-outline', label: 'Allergies & Dislikes', subtitle: 'Foods to avoid', screen: 'Allergies', iconBg: colors.error },
       ],
     },
     {
       title: 'ACCOUNT',
       items: [
-        { icon: '✏️', ionicon: 'person-outline', label: 'Edit Profile', subtitle: 'Photo, name & password', screen: 'EditProfile', iconBg: colors.secondary || '#6B7280' },
+        { ionicon: 'create-outline', label: 'Edit Profile', subtitle: 'Photo, name & password', screen: 'EditProfile', iconBg: colors.secondary || '#6B7280' },
       ],
     },
     {
       title: 'APP SETTINGS',
       items: [
-        { icon: '🎨', ionicon: 'color-palette-outline', label: 'Theme', subtitle: 'Light, dark or system', screen: 'Theme', iconBg: '#8B5CF6' },
-        { icon: '🔔', ionicon: 'notifications-outline', label: 'Notifications', subtitle: 'Reminders & alerts', screen: 'Notifications', iconBg: '#EC4899' },
+        { ionicon: 'color-palette-outline', label: 'Theme', subtitle: 'Light, dark or system', screen: 'Theme', iconBg: '#8B5CF6' },
+        { ionicon: 'notifications-outline', label: 'Notifications', subtitle: 'Reminders & alerts', screen: 'Notifications', iconBg: '#EC4899' },
       ],
     },
     {
       title: 'ABOUT',
       items: [
-        { icon: '❓', ionicon: 'help-circle-outline', label: 'Help & Support', subtitle: 'FAQs & contact', screen: 'HelpSupport', iconBg: '#06B6D4' },
-        { icon: '📄', ionicon: 'document-text-outline', label: 'Terms of Service', subtitle: 'Our terms', screen: 'Terms', iconBg: '#64748B' },
-        { icon: '🔐', ionicon: 'shield-checkmark-outline', label: 'Privacy Policy', subtitle: 'How we protect data', screen: 'PrivacyPolicy', iconBg: '#64748B' },
+        { ionicon: 'help-circle-outline', label: 'Help & Support', subtitle: 'FAQs & contact', screen: 'HelpSupport', iconBg: '#06B6D4' },
+        { ionicon: 'document-text-outline', label: 'Terms of Service', subtitle: 'Our terms', screen: 'Terms', iconBg: '#64748B' },
+        { ionicon: 'shield-checkmark-outline', label: 'Privacy Policy', subtitle: 'How we protect data', screen: 'PrivacyPolicy', iconBg: '#64748B' },
       ],
     },
   ];
@@ -106,6 +106,40 @@ export const ProfileScreen: React.FC = () => {
             <Text style={styles.memberSince}>Member since {memberSince}</Text>
           ) : null}
         </View>
+
+        {/* Preferences Summary */}
+        <TouchableOpacity
+          style={styles.prefsSummaryCard}
+          onPress={() => navigation.navigate('EditPreferences')}
+          activeOpacity={0.7}
+        >
+          <View style={styles.prefsSummaryHeader}>
+            <Ionicons name="options-outline" size={18} color={colors.primary} />
+            <Text style={styles.prefsSummaryTitle}>Your Preferences</Text>
+            <View style={{ flex: 1 }} />
+            <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+          </View>
+          <View style={styles.prefsSummaryTags}>
+            {userPrefs.cooking_skill && (
+              <View style={styles.prefTag}>
+                <Text style={styles.prefTagText}>{userPrefs.cooking_skill}</Text>
+              </View>
+            )}
+            {userPrefs.dietary_restrictions?.map((d: string) => (
+              <View key={d} style={styles.prefTag}>
+                <Text style={styles.prefTagText}>{d}</Text>
+              </View>
+            ))}
+            {userPrefs.cuisine_preferences?.slice(0, 3).map((c: string) => (
+              <View key={c} style={styles.prefTag}>
+                <Text style={styles.prefTagText}>{c}</Text>
+              </View>
+            ))}
+            {(!userPrefs.cooking_skill && !userPrefs.dietary_restrictions?.length) && (
+              <Text style={styles.prefsSummaryEmpty}>Tap to set your preferences</Text>
+            )}
+          </View>
+        </TouchableOpacity>
 
         {/* Menu Sections */}
         {sections.map((section) => (
@@ -226,6 +260,49 @@ const createStyles = (colors: any) =>
       color: colors.textMuted,
       marginTop: 6,
       opacity: 0.7,
+    },
+    prefsSummaryCard: {
+      marginHorizontal: 16,
+      marginBottom: 12,
+      marginTop: 12,
+      padding: 14,
+      backgroundColor: colors.backgroundSecondary,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.primary + '20',
+    },
+    prefsSummaryHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginBottom: 8,
+    },
+    prefsSummaryTitle: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.primary,
+    },
+    prefsSummaryTags: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 6,
+    },
+    prefTag: {
+      backgroundColor: colors.primary + '12',
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 12,
+    },
+    prefTagText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.primary,
+      textTransform: 'capitalize',
+    },
+    prefsSummaryEmpty: {
+      fontSize: 13,
+      color: colors.textMuted,
+      fontStyle: 'italic',
     },
     sectionTitle: {
       fontSize: 13,

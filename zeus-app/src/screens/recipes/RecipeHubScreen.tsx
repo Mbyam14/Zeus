@@ -19,9 +19,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Recipe } from '../../types/recipe';
 import { recipeService } from '../../services/recipeService';
-import { smartAIService, CookTonightResult } from '../../services/smartAIService';
+import { mealPlanService } from '../../services/mealPlanService';
+import { getRecipeIdFromSlot, DEFAULT_MEAL_TYPES } from '../../types/mealplan';
 import { useThemeStore, ThemeColors } from '../../store/themeStore';
 import { useDataStore } from '../../store/dataStore';
+import { useAuthStore } from '../../store/authStore';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -31,7 +33,18 @@ type SortOption = 'popular' | 'newest' | 'quick';
 
 const MEAL_TYPES = ['All', 'Breakfast', 'Lunch', 'Dinner', 'Snack', 'Dessert'];
 const CUISINES = ['All', 'Italian', 'Mexican', 'Asian', 'Mediterranean', 'American', 'Indian', 'Japanese', 'Thai', 'Korean', 'Greek'];
-const LIMIT = 20;
+const LIMIT = 30;
+
+// ─────────────────────────────────────────────────────────────
+// Time formatting helper
+// ─────────────────────────────────────────────────────────────
+const formatTime = (minutes: number): string => {
+  if (minutes < 60) return `${minutes} min`;
+  const hrs = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  if (mins === 0) return `${hrs} hr`;
+  return `${hrs} hr ${mins} min`;
+};
 
 // ─────────────────────────────────────────────────────────────
 // Reusable Recipe Card
@@ -41,9 +54,41 @@ const RecipeCard: React.FC<{
   onPress: () => void;
   compact?: boolean;
   colors: ThemeColors;
-}> = ({ recipe, onPress, compact, colors }) => {
+  showActions?: boolean;
+  onLikeChange?: (recipeId: string, liked: boolean) => void;
+  onSaveChange?: (recipeId: string, saved: boolean) => void;
+}> = ({ recipe, onPress, compact, colors, showActions = false, onLikeChange, onSaveChange }) => {
   const cardWidth = compact ? 180 : (screenWidth - 48) / 2;
   const imageHeight = compact ? 110 : 120;
+
+  // Sync local state with recipe prop when it changes
+  const [isLiked, setIsLiked] = useState(recipe.is_liked || false);
+  const [isSaved, setIsSaved] = useState(recipe.is_saved || false);
+
+  useEffect(() => {
+    setIsLiked(recipe.is_liked || false);
+    setIsSaved(recipe.is_saved || false);
+  }, [recipe.is_liked, recipe.is_saved]);
+
+  const handleLike = async () => {
+    const newState = !isLiked;
+    setIsLiked(newState);
+    try {
+      if (newState) await recipeService.likeRecipe(recipe.id);
+      else await recipeService.unlikeRecipe(recipe.id);
+      onLikeChange?.(recipe.id, newState);
+    } catch { setIsLiked(!newState); }
+  };
+
+  const handleSave = async () => {
+    const newState = !isSaved;
+    setIsSaved(newState);
+    try {
+      if (newState) await recipeService.saveRecipe(recipe.id);
+      else await recipeService.unsaveRecipe(recipe.id);
+      onSaveChange?.(recipe.id, newState);
+    } catch { setIsSaved(!newState); }
+  };
 
   return (
     <TouchableOpacity
@@ -80,11 +125,21 @@ const RecipeCard: React.FC<{
           )}
           {(recipe.prep_time != null || recipe.cook_time != null) && (
             <Text style={cardStyles(colors).metaText}>
-              {(recipe.prep_time || 0) + (recipe.cook_time || 0)} min
+              {formatTime((recipe.prep_time || 0) + (recipe.cook_time || 0))}
             </Text>
           )}
         </View>
       </View>
+      {showActions && (
+        <View style={cardStyles(colors).actionRow}>
+          <TouchableOpacity onPress={handleLike} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Ionicons name={isLiked ? 'heart' : 'heart-outline'} size={20} color={isLiked ? '#EF4444' : colors.textMuted} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={handleSave} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Ionicons name={isSaved ? 'bookmark' : 'bookmark-outline'} size={20} color={isSaved ? colors.primary : colors.textMuted} />
+          </TouchableOpacity>
+        </View>
+      )}
     </TouchableOpacity>
   );
 };
@@ -157,6 +212,13 @@ const cardStyles = (colors: ThemeColors) =>
       fontSize: 12,
       color: colors.textMuted,
     },
+    actionRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      paddingHorizontal: 10,
+      paddingBottom: 8,
+      paddingTop: 2,
+    },
   });
 
 // ─────────────────────────────────────────────────────────────
@@ -169,6 +231,8 @@ export const RecipeHubScreen: React.FC = () => {
   const styles = createStyles(colors);
   const cachedRecipeFeed = useDataStore((s) => s.recipeFeed);
   const recipeFeedFresh = useDataStore((s) => s.isFresh('recipeFeed'));
+  const user = useAuthStore((s) => s.user);
+  const cookingSkill = user?.profile_data?.preferences?.cooking_skill || 'intermediate';
 
   // Main tab
   const [mainTab, setMainTab] = useState<MainTab>('browse');
@@ -186,13 +250,21 @@ export const RecipeHubScreen: React.FC = () => {
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Cook Tonight
-  const [cookTonightLoading, setCookTonightLoading] = useState(false);
-  const [cookTonightResult, setCookTonightResult] = useState<CookTonightResult['suggestion']>(null);
-  const [cookTonightExpanded, setCookTonightExpanded] = useState(false);
-
   // Filter modal
   const [showFilterModal, setShowFilterModal] = useState(false);
+
+  // Today's Menu
+  const [todayMeals, setTodayMeals] = useState<{ mealType: string; recipe: Recipe | null }[]>([]);
+  const [todayMenuLoading, setTodayMenuLoading] = useState(false);
+
+  // Collapsible sections
+  const [showTodayMenu, setShowTodayMenu] = useState(true);
+  const [showDailyPick, setShowDailyPick] = useState(false);
+  const [showSeasonal, setShowSeasonal] = useState(false);
+
+  // Featured / Daily Pick
+  const [dailyPick, setDailyPick] = useState<Recipe | null>(null);
+  const [seasonalPicks, setSeasonalPicks] = useState<Recipe[]>([]);
 
   // ── My Recipes state ──
   const [myRecipesTab, setMyRecipesTab] = useState<MyRecipesTab>('liked');
@@ -221,8 +293,11 @@ export const RecipeHubScreen: React.FC = () => {
       const mealType = mealTypeFilter !== 'All' ? mealTypeFilter : undefined;
       const cuisine = cuisineFilter !== 'All' ? cuisineFilter : undefined;
 
+      // Map cooking skill to max difficulty for backend filtering
+      const maxDiff = cookingSkill === 'beginner' ? 'Easy' : cookingSkill === 'intermediate' ? 'Medium' : undefined;
+
       let results = await recipeService.getAllRecipes(
-        LIMIT, newOffset, search || undefined, mealType, undefined, cuisine
+        LIMIT, newOffset, search || undefined, mealType, undefined, cuisine, maxDiff
       );
 
       // Client-side sorting
@@ -257,7 +332,7 @@ export const RecipeHubScreen: React.FC = () => {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [offset, search, mealTypeFilter, cuisineFilter, sortBy]);
+  }, [offset, search, mealTypeFilter, cuisineFilter, sortBy, cookingSkill]);
 
   // Reload when filters change
   const isFirstMount = useRef(true);
@@ -290,10 +365,100 @@ export const RecipeHubScreen: React.FC = () => {
     }
   };
 
+  // ── Today's Menu loader ──
+
+  const getTodayDayOfWeek = (): string => {
+    const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    return days[new Date().getDay()];
+  };
+
+  const loadTodayMenu = async () => {
+    setTodayMenuLoading(true);
+    try {
+      const plan = await mealPlanService.getCurrentWeekMealPlan();
+      if (!plan || !plan.meals) { setTodayMeals([]); return; }
+
+      const today = getTodayDayOfWeek();
+      const todayData = (plan.meals as any)[today];
+      if (!todayData) { setTodayMeals([]); return; }
+
+      // Get recipe IDs for today
+      const mealTypes = plan.meal_types || DEFAULT_MEAL_TYPES;
+      const recipeIds: string[] = [];
+      const mealEntries: { mealType: string; recipeId: string | null }[] = [];
+
+      for (const mt of mealTypes) {
+        const slot = todayData[mt.key as keyof typeof todayData] as any;
+        const recipeId = slot ? getRecipeIdFromSlot(slot) : null;
+        mealEntries.push({ mealType: mt.label, recipeId: recipeId || null });
+        if (recipeId) recipeIds.push(recipeId);
+      }
+
+      if (recipeIds.length === 0) { setTodayMeals([]); return; }
+
+      // Fetch recipes
+      const recipesData = await mealPlanService.getRecipes(recipeIds);
+      const recipeMap: Record<string, any> = {};
+      recipesData.forEach((r: any) => { if (r?.id) recipeMap[r.id] = r; });
+
+      setTodayMeals(
+        mealEntries
+          .filter(m => m.recipeId && recipeMap[m.recipeId])
+          .map(m => ({ mealType: m.mealType, recipe: recipeMap[m.recipeId!] }))
+      );
+    } catch {
+      setTodayMeals([]);
+    } finally {
+      setTodayMenuLoading(false);
+    }
+  };
+
+  // ── Featured / Seasonal loader ──
+
+  const SEASONAL_KEYWORDS: Record<string, string[]> = {
+    spring: ['salad', 'asparagus', 'pea', 'lemon', 'herb', 'light', 'fresh', 'spring'],
+    summer: ['grill', 'bbq', 'watermelon', 'corn', 'tomato', 'berry', 'summer', 'cold', 'ice'],
+    fall: ['pumpkin', 'apple', 'squash', 'cinnamon', 'harvest', 'maple', 'autumn', 'fall', 'sweet potato'],
+    winter: ['stew', 'soup', 'roast', 'comfort', 'chili', 'winter', 'warm', 'hearty', 'hot chocolate'],
+  };
+
+  const getCurrentSeason = (): string => {
+    const month = new Date().getMonth(); // 0-11
+    if (month >= 2 && month <= 4) return 'spring';
+    if (month >= 5 && month <= 7) return 'summer';
+    if (month >= 8 && month <= 10) return 'fall';
+    return 'winter';
+  };
+
+  const loadFeatured = async () => {
+    try {
+      // Daily pick: deterministic based on date so it's consistent all day
+      const dateStr = new Date().toISOString().split('T')[0];
+      const seed = dateStr.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+
+      // Get a page of popular recipes
+      const popular = await recipeService.getAllRecipes(50, 0);
+      if (popular.length > 0) {
+        setDailyPick(popular[seed % popular.length]);
+      }
+
+      // Seasonal: filter by keywords in title/description
+      const season = getCurrentSeason();
+      const keywords = SEASONAL_KEYWORDS[season];
+      const seasonal = popular.filter(r => {
+        const text = ((r.title || '') + ' ' + (r.description || '')).toLowerCase();
+        return keywords.some(kw => text.includes(kw));
+      }).slice(0, 6);
+      setSeasonalPicks(seasonal);
+    } catch { /* silent */ }
+  };
+
   useFocusEffect(
     useCallback(() => {
       if (mainTab === 'browse') {
         loadRecipes(true);
+        loadTodayMenu();
+        loadFeatured();
       } else {
         loadMyRecipes();
       }
@@ -322,35 +487,6 @@ export const RecipeHubScreen: React.FC = () => {
   const clearSearch = () => {
     setSearchText('');
     setSearch('');
-  };
-
-  // ── Cook Tonight ──
-
-  const handleCookTonight = async () => {
-    if (cookTonightExpanded && cookTonightResult) {
-      // Already expanded — just collapse
-      setCookTonightExpanded(false);
-      return;
-    }
-    setCookTonightLoading(true);
-    setCookTonightExpanded(true);
-    try {
-      const result = await smartAIService.getCookTonightSuggestion();
-      setCookTonightResult(result.suggestion);
-    } catch {
-      setCookTonightResult(null);
-    } finally {
-      setCookTonightLoading(false);
-    }
-  };
-
-  const handleRefreshSuggestion = async () => {
-    setCookTonightLoading(true);
-    try {
-      const result = await smartAIService.getCookTonightSuggestion();
-      setCookTonightResult(result.suggestion);
-    } catch { }
-    finally { setCookTonightLoading(false); }
   };
 
   const activeFilterCount =
@@ -462,55 +598,99 @@ export const RecipeHubScreen: React.FC = () => {
 
   const renderBrowseHeader = () => (
     <View>
-      {/* Cook Tonight mini-banner */}
-      <TouchableOpacity
-        style={styles.cookTonightBanner}
-        onPress={handleCookTonight}
-        activeOpacity={0.7}
-      >
-        <Ionicons name="sparkles" size={18} color={colors.primary} />
-        <Text style={styles.cookTonightText}>What should I cook tonight?</Text>
-        <Ionicons name={cookTonightExpanded ? 'chevron-up' : 'chevron-forward'} size={16} color={colors.primary} />
-      </TouchableOpacity>
+      {/* Today's Menu */}
+      {todayMeals.length > 0 && (
+        <View style={styles.todayMenuSection}>
+          <TouchableOpacity style={styles.sectionHeaderRow} onPress={() => setShowTodayMenu(!showTodayMenu)} activeOpacity={0.7}>
+            <Ionicons name="restaurant" size={20} color={colors.primary} />
+            <Text style={styles.sectionHeaderText}>Today's Menu</Text>
+            <View style={{ flex: 1 }} />
+            <Ionicons name={showTodayMenu ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
+          </TouchableOpacity>
+          {showTodayMenu && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}>
+              {todayMeals.map((meal, i) => (
+                <TouchableOpacity
+                  key={i}
+                  style={styles.todayMealCard}
+                  onPress={() => meal.recipe && goToRecipe(meal.recipe)}
+                  activeOpacity={0.8}
+                >
+                  {meal.recipe?.image_url ? (
+                    <Image source={{ uri: meal.recipe.image_url }} style={styles.todayMealImage} />
+                  ) : (
+                    <View style={[styles.todayMealImage, styles.todayMealImagePlaceholder]}>
+                      <Ionicons name="restaurant-outline" size={24} color={colors.textMuted} />
+                    </View>
+                  )}
+                  <View style={styles.todayMealInfo}>
+                    <Text style={styles.todayMealType}>{meal.mealType}</Text>
+                    <Text style={styles.todayMealTitle} numberOfLines={2}>{meal.recipe?.title || 'No recipe'}</Text>
+                    {meal.recipe?.calories != null && (
+                      <Text style={styles.todayMealCal}>{Math.round(meal.recipe.calories)} cal</Text>
+                    )}
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
+        </View>
+      )}
 
-      {/* Cook Tonight expanded result */}
-      {cookTonightExpanded && (
-        <View style={styles.cookTonightCard}>
-          {cookTonightLoading ? (
-            <View style={{ padding: 20, alignItems: 'center' }}>
-              <ActivityIndicator size="small" color={colors.primary} />
-              <Text style={[styles.cookTonightCardSubtext, { marginTop: 8 }]}>Thinking...</Text>
-            </View>
-          ) : cookTonightResult ? (
-            <>
-              <Text style={styles.cookTonightCardTitle}>{cookTonightResult.recipe_title}</Text>
-              <Text style={styles.cookTonightCardSubtext}>{cookTonightResult.why}</Text>
-              <View style={styles.cookTonightMeta}>
-                <View style={styles.cookTonightMetaItem}>
-                  <Ionicons name="time-outline" size={14} color={colors.textMuted} />
-                  <Text style={styles.cookTonightMetaText}>{cookTonightResult.prep_time_minutes} min</Text>
-                </View>
-                <View style={styles.cookTonightMetaItem}>
-                  <Ionicons name="flame-outline" size={14} color={colors.textMuted} />
-                  <Text style={styles.cookTonightMetaText}>{cookTonightResult.calories_estimate} cal</Text>
-                </View>
-                <View style={styles.cookTonightMetaItem}>
-                  <Ionicons name="basket-outline" size={14} color={colors.textMuted} />
-                  <Text style={styles.cookTonightMetaText}>{cookTonightResult.pantry_items_used.length} pantry items</Text>
+      {/* Daily Pick */}
+      {dailyPick && (
+        <View style={styles.featuredSection}>
+          <TouchableOpacity style={styles.sectionHeaderRow} onPress={() => setShowDailyPick(!showDailyPick)} activeOpacity={0.7}>
+            <Ionicons name="star" size={20} color="#F59E0B" />
+            <Text style={styles.sectionHeaderText}>Today's Pick</Text>
+            <View style={{ flex: 1 }} />
+            <Ionicons name={showDailyPick ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
+          </TouchableOpacity>
+          {showDailyPick && (
+            <TouchableOpacity
+              style={styles.dailyPickCard}
+              onPress={() => goToRecipe(dailyPick)}
+              activeOpacity={0.85}
+            >
+              {dailyPick.image_url ? (
+                <Image source={{ uri: dailyPick.image_url }} style={styles.dailyPickImage} />
+              ) : null}
+              <View style={styles.dailyPickOverlay}>
+                <Text style={styles.dailyPickTitle}>{dailyPick.title}</Text>
+                <View style={styles.dailyPickMeta}>
+                  {dailyPick.calories != null && (
+                    <Text style={styles.dailyPickMetaText}>{Math.round(dailyPick.calories)} cal</Text>
+                  )}
+                  {(dailyPick.prep_time != null || dailyPick.cook_time != null) && (
+                    <Text style={styles.dailyPickMetaText}>{formatTime((dailyPick.prep_time || 0) + (dailyPick.cook_time || 0))}</Text>
+                  )}
+                  {dailyPick.difficulty && (
+                    <Text style={styles.dailyPickMetaText}>{dailyPick.difficulty}</Text>
+                  )}
                 </View>
               </View>
-              {cookTonightResult.items_to_buy.length > 0 && (
-                <Text style={styles.cookTonightBuyText}>
-                  Need to buy: {cookTonightResult.items_to_buy.join(', ')}
-                </Text>
-              )}
-              <TouchableOpacity style={styles.cookTonightRefresh} onPress={handleRefreshSuggestion}>
-                <Ionicons name="refresh-outline" size={16} color={colors.primary} />
-                <Text style={[styles.cookTonightText, { flex: 0 }]}>Get another suggestion</Text>
-              </TouchableOpacity>
-            </>
-          ) : (
-            <Text style={styles.cookTonightCardSubtext}>Add items to your pantry for personalized suggestions!</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+
+      {/* Seasonal Picks */}
+      {seasonalPicks.length > 0 && (
+        <View style={styles.featuredSection}>
+          <TouchableOpacity style={styles.sectionHeaderRow} onPress={() => setShowSeasonal(!showSeasonal)} activeOpacity={0.7}>
+            <Ionicons name="leaf" size={20} color="#22C55E" />
+            <Text style={styles.sectionHeaderText}>
+              {getCurrentSeason().charAt(0).toUpperCase() + getCurrentSeason().slice(1)} Favorites
+            </Text>
+            <View style={{ flex: 1 }} />
+            <Ionicons name={showSeasonal ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
+          </TouchableOpacity>
+          {showSeasonal && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}>
+              {seasonalPicks.map((recipe) => (
+                <RecipeCard key={recipe.id} recipe={recipe} onPress={() => goToRecipe(recipe)} compact colors={colors} />
+              ))}
+            </ScrollView>
           )}
         </View>
       )}
@@ -621,7 +801,7 @@ export const RecipeHubScreen: React.FC = () => {
       const emptyMessages: Record<MyRecipesTab, { title: string; subtitle: string }> = {
         liked: { title: 'No liked recipes', subtitle: 'Recipes you like will appear here' },
         saved: { title: 'No saved recipes', subtitle: 'Save recipes for quick access' },
-        created: { title: 'No recipes yet', subtitle: 'Tap + to create your first recipe' },
+        created: { title: 'No recipes yet', subtitle: 'Create your own recipes and they\'ll appear here' },
       };
       return (
         <View style={styles.emptyContainer}>
@@ -638,6 +818,25 @@ export const RecipeHubScreen: React.FC = () => {
           />
           <Text style={styles.emptyTitle}>{emptyMessages[myRecipesTab].title}</Text>
           <Text style={styles.emptySubtitle}>{emptyMessages[myRecipesTab].subtitle}</Text>
+          {myRecipesTab === 'created' && (
+            <TouchableOpacity
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: colors.primary,
+                paddingHorizontal: 20,
+                paddingVertical: 12,
+                borderRadius: 12,
+                marginTop: 16,
+                gap: 8,
+              }}
+              onPress={goToCreate}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="add-circle-outline" size={20} color="#FFF" />
+              <Text style={{ fontSize: 15, fontWeight: '700', color: '#FFF' }}>Create Your Own</Text>
+            </TouchableOpacity>
+          )}
         </View>
       );
     }
@@ -654,6 +853,17 @@ export const RecipeHubScreen: React.FC = () => {
             recipe={item}
             onPress={() => goToRecipe(item)}
             colors={colors}
+            showActions
+            onLikeChange={(id, liked) => {
+              if (!liked && myRecipesTab === 'liked') {
+                setLikedRecipes(prev => prev.filter(r => r.id !== id));
+              }
+            }}
+            onSaveChange={(id, saved) => {
+              if (!saved && myRecipesTab === 'saved') {
+                setSavedRecipes(prev => prev.filter(r => r.id !== id));
+              }
+            }}
           />
         )}
         ListFooterComponent={<View style={{ height: 100 }} />}
@@ -739,7 +949,10 @@ export const RecipeHubScreen: React.FC = () => {
               ListFooterComponent={renderBrowseFooter}
               ListEmptyComponent={renderBrowseEmpty}
               onEndReached={handleLoadMore}
-              onEndReachedThreshold={0.5}
+              onEndReachedThreshold={1.5}
+              windowSize={13}
+              maxToRenderPerBatch={15}
+              initialNumToRender={15}
               refreshControl={
                 <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
               }
@@ -748,6 +961,7 @@ export const RecipeHubScreen: React.FC = () => {
                   recipe={item}
                   onPress={() => goToRecipe(item)}
                   colors={colors}
+                  showActions
                 />
               )}
             />
@@ -907,22 +1121,110 @@ const createStyles = (colors: ThemeColors) =>
       paddingVertical: 0,
     },
 
-    // Cook Tonight banner
-    cookTonightBanner: {
+    // Today's Menu
+    todayMenuSection: {
+      marginBottom: 8,
+      paddingTop: 8,
+    },
+    sectionHeaderRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      marginHorizontal: 16,
-      marginVertical: 8,
-      padding: 12,
-      borderRadius: 12,
-      backgroundColor: colors.primary + '10',
+      paddingHorizontal: 16,
+      marginBottom: 10,
       gap: 8,
     },
-    cookTonightText: {
-      flex: 1,
+    sectionHeaderText: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: colors.text,
+    },
+    todayMealCard: {
+      width: 200,
+      backgroundColor: colors.backgroundSecondary,
+      borderRadius: 14,
+      overflow: 'hidden',
+      ...Platform.select({
+        ios: { shadowColor: colors.shadow, shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 6 },
+        android: { elevation: 2 },
+      }),
+    },
+    todayMealImage: {
+      width: '100%',
+      height: 110,
+    },
+    todayMealImagePlaceholder: {
+      backgroundColor: colors.border,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    todayMealInfo: {
+      padding: 10,
+    },
+    todayMealType: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: colors.primary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+      marginBottom: 2,
+    },
+    todayMealTitle: {
       fontSize: 14,
       fontWeight: '600',
-      color: colors.primary,
+      color: colors.text,
+      lineHeight: 19,
+      marginBottom: 4,
+    },
+    todayMealCal: {
+      fontSize: 12,
+      color: colors.textMuted,
+    },
+
+    // Featured / Daily Pick
+    featuredSection: {
+      marginBottom: 12,
+      paddingTop: 4,
+    },
+    dailyPickCard: {
+      marginHorizontal: 16,
+      borderRadius: 16,
+      overflow: 'hidden',
+      height: 180,
+      backgroundColor: colors.backgroundSecondary,
+    },
+    dailyPickImage: {
+      width: '100%',
+      height: '100%',
+      resizeMode: 'cover',
+    },
+    dailyPickOverlay: {
+      position: 'absolute',
+      bottom: 0,
+      left: 0,
+      right: 0,
+      padding: 14,
+      paddingTop: 30,
+    },
+    dailyPickTitle: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: '#FFF',
+      textShadowColor: 'rgba(0,0,0,0.8)',
+      textShadowOffset: { width: 0, height: 1 },
+      textShadowRadius: 4,
+      marginBottom: 4,
+    },
+    dailyPickMeta: {
+      flexDirection: 'row',
+      gap: 12,
+    },
+    dailyPickMetaText: {
+      fontSize: 13,
+      color: 'rgba(255,255,255,0.9)',
+      fontWeight: '600',
+      textShadowColor: 'rgba(0,0,0,0.6)',
+      textShadowOffset: { width: 0, height: 1 },
+      textShadowRadius: 3,
     },
 
     // Filter chips
@@ -1043,57 +1345,6 @@ const createStyles = (colors: ThemeColors) =>
       lineHeight: 20,
     },
 
-    // Cook Tonight expanded card
-    cookTonightCard: {
-      marginHorizontal: 16,
-      marginBottom: 8,
-      padding: 16,
-      borderRadius: 14,
-      backgroundColor: colors.backgroundSecondary,
-      borderWidth: 1,
-      borderColor: colors.primary + '25',
-    },
-    cookTonightCardTitle: {
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.text,
-      marginBottom: 6,
-    },
-    cookTonightCardSubtext: {
-      fontSize: 13,
-      color: colors.textSecondary,
-      lineHeight: 19,
-      marginBottom: 8,
-    },
-    cookTonightMeta: {
-      flexDirection: 'row',
-      gap: 16,
-      marginBottom: 8,
-    },
-    cookTonightMetaItem: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-    },
-    cookTonightMetaText: {
-      fontSize: 12,
-      color: colors.textMuted,
-      fontWeight: '500',
-    },
-    cookTonightBuyText: {
-      fontSize: 12,
-      color: colors.warning || '#F59E0B',
-      marginBottom: 10,
-    },
-    cookTonightRefresh: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      paddingTop: 8,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: colors.border,
-    },
-
     // Filter bar
     filterBar: {
       flexDirection: 'row',
@@ -1102,6 +1353,7 @@ const createStyles = (colors: ThemeColors) =>
       paddingVertical: 8,
       gap: 8,
       flexWrap: 'wrap',
+      justifyContent: 'flex-end',
     },
     filterButton: {
       flexDirection: 'row',

@@ -54,7 +54,7 @@ export const ZeusAIChatBubble: React.FC = () => {
         activeOpacity={0.8}
         style={[styles.bubble, { backgroundColor: colors.primary }]}
       >
-        <Ionicons name="flash" size={26} color="#FFF" />
+        <Ionicons name="flash" size={22} color="#FFF" />
       </TouchableOpacity>
 
       {unreadCount > 0 && (
@@ -75,9 +75,9 @@ const styles = StyleSheet.create({
     zIndex: 999,
   },
   bubble: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
     elevation: 6,
@@ -85,6 +85,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.3,
     shadowRadius: 6,
+    opacity: 0.85,
   },
   badge: {
     position: 'absolute',

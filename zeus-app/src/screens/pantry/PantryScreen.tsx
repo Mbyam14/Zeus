@@ -748,10 +748,10 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
   };
 
   const groupedItems = () => {
-    const grouped: Record<PantryCategory, PantryItem[]> = {
+    const grouped: Record<string, PantryItem[]> = {
       Produce: [], Dairy: [], Protein: [], Grains: [],
       Spices: [], Condiments: [], Beverages: [], Frozen: [],
-      Pantry: [], Other: []
+      'Canned & Jarred': [], Baking: [], 'Oils & Vinegars': [], Snacks: [], Other: []
     };
 
     pantryItems.forEach(item => {
@@ -1052,21 +1052,6 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
                 style={styles.dropdownMenuItem}
                 onPress={() => {
                   setShowAddDropdown(false);
-                  setSelectionMode(true);
-                }}
-              >
-                <View style={styles.dropdownMenuIcon}>
-                  <Text style={styles.dropdownMenuIconText}>☑️</Text>
-                </View>
-                <Text style={styles.dropdownMenuText}>Select</Text>
-              </TouchableOpacity>
-            )}
-
-            {pantryItems.length > 0 && (
-              <TouchableOpacity
-                style={styles.dropdownMenuItem}
-                onPress={() => {
-                  setShowAddDropdown(false);
                   Alert.alert(
                     'Clear All Items',
                     `Remove all ${pantryItems.length} items from your pantry?`,
@@ -1205,38 +1190,16 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
 
       {loading ? (
         <PantryItemSkeleton />
-      ) : pantryItems.length === 0 ? (
+      ) : pantryItems.length === 0 && !selectedCategory && !searchQuery ? (
         renderEmptyState()
+      ) : pantryItems.length === 0 ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 }}>
+          <Ionicons name="search-outline" size={48} color={colors.textMuted} />
+          <Text style={{ fontSize: 16, fontWeight: '600', color: colors.text, marginTop: 12 }}>No items found</Text>
+          <Text style={{ fontSize: 14, color: colors.textMuted, marginTop: 4, textAlign: 'center' }}>Try a different search or category</Text>
+        </View>
       ) : (
         <>
-          {/* Inline Quick Add */}
-          <View style={styles.inlineAddBar}>
-            <TextInput
-              style={styles.inlineAddInput}
-              placeholder="Quick add item..."
-              placeholderTextColor={colors.textMuted}
-              value={inlineAddText}
-              onChangeText={setInlineAddText}
-              onSubmitEditing={handleInlineAdd}
-              returnKeyType="done"
-              autoComplete="off"
-              textContentType="none"
-            />
-            <TouchableOpacity
-              style={[
-                styles.inlineAddButton,
-                { backgroundColor: inlineAddText.trim() ? colors.primary : colors.border },
-              ]}
-              onPress={handleInlineAdd}
-              disabled={!inlineAddText.trim() || inlineAddLoading}
-            >
-              {inlineAddLoading ? (
-                <ActivityIndicator size="small" color="#FFF" />
-              ) : (
-                <Ionicons name="add" size={22} color="#FFF" />
-              )}
-            </TouchableOpacity>
-          </View>
           <SectionList
             sections={groupedItems()}
             renderItem={renderPantryItem}

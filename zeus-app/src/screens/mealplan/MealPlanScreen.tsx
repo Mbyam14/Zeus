@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
@@ -64,6 +64,7 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
   const [showCreateSheet, setShowCreateSheet] = useState(false);
   const [selectedCreateDays, setSelectedCreateDays] = useState<Set<DayOfWeek>>(new Set(ALL_DAYS));
   const [generating, setGenerating] = useState(false);
+  const [aiOptimizing, setAiOptimizing] = useState(false);
 
   const insets = useSafeAreaInsets();
   const { colors } = useThemeStore();
@@ -75,7 +76,6 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
   const dismissOnboarding = useOnboardingStore((s) => s.dismissBanner);
   const onboardingDismissed = useOnboardingStore((s) => s.dismissed);
   const regeneratingMealsRef = useRef(new Set<string>());
-  const autoShowRef = useRef(false);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -83,34 +83,34 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
     return () => { isMountedRef.current = false; };
   }, [weekOffset]);
 
-  useEffect(() => {
-    if (!loading && !mealPlan && weekOffset === 0 && !autoShowRef.current) {
-      autoShowRef.current = true;
-      // Small delay so the screen renders first
-      const timer = setTimeout(() => {
-        setSelectedCreateDays(new Set(ALL_DAYS));
-        setShowCreateSheet(true);
-      }, 500);
-      return () => clearTimeout(timer);
-    }
-  }, [loading, mealPlan, weekOffset]);
-
   useFocusEffect(
     useCallback(() => {
       const dataStore = useDataStore.getState();
-      if (mealPlan && (!dataStore.isFresh('mealPlan') || dataStore.getCachedWeekOffset() !== weekOffset)) {
+      const mondayKey = getMondayDateString(weekOffset);
+      if (!dataStore.isFresh('mealPlan') || dataStore.getCachedWeekDate() !== mondayKey) {
         loadMealPlan();
       }
       return () => setShowMenu(false);
     }, [mealPlan?.id, weekOffset])
   );
 
+  // ------- Helpers -------
+
+  const getMondayDateString = (offset: number): string => {
+    const today = new Date();
+    const dow = today.getDay();
+    const monday = new Date(today);
+    monday.setDate(today.getDate() + (dow === 0 ? -6 : 1 - dow) + offset * 7);
+    return monday.toISOString().split('T')[0];
+  };
+
   // ------- Data Loading -------
 
   const loadMealPlan = async () => {
     // Show cached data immediately if fresh and matching week
     const cached = useDataStore.getState();
-    if (cached.mealPlan && cached.isFresh('mealPlan') && cached.getCachedWeekOffset() === weekOffset) {
+    const mondayKey = getMondayDateString(weekOffset);
+    if (cached.mealPlan && cached.isFresh('mealPlan') && cached.getCachedWeekDate() === mondayKey) {
       setMealPlan(cached.mealPlan);
       setRecipes(cached.mealPlanRecipes);
       setMacroSummary(cached.macroSummary);
@@ -128,7 +128,7 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
         if (isMountedRef.current) setMealPlan(plan);
         await Promise.all([loadRecipes(plan), loadMacroSummary(plan.id)]);
         useDataStore.getState().setMealPlan(plan, recipes, macroSummary);
-        useDataStore.getState().setCachedWeekOffset(weekOffset);
+        useDataStore.getState().setCachedWeekDate(getMondayDateString(weekOffset));
 
         // Advance onboarding when meal plan exists
         const onboarding = useOnboardingStore.getState();
@@ -293,6 +293,8 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
         onPress: async () => {
           try {
             await mealPlanService.deleteMealPlan(mealPlan.id);
+            // Clear cached data so loadMealPlan doesn't restore the deleted plan
+            useDataStore.getState().setMealPlan(null, {}, null);
             if (isMountedRef.current) { setMealPlan(null); setRecipes({}); setMacroSummary(null); }
           } catch { Alert.alert('Error', 'Failed to delete meal plan.'); }
         },
@@ -308,8 +310,10 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
       await mealPlanService.generateMealPlanForWeek(weekOffset, days);
       setShowCreateSheet(false);
       await loadMealPlan();
-    } catch {
-      Alert.alert('Error', 'Failed to generate meal plan. Please try again.');
+    } catch (err: any) {
+      console.error('[Generate] error:', JSON.stringify(err?.response?.data), 'msg:', err?.message, 'code:', err?.code);
+      const detail = err?.response?.data?.detail || err?.message || 'Please try again.';
+      Alert.alert('Error', detail);
     } finally {
       setGenerating(false);
     }
@@ -319,6 +323,32 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
     const days = ALL_DAYS.filter((d) => selectedCreateDays.has(d));
     setShowCreateSheet(false);
     navigation.navigate('MealPlanEdit', { selectedDays: days, weekOffset });
+  };
+
+  const handleAIOptimize = async () => {
+    if (!mealPlan || aiOptimizing) return;
+    if ((mealPlan.ai_optimize_remaining ?? 0) <= 0) {
+      Alert.alert('Limit Reached', 'You\'ve used all AI boosts for this plan. Create a new plan to reset.');
+      return;
+    }
+    setShowMenu(false);
+    setAiOptimizing(true);
+    try {
+      const result = await mealPlanService.aiOptimizeMealPlan(mealPlan.id);
+      if (result.optimized && result.meals) {
+        setMealPlan((prev) => prev ? { ...prev, meals: result.meals!, ai_optimize_remaining: result.uses_remaining } : prev);
+        await loadRecipes({ ...mealPlan, meals: result.meals });
+        loadMacroSummary(mealPlan.id);
+        const swapText = result.swaps.map((s) => `· ${s.day} ${s.meal_type}: ${s.new_recipe}`).join('\n');
+        Alert.alert('Plan Improved!', `${result.message}\n\n${swapText}\n\n${result.uses_remaining} AI boost${result.uses_remaining !== 1 ? 's' : ''} remaining.`);
+      } else {
+        Alert.alert('No Changes', result.message);
+      }
+    } catch {
+      Alert.alert('Error', 'AI optimize failed. Please try again.');
+    } finally {
+      setAiOptimizing(false);
+    }
   };
 
   // ------- Render -------
@@ -357,13 +387,15 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
         <EmptyState
           icon="calendar-outline"
           title="No Meal Plan"
-          description={weekOffset === 0
+          description={weekOffset < 0
+            ? `No meal plan was created for ${getWeekLabel().toLowerCase()}.`
+            : weekOffset === 0
             ? 'Create a meal plan powered by AI that fits your needs.'
             : `No meal plan for ${getWeekLabel().toLowerCase()}.`}
-          actionLabel="Create Meal Plan"
-          onAction={() => { setSelectedCreateDays(new Set(ALL_DAYS)); setShowCreateSheet(true); }}
+          actionLabel={weekOffset < 0 ? undefined : "Create Meal Plan"}
+          onAction={weekOffset < 0 ? undefined : () => { setSelectedCreateDays(new Set(ALL_DAYS)); setShowCreateSheet(true); }}
         />
-        {renderCreateSheet()}
+        {weekOffset >= 0 && renderCreateSheet()}
       </View>
     );
   }
@@ -379,7 +411,7 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Meal Plan</Text>
         <TouchableOpacity style={styles.menuButton} onPress={() => setShowMenu(!showMenu)}>
-          <Text style={styles.menuButtonText}>⋯</Text>
+          <Ionicons name="ellipsis-horizontal" size={20} color={colors.text} />
         </TouchableOpacity>
       </View>
 
@@ -391,6 +423,20 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
             <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); setSelectedCreateDays(new Set(ALL_DAYS)); setShowCreateSheet(true); }}>
               <Ionicons name="calendar-outline" size={18} color={colors.primary} />
               <Text style={[styles.menuItemText, { color: colors.text }]}>Create New Plan</Text>
+            </TouchableOpacity>
+            <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
+            <TouchableOpacity style={[styles.menuItem, aiOptimizing && { opacity: 0.5 }]} onPress={handleAIOptimize} disabled={aiOptimizing}>
+              <Ionicons name="sparkles-outline" size={18} color={colors.primary} />
+              <Text style={[styles.menuItemText, { color: colors.text }]}>
+                {aiOptimizing ? 'Optimizing…' : '✨ AI Optimize'}
+              </Text>
+              {!aiOptimizing && (
+                <View style={[styles.aiUsageBadge, { backgroundColor: colors.primary + '20' }]}>
+                  <Text style={[styles.aiUsageText, { color: colors.primary }]}>
+                    {mealPlan?.ai_optimize_remaining ?? 3} left
+                  </Text>
+                </View>
+              )}
             </TouchableOpacity>
             <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
             <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); navigation.navigate('MealPlanEdit', { mealPlan, recipes }); }}>
@@ -509,6 +555,31 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
           </View>
         )}
 
+        {/* AI Optimize pill — visible above meals when boosts remain */}
+        {(mealPlan.ai_optimize_remaining ?? 3) > 0 && (
+          <TouchableOpacity
+            style={[styles.aiOptimizePill, { borderColor: colors.primary + '40', backgroundColor: colors.primary + '10' }]}
+            onPress={handleAIOptimize}
+            disabled={aiOptimizing}
+            activeOpacity={0.75}
+          >
+            {aiOptimizing ? (
+              <>
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Text style={[styles.aiOptimizePillText, { color: colors.primary }]}>Optimizing your plan…</Text>
+              </>
+            ) : (
+              <>
+                <Ionicons name="sparkles" size={15} color={colors.primary} />
+                <Text style={[styles.aiOptimizePillText, { color: colors.primary }]}>AI Optimize</Text>
+                <View style={[styles.aiOptimizePillBadge, { backgroundColor: colors.primary }]}>
+                  <Text style={styles.aiOptimizePillBadgeText}>{mealPlan.ai_optimize_remaining ?? 3} left</Text>
+                </View>
+              </>
+            )}
+          </TouchableOpacity>
+        )}
+
         {/* Meal Cards */}
         <View style={styles.mealsContainer}>
           {mealTypes.map((mt) => {
@@ -526,7 +597,7 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
                 style={styles.mealCard}
                 onPress={() => {
                   if (recipe) setShowMealOptions(mt.key);
-                  else handleRegenerateMeal(mt.key);
+                  else navigation.navigate('MealPlanEdit', { mealPlan, recipes });
                 }}
                 activeOpacity={0.7}
                 disabled={isRegenerating}
@@ -538,16 +609,26 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
                   {isRepeat && (
                     <View style={[styles.repeatBadge, { backgroundColor: colors.primary + '15' }]}>
                       <Text style={[styles.repeatBadgeText, { color: colors.primary }]}>
-                        {originalDay ? 'Leftover' : 'Repeat'}
+                        {originalDay ? `Leftovers \u00B7 ${originalDay.charAt(0).toUpperCase() + originalDay.slice(1)}` : 'Same Recipe'}
                       </Text>
                     </View>
+                  )}
+                  {/* Quick-swap: one-tap swap, bypasses options sheet */}
+                  {recipe && !isRepeat && !isRegenerating && (
+                    <TouchableOpacity
+                      style={[styles.swapBtn, { backgroundColor: colors.backgroundSecondary }]}
+                      onPress={(e) => { e.stopPropagation(); handleRegenerateMeal(mt.key); }}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Ionicons name='refresh-outline' size={14} color={colors.textMuted} />
+                    </TouchableOpacity>
                   )}
                 </View>
 
                 {isRegenerating ? (
                   <View style={styles.mealLoadingRow}>
                     <ActivityIndicator size="small" color={colors.primary} />
-                    <Text style={styles.mealLoadingText}>Finding a new recipe...</Text>
+                    <Text style={styles.mealLoadingText}>Finding a new recipe…</Text>
                   </View>
                 ) : recipe ? (
                   <View style={styles.mealContent}>
@@ -576,10 +657,14 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
                     </View>
                   </View>
                 ) : (
-                  <View style={styles.emptySlot}>
-                    <Text style={styles.emptySlotPlus}>+</Text>
-                    <Text style={styles.emptySlotText}>Add meal</Text>
-                  </View>
+                  <TouchableOpacity
+                    style={[styles.emptySlot, { borderColor: colors.border }]}
+                    onPress={() => navigation.navigate('MealPlanEdit', { mealPlan, recipes })}
+                    activeOpacity={0.6}
+                  >
+                    <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
+                    <Text style={[styles.emptySlotText, { color: colors.textSecondary }]}>Add a recipe</Text>
+                  </TouchableOpacity>
                 )}
               </TouchableOpacity>
             );
@@ -600,9 +685,10 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
 
       {/* Meal Options Sheet */}
       {showMealOptions && (
-        <Modal transparent animationType="fade" onRequestClose={() => setShowMealOptions(null)}>
+        <Modal transparent animationType="slide" onRequestClose={() => setShowMealOptions(null)}>
           <TouchableOpacity style={styles.sheetBackdrop} onPress={() => setShowMealOptions(null)} activeOpacity={1}>
             <View style={[styles.optionsSheet, { backgroundColor: colors.card }]}>
+              <View style={[styles.sheetHandle, { alignSelf: 'center', marginBottom: 8 }]} />
               <TouchableOpacity
                 style={styles.optionItem}
                 onPress={() => {
@@ -627,6 +713,17 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
               >
                 <Ionicons name="refresh-outline" size={20} color={colors.text} />
                 <Text style={[styles.optionText, { color: colors.text }]}>Swap Meal</Text>
+              </TouchableOpacity>
+              <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
+              <TouchableOpacity
+                style={styles.optionItem}
+                onPress={() => {
+                  setShowMealOptions(null);
+                  navigation.navigate('MealPlanEdit', { mealPlan, recipes });
+                }}
+              >
+                <Ionicons name="search-outline" size={20} color={colors.text} />
+                <Text style={[styles.optionText, { color: colors.text }]}>Browse & Pick</Text>
               </TouchableOpacity>
               <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
               <TouchableOpacity
@@ -711,9 +808,15 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
               disabled={generating}
             >
               {generating ? (
-                <ActivityIndicator size="small" color="#FFF" />
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <ActivityIndicator size="small" color="#FFF" />
+                  <Text style={styles.createButtonText}>Building your plan…</Text>
+                </View>
               ) : (
-                <Text style={styles.createButtonText}>Generate with AI</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Ionicons name="sparkles" size={17} color="#FFF" />
+                  <Text style={styles.createButtonText}>Generate Plan</Text>
+                </View>
               )}
             </TouchableOpacity>
 
@@ -722,6 +825,7 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
               onPress={handleBuildManually}
               disabled={generating}
             >
+              <Ionicons name="create-outline" size={16} color={colors.textSecondary} />
               <Text style={[styles.createButtonSecondaryText, { color: colors.text }]}>Build Manually</Text>
             </TouchableOpacity>
           </View>
@@ -841,8 +945,10 @@ const createStyles = (colors: ThemeColors) =>
     },
     menuItem: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, gap: 12 },
     menuItemIcon: { fontSize: 18 },
-    menuItemText: { fontSize: 15 },
+    menuItemText: { fontSize: 15, flex: 1 },
     menuDivider: { height: StyleSheet.hairlineWidth },
+    aiUsageBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
+    aiUsageText: { fontSize: 12, fontWeight: '600' },
 
     // Day strip
     dayStrip: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 10, justifyContent: 'space-between' },
@@ -860,8 +966,18 @@ const createStyles = (colors: ThemeColors) =>
     nutritionBar: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 4 },
     macroRow: { flexDirection: 'row', gap: 12, marginTop: 4 },
 
+    // AI Optimize pill
+    aiOptimizePill: {
+      flexDirection: 'row', alignItems: 'center', alignSelf: 'center',
+      marginHorizontal: 16, marginBottom: 10, paddingHorizontal: 14, paddingVertical: 8,
+      borderRadius: 20, borderWidth: 1, gap: 6,
+    },
+    aiOptimizePillText: { fontSize: 14, fontWeight: '600' },
+    aiOptimizePillBadge: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 10 },
+    aiOptimizePillBadgeText: { fontSize: 11, fontWeight: '700', color: '#FFF' },
+
     // Meals
-    mealsContainer: { paddingHorizontal: 16, paddingTop: 8 },
+    mealsContainer: { paddingHorizontal: 16, paddingTop: 0 },
     mealCard: {
       backgroundColor: colors.card, borderRadius: 16, padding: 14, marginBottom: 10,
       borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border,
@@ -871,6 +987,7 @@ const createStyles = (colors: ThemeColors) =>
     mealTime: { fontSize: 12, color: colors.textMuted },
     repeatBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
     repeatBadgeText: { fontSize: 11, fontWeight: '600' },
+    swapBtn: { marginLeft: 'auto', width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
     mealContent: { flexDirection: 'row', gap: 12, alignItems: 'center' },
     mealImage: { width: 64, height: 64, borderRadius: 12 },
     mealImagePlaceholder: { width: 64, height: 64, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
@@ -880,9 +997,11 @@ const createStyles = (colors: ThemeColors) =>
     mealMeta: { fontSize: 13, color: colors.textMuted },
     mealLoadingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
     mealLoadingText: { fontSize: 14, color: colors.textMuted },
-    emptySlot: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
-    emptySlotPlus: { fontSize: 22, fontWeight: '300', color: colors.primary },
-    emptySlotText: { fontSize: 14, color: colors.textMuted },
+    emptySlot: {
+      flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12,
+      paddingHorizontal: 14, borderRadius: 10, borderWidth: 1, borderStyle: 'dashed',
+    },
+    emptySlotText: { fontSize: 14, fontWeight: '500' },
 
     // Grocery CTA
     groceryCta: {
@@ -924,7 +1043,7 @@ const createStyles = (colors: ThemeColors) =>
     presetText: { fontSize: 13 },
     createButton: { borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginBottom: 10 },
     createButtonText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
-    createButtonSecondary: { borderWidth: 1, borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
+    createButtonSecondary: { borderWidth: 1, borderRadius: 14, paddingVertical: 16, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 },
     createButtonSecondaryText: { fontSize: 16, fontWeight: '600' },
 
     // Onboarding

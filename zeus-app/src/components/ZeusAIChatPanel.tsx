@@ -66,6 +66,8 @@ export const ZeusAIChatPanel: React.FC = () => {
 
     setInputText('');
     setError(null);
+    // Force clear the native input on multiline
+    inputRef.current?.clear();
 
     try {
       await sendMessage(text);
@@ -76,7 +78,8 @@ export const ZeusAIChatPanel: React.FC = () => {
   }, [inputText, isSending, sendMessage]);
 
   const handleQuickPrompt = (prompt: string) => {
-    setInputText(prompt);
+    setInputText('');
+    inputRef.current?.clear();
     // Auto-send quick prompts
     useChatStore.getState().sendMessage(prompt).then(() => {
       trackEvent('zeus_chat_message_sent', { quick_prompt: true });
@@ -277,13 +280,16 @@ export const ZeusAIChatPanel: React.FC = () => {
             styles.panel,
             {
               backgroundColor: colors.background,
-              maxHeight: SCREEN_HEIGHT * 0.85,
+              height: SCREEN_HEIGHT * 0.6,
               paddingBottom: Math.max(insets.bottom, 12),
             },
           ]}
         >
+          {/* Drag handle */}
+          <View style={[styles.panelHandle, { backgroundColor: colors.border }]} />
+
           {/* Header */}
-          <View style={[styles.header, { borderBottomColor: colors.border }]}>
+          <View style={[styles.header, { borderBottomColor: colors.border, backgroundColor: colors.backgroundSecondary }]}>
             <View style={styles.headerLeft}>
               <Ionicons name="flash" size={20} color={colors.primary} />
               <Text style={[styles.headerTitle, { color: colors.text }]}> Zeus AI</Text>
@@ -441,8 +447,15 @@ const styles = StyleSheet.create({
   panel: {
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    minHeight: 300,
     overflow: 'hidden',
+  },
+  panelHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginTop: 8,
+    marginBottom: 4,
   },
   header: {
     flexDirection: 'row',
@@ -450,7 +463,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingVertical: 16,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: 1,
   },
   headerLeft: {
     flexDirection: 'row',

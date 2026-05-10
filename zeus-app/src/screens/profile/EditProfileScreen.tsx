@@ -218,6 +218,8 @@ export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({ navigation
                   placeholder="Username"
                   placeholderTextColor={colors.textMuted}
                   autoCapitalize="none"
+                  autoComplete="off"
+                  textContentType="none"
                 />
               </View>
               <View style={[styles.field, styles.fieldLast]}>
@@ -230,6 +232,8 @@ export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({ navigation
                   placeholderTextColor={colors.textMuted}
                   keyboardType="email-address"
                   autoCapitalize="none"
+                  autoComplete="off"
+                  textContentType="none"
                 />
               </View>
             </View>
@@ -263,6 +267,8 @@ export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({ navigation
                     placeholder="Current password"
                     placeholderTextColor={colors.textMuted}
                     secureTextEntry
+                    autoComplete="off"
+                    textContentType="none"
                   />
                   <TextInput
                     style={styles.passwordInput}
@@ -271,6 +277,8 @@ export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({ navigation
                     placeholder="New password (min 8 characters)"
                     placeholderTextColor={colors.textMuted}
                     secureTextEntry
+                    autoComplete="off"
+                    textContentType="none"
                   />
                   <TextInput
                     style={[styles.passwordInput, { marginBottom: 0 }]}
@@ -279,6 +287,8 @@ export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({ navigation
                     placeholder="Confirm new password"
                     placeholderTextColor={colors.textMuted}
                     secureTextEntry
+                    autoComplete="off"
+                    textContentType="none"
                   />
                   <TouchableOpacity
                     style={styles.actionButton}
@@ -327,6 +337,8 @@ export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({ navigation
                     placeholder="Enter your password to confirm"
                     placeholderTextColor={colors.textMuted}
                     secureTextEntry
+                    autoComplete="off"
+                    textContentType="none"
                   />
                   <TouchableOpacity
                     style={[styles.actionButton, { backgroundColor: colors.error }]}

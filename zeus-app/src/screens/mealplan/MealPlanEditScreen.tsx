@@ -13,9 +13,11 @@ import {
   Modal,
   Dimensions,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useThemeStore, ThemeColors } from '../../store/themeStore';
 import { useAuthStore } from '../../store/authStore';
+import { useDataStore } from '../../store/dataStore';
 import { mealPlanService } from '../../services/mealPlanService';
 import { recipeService } from '../../services/recipeService';
 import {
@@ -125,14 +127,16 @@ export const MealPlanEditScreen: React.FC<MealPlanBuilderProps> = ({ navigation,
   const loadRecipes = useCallback(async (query?: string, mealType?: string | null) => {
     setLoadingRecipes(true);
     try {
-      const dietaryRestrictions = user?.profile_data?.preferences?.dietary_restrictions || [];
+      const rawRestrictions = user?.profile_data?.preferences?.dietary_restrictions;
+      const dietaryRestrictions = Array.isArray(rawRestrictions) ? rawRestrictions : [];
       const recipes = await recipeService.getAllRecipes(
         50, 0, query || undefined, mealType || undefined,
         dietaryRestrictions.length > 0 ? dietaryRestrictions : undefined,
       );
       setAllRecipes(recipes);
-    } catch { /* silent */ }
-    finally { setLoadingRecipes(false); }
+    } catch (err) {
+      console.error('[MealPlanEdit] loadRecipes error:', err);
+    } finally { setLoadingRecipes(false); }
   }, [user]);
 
   useEffect(() => { loadRecipes(); }, []);
@@ -156,13 +160,9 @@ export const MealPlanEditScreen: React.FC<MealPlanBuilderProps> = ({ navigation,
   const openPicker = (mealKey: string) => {
     setPickerMealKey(mealKey);
     setSearchQuery('');
-    // Auto-set filter based on the meal slot type
-    const mealLabel = mealTypes.find((mt) => mt.key === mealKey)?.label || null;
-    const matchingFilter = RECIPE_FILTERS.find((f) => f.key && f.key.toLowerCase() === mealLabel?.toLowerCase());
-    const autoFilter = matchingFilter?.key || null;
-    setActiveFilter(autoFilter);
+    setActiveFilter(null);
     setPickerOpen(true);
-    loadRecipes('', autoFilter);
+    loadRecipes('', null);
   };
 
   const assignRecipe = (recipe: Recipe) => {
@@ -232,7 +232,10 @@ export const MealPlanEditScreen: React.FC<MealPlanBuilderProps> = ({ navigation,
         await mealPlanService.createManualMealPlan(getStartDate(), selectedDays, mealsForApi);
       }
       Alert.alert('Success', isEditMode ? 'Meal plan updated!' : 'Meal plan created!', [
-        { text: 'OK', onPress: () => navigation.navigate('MealPlanMain') },
+        { text: 'OK', onPress: () => {
+          useDataStore.getState().setMealPlan(null, {}, null);
+          navigation.navigate('MealPlanMain');
+        }},
       ]);
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to save meal plan.');
@@ -260,7 +263,10 @@ export const MealPlanEditScreen: React.FC<MealPlanBuilderProps> = ({ navigation,
               await mealPlanService.fillRemainingWithAI(created.id);
             }
             Alert.alert('Success', 'Empty slots filled!', [
-              { text: 'OK', onPress: () => navigation.navigate('MealPlanMain') },
+              { text: 'OK', onPress: () => {
+                useDataStore.getState().setMealPlan(null, {}, null);
+                navigation.navigate('MealPlanMain');
+              }},
             ]);
           } catch { Alert.alert('Error', 'Failed to fill with AI.'); }
           finally { setFillingWithAI(false); }
@@ -386,7 +392,7 @@ export const MealPlanEditScreen: React.FC<MealPlanBuilderProps> = ({ navigation,
                       <Image source={{ uri: recipe.image_url }} style={styles.slotImage} />
                     ) : (
                       <View style={[styles.slotImagePlaceholder, { backgroundColor: colors.backgroundSecondary }]}>
-                        <Text style={{ fontSize: 20 }}>🍽️</Text>
+                        <Ionicons name="restaurant-outline" size={24} color={colors.textMuted} />
                       </View>
                     )}
                     <View style={styles.slotRecipeInfo}>
@@ -475,7 +481,7 @@ export const MealPlanEditScreen: React.FC<MealPlanBuilderProps> = ({ navigation,
                     <Image source={{ uri: item.image_url }} style={styles.pickerRecipeImage} />
                   ) : (
                     <View style={[styles.pickerRecipeImagePlaceholder, { backgroundColor: colors.backgroundSecondary }]}>
-                      <Text style={{ fontSize: 22 }}>🍽️</Text>
+                      <Ionicons name="restaurant-outline" size={24} color={colors.textMuted} />
                     </View>
                   )}
                   <View style={styles.pickerRecipeInfo}>

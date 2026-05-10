@@ -22,7 +22,7 @@ import {
   SectionList,
   Platform,
 } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { groceryListService } from '../../services/groceryListService';
@@ -46,6 +46,7 @@ import { EmptyState } from '../../components/EmptyState';
 export const GroceryListScreen: React.FC = () => {
   const { colors } = useThemeStore();
   const styles = createStyles(colors);
+  const navigation = useNavigation<any>();
 
   const [groceryList, setGroceryList] = useState<GroceryList | null>(null);
   const [mealPlanId, setMealPlanId] = useState<string | null>(null);
@@ -216,7 +217,8 @@ export const GroceryListScreen: React.FC = () => {
               await pantryService.bulkAddPantryItems(pantryItems);
               Alert.alert(
                 'Pantry Updated!',
-                `${pantryItems.length} item${pantryItems.length !== 1 ? 's' : ''} moved to your pantry.`
+                `${pantryItems.length} item${pantryItems.length !== 1 ? 's' : ''} moved to your pantry.`,
+                [{ text: 'View Pantry', onPress: () => navigation.getParent()?.navigate('Pantry') }]
               );
             } catch {
               Alert.alert('Error', 'Failed to move items to pantry. Please try again.');

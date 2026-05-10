@@ -375,6 +375,8 @@ export const CreateScreen: React.FC<CreateScreenProps> = ({ navigation }) => {
                   placeholder="4"
                   placeholderTextColor="#95A5A6"
                   keyboardType="numeric"
+                  autoComplete="off"
+                  textContentType="none"
                 />
               </View>
 
@@ -388,6 +390,8 @@ export const CreateScreen: React.FC<CreateScreenProps> = ({ navigation }) => {
                   placeholder="15"
                   placeholderTextColor="#95A5A6"
                   keyboardType="numeric"
+                  autoComplete="off"
+                  textContentType="none"
                 />
                 <Text style={styles.factUnit}>min</Text>
               </View>
@@ -402,6 +406,8 @@ export const CreateScreen: React.FC<CreateScreenProps> = ({ navigation }) => {
                   placeholder="30"
                   placeholderTextColor="#95A5A6"
                   keyboardType="numeric"
+                  autoComplete="off"
+                  textContentType="none"
                 />
                 <Text style={styles.factUnit}>min</Text>
               </View>

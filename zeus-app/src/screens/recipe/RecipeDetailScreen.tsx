@@ -60,20 +60,47 @@ export const RecipeDetailScreen: React.FC<RecipeDetailScreenProps> = ({
     'strip', 'strips', 'link', 'links',
   ]);
 
+  const toFraction = (decimal: number): string => {
+    if (decimal === Math.floor(decimal)) return String(decimal);
+
+    const whole = Math.floor(decimal);
+    const remainder = decimal - whole;
+
+    // Common cooking fractions
+    const fractions: [number, string][] = [
+      [0.125, '1/8'], [0.25, '1/4'], [0.333, '1/3'], [0.375, '3/8'],
+      [0.5, '1/2'], [0.625, '5/8'], [0.667, '2/3'], [0.75, '3/4'],
+      [0.875, '7/8'],
+    ];
+
+    // Find closest fraction
+    let closest = fractions[0];
+    let minDiff = Math.abs(remainder - fractions[0][0]);
+    for (const [val, str] of fractions) {
+      const diff = Math.abs(remainder - val);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closest = [val, str];
+      }
+    }
+
+    // If very close to a whole number, round
+    if (minDiff > 0.1) return decimal.toFixed(1);
+
+    if (whole === 0) return closest[1];
+    return `${whole} ${closest[1]}`;
+  };
+
   const scaleQuantity = (quantity: string, unit?: string): string => {
     if (!quantity || servingScale === 1) return quantity;
-    // Try to parse as a number
     const num = parseFloat(quantity);
-    if (isNaN(num)) return quantity; // Non-numeric (e.g., "to taste")
+    if (isNaN(num)) return quantity;
     const scaled = num * servingScale;
-    // Round up count-based units (you can't use 0.3 of an egg)
     const unitLower = (unit || '').toLowerCase().trim();
     if (countUnits.has(unitLower)) {
       return String(Math.ceil(scaled));
     }
-    // Format nicely: no unnecessary decimals
-    if (scaled === Math.floor(scaled)) return String(scaled);
-    return scaled.toFixed(1).replace(/\.0$/, '');
+    return toFraction(scaled);
   };
 
   const scaledIngredients = useMemo(() => {
@@ -350,7 +377,7 @@ Shared from Zeus - Your AI Meal Planner`;
           {
             text: 'Copy to Clipboard',
             onPress: () => {
-              Clipboard.setString(shareMessage);
+              Clipboard.setString(shareMessage + (recipe.image_url ? `\n\n${recipe.image_url}` : ''));
               Alert.alert('Copied!', 'Recipe copied to clipboard.');
             },
           },
@@ -361,6 +388,7 @@ Shared from Zeus - Your AI Meal Planner`;
                 await Share.share({
                   message: shareMessage,
                   title: recipe.title,
+                  url: recipe.image_url || undefined,
                 });
               } catch (error: any) {
                 Alert.alert('Share Failed', error.message || 'Could not share recipe.');
@@ -388,7 +416,7 @@ Shared from Zeus - Your AI Meal Planner`;
             style={styles.backButton}
             onPress={() => navigation.goBack()}
           >
-            <Ionicons name="arrow-back" size={24} color={colors.text} />
+            <Ionicons name="arrow-back" size={24} color="#FFF" />
           </TouchableOpacity>
           <View style={styles.headerActions}>
             <TouchableOpacity
@@ -485,7 +513,7 @@ Shared from Zeus - Your AI Meal Planner`;
           </View>
 
           {/* Nutrition/Macros */}
-          {(recipe.calories || recipe.protein_grams || recipe.carbs_grams || recipe.fat_grams) && (
+          {(recipe.calories > 0 || recipe.protein_grams > 0 || recipe.carbs_grams > 0 || recipe.fat_grams > 0) && (
             <View style={styles.macrosSection}>
               <Text style={styles.macrosTitle}>
                 {servingScale === 1 ? 'Nutrition per Serving' : `Nutrition (${adjustedServings} servings)`}
@@ -494,28 +522,28 @@ Shared from Zeus - Your AI Meal Planner`;
                 <Text style={styles.servingSize}>Serving: {recipe.serving_size}</Text>
               )}
               <View style={styles.macrosRow}>
-                {recipe.calories && (
+                {recipe.calories > 0 && (
                   <View style={styles.macroCard}>
                     <Ionicons name="flame-outline" size={18} color={colors.primary} style={styles.macroIconSpacing} />
                     <Text style={styles.macroValue}>{scaleNutrition(recipe.calories)}</Text>
                     <Text style={styles.macroLabel}>Calories</Text>
                   </View>
                 )}
-                {recipe.protein_grams && (
+                {recipe.protein_grams > 0 && (
                   <View style={styles.macroCard}>
                     <Ionicons name="barbell-outline" size={18} color="#4ECDC4" style={styles.macroIconSpacing} />
                     <Text style={styles.macroValue}>{scaleNutrition(recipe.protein_grams)}g</Text>
                     <Text style={styles.macroLabel}>Protein</Text>
                   </View>
                 )}
-                {recipe.carbs_grams && (
+                {recipe.carbs_grams > 0 && (
                   <View style={styles.macroCard}>
                     <Ionicons name="nutrition-outline" size={18} color="#F59E0B" style={styles.macroIconSpacing} />
                     <Text style={styles.macroValue}>{scaleNutrition(recipe.carbs_grams)}g</Text>
                     <Text style={styles.macroLabel}>Carbs</Text>
                   </View>
                 )}
-                {recipe.fat_grams && (
+                {recipe.fat_grams > 0 && (
                   <View style={styles.macroCard}>
                     <Ionicons name="water-outline" size={18} color="#EF4444" style={styles.macroIconSpacing} />
                     <Text style={styles.macroValue}>{scaleNutrition(recipe.fat_grams)}g</Text>
@@ -823,61 +851,61 @@ Shared from Zeus - Your AI Meal Planner`;
                   {scaledInstructions?.[currentStep]?.instruction || ''}
                 </Text>
               </ScrollView>
+
+              {/* Step Timer */}
+              {(() => {
+                const stepText = scaledInstructions?.[currentStep]?.instruction || '';
+                const detectedTime = extractTime(stepText);
+                if (!detectedTime && timerSeconds === null) return null;
+
+                return (
+                  <View style={styles.timerContainer}>
+                    {timerSeconds !== null ? (
+                      <>
+                        <Text style={[styles.timerDisplay, timerSeconds === 0 && { color: colors.success }]}>
+                          {formatTimer(timerSeconds)}
+                        </Text>
+                        <View style={styles.timerButtons}>
+                          <TouchableOpacity
+                            style={[styles.timerButton, { backgroundColor: timerRunning ? colors.error + '15' : colors.primary + '15' }]}
+                            onPress={() => {
+                              if (timerRunning) {
+                                setTimerRunning(false);
+                                if (timerRef.current) clearInterval(timerRef.current);
+                              } else if (timerSeconds > 0) {
+                                setTimerRunning(true);
+                              }
+                            }}
+                          >
+                            <Ionicons name={timerRunning ? 'pause' : 'play'} size={18} color={timerRunning ? colors.error : colors.primary} />
+                            <Text style={[styles.timerButtonText, { color: timerRunning ? colors.error : colors.primary }]}>
+                              {timerRunning ? 'Pause' : 'Resume'}
+                            </Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[styles.timerButton, { backgroundColor: colors.backgroundSecondary }]}
+                            onPress={() => { setTimerRunning(false); setTimerSeconds(null); if (timerRef.current) clearInterval(timerRef.current); }}
+                          >
+                            <Ionicons name="close" size={18} color={colors.textMuted} />
+                            <Text style={[styles.timerButtonText, { color: colors.textMuted }]}>Cancel</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </>
+                    ) : detectedTime ? (
+                      <TouchableOpacity
+                        style={styles.startTimerButton}
+                        onPress={() => { setTimerSeconds(detectedTime); setTimerRunning(true); }}
+                      >
+                        <Ionicons name="timer-outline" size={20} color={colors.primary} />
+                        <Text style={styles.startTimerText}>
+                          Start {detectedTime >= 3600 ? `${Math.floor(detectedTime / 3600)}h ` : ''}{detectedTime >= 60 ? `${Math.floor((detectedTime % 3600) / 60)}m` : `${detectedTime}s`} Timer
+                        </Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                );
+              })()}
             </View>
-
-            {/* Step Timer */}
-            {(() => {
-              const stepText = scaledInstructions?.[currentStep]?.instruction || '';
-              const detectedTime = extractTime(stepText);
-              if (!detectedTime && timerSeconds === null) return null;
-
-              return (
-                <View style={styles.timerContainer}>
-                  {timerSeconds !== null ? (
-                    <>
-                      <Text style={[styles.timerDisplay, timerSeconds === 0 && { color: colors.success }]}>
-                        {formatTimer(timerSeconds)}
-                      </Text>
-                      <View style={styles.timerButtons}>
-                        <TouchableOpacity
-                          style={[styles.timerButton, { backgroundColor: timerRunning ? colors.error + '15' : colors.primary + '15' }]}
-                          onPress={() => {
-                            if (timerRunning) {
-                              setTimerRunning(false);
-                              if (timerRef.current) clearInterval(timerRef.current);
-                            } else if (timerSeconds > 0) {
-                              setTimerRunning(true);
-                            }
-                          }}
-                        >
-                          <Ionicons name={timerRunning ? 'pause' : 'play'} size={18} color={timerRunning ? colors.error : colors.primary} />
-                          <Text style={[styles.timerButtonText, { color: timerRunning ? colors.error : colors.primary }]}>
-                            {timerRunning ? 'Pause' : 'Resume'}
-                          </Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={[styles.timerButton, { backgroundColor: colors.backgroundSecondary }]}
-                          onPress={() => { setTimerRunning(false); setTimerSeconds(null); if (timerRef.current) clearInterval(timerRef.current); }}
-                        >
-                          <Ionicons name="close" size={18} color={colors.textMuted} />
-                          <Text style={[styles.timerButtonText, { color: colors.textMuted }]}>Cancel</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </>
-                  ) : detectedTime ? (
-                    <TouchableOpacity
-                      style={styles.startTimerButton}
-                      onPress={() => { setTimerSeconds(detectedTime); setTimerRunning(true); }}
-                    >
-                      <Ionicons name="timer-outline" size={20} color={colors.primary} />
-                      <Text style={styles.startTimerText}>
-                        Start {detectedTime >= 3600 ? `${Math.floor(detectedTime / 3600)}h ` : ''}{detectedTime >= 60 ? `${Math.floor((detectedTime % 3600) / 60)}m` : `${detectedTime}s`} Timer
-                      </Text>
-                    </TouchableOpacity>
-                  ) : null}
-                </View>
-              );
-            })()}
 
             {/* Ask AI button + Swipe Hint */}
             <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 16, marginTop: 8 }}>
@@ -1069,7 +1097,7 @@ const createStyles = (colors: any) =>
       width: 40,
       height: 40,
       borderRadius: 20,
-      backgroundColor: 'rgba(255,255,255,0.9)',
+      backgroundColor: 'rgba(0,0,0,0.45)',
       justifyContent: 'center',
       alignItems: 'center',
     },
@@ -1085,7 +1113,7 @@ const createStyles = (colors: any) =>
       width: 40,
       height: 40,
       borderRadius: 20,
-      backgroundColor: 'rgba(255,255,255,0.9)',
+      backgroundColor: 'rgba(0,0,0,0.45)',
       justifyContent: 'center',
       alignItems: 'center',
     },
@@ -1590,7 +1618,7 @@ const createStyles = (colors: any) =>
       color: colors.buttonText,
     },
     cookingInstructionScroll: {
-      flex: 1,
+      maxHeight: '55%',
       width: '100%',
     },
     cookingInstructionScrollContent: {
@@ -1736,7 +1764,7 @@ const createStyles = (colors: any) =>
       lineHeight: 24,
     },
     // Timer styles
-    timerContainer: { alignItems: 'center' as const, marginVertical: 12 },
+    timerContainer: { alignItems: 'center' as const, marginTop: 12 },
     timerDisplay: { fontSize: 48, fontWeight: '700' as const, color: colors.primary, fontVariant: ['tabular-nums' as const] },
     timerButtons: { flexDirection: 'row' as const, gap: 12, marginTop: 8 },
     timerButton: { flexDirection: 'row' as const, alignItems: 'center' as const, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, gap: 6 },

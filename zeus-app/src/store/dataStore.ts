@@ -21,8 +21,8 @@ interface DataState {
   groceryListFetchedAt: number | null;
   recipeFeedFetchedAt: number | null;
 
-  // Week offset for meal plan cache invalidation
-  cachedWeekOffset: number | null;
+  // Date-based meal plan cache key (ISO YYYY-MM-DD Monday of the cached week)
+  cachedWeekDate: string | null;
 
   // Network state
   isOffline: boolean;
@@ -38,8 +38,8 @@ interface DataState {
   setRecipeFeed: (recipes: FeedRecipe[]) => void;
   isFresh: (key: 'mealPlan' | 'pantry' | 'groceryList' | 'recipeFeed', maxAgeMs?: number) => boolean;
   invalidate: (key: 'mealPlan' | 'pantry' | 'groceryList' | 'recipeFeed' | 'all') => void;
-  getCachedWeekOffset: () => number | null;
-  setCachedWeekOffset: (offset: number) => void;
+  getCachedWeekDate: () => string | null;
+  setCachedWeekDate: (date: string) => void;
   setOffline: (offline: boolean) => void;
   markSynced: () => void;
 }
@@ -66,7 +66,7 @@ export const useDataStore = create<DataState>()(
       pantryFetchedAt: null,
       groceryListFetchedAt: null,
       recipeFeedFetchedAt: null,
-      cachedWeekOffset: null,
+      cachedWeekDate: null,
       isOffline: false,
       lastSyncedAt: null,
       _hasHydrated: false,
@@ -151,8 +151,8 @@ export const useDataStore = create<DataState>()(
         }
       },
 
-      getCachedWeekOffset: () => get().cachedWeekOffset,
-      setCachedWeekOffset: (offset) => set({ cachedWeekOffset: offset }),
+      getCachedWeekDate: () => get().cachedWeekDate,
+      setCachedWeekDate: (date) => set({ cachedWeekDate: date }),
       setOffline: (offline) => set({ isOffline: offline }),
       markSynced: () => set({ lastSyncedAt: Date.now() }),
     }),
@@ -171,7 +171,7 @@ export const useDataStore = create<DataState>()(
         groceryListFetchedAt: state.groceryListFetchedAt,
         recipeFeed: state.recipeFeed,
         recipeFeedFetchedAt: state.recipeFeedFetchedAt,
-        cachedWeekOffset: state.cachedWeekOffset,
+        cachedWeekDate: state.cachedWeekDate,
         lastSyncedAt: state.lastSyncedAt,
       }),
       onRehydrateStorage: () => {

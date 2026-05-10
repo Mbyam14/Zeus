@@ -79,7 +79,7 @@ const MealPlanStackNavigator = () => {
     <MealPlanStack.Navigator screenOptions={{ headerShown: false }}>
       <MealPlanStack.Screen name="MealPlanMain" component={MealPlanScreen} />
       <MealPlanStack.Screen name="RecipeDetail" component={RecipeDetailScreen} />
-      <MealPlanStack.Screen name="MealPlanEdit" component={MealPlanEditScreen} />
+      <MealPlanStack.Screen name="MealPlanEdit" component={MealPlanEditScreen as any} />
     </MealPlanStack.Navigator>
   );
 };
@@ -91,7 +91,7 @@ export const MainTabNavigator: React.FC = () => {
   return (
     <View style={{ flex: 1 }}>
       <Tab.Navigator
-        initialRouteName="MealPlan"
+        initialRouteName="Recipes"
         screenOptions={{
           headerShown: false,
           tabBarStyle: {

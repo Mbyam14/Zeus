@@ -750,6 +750,113 @@ Respond with ONLY a JSON object mapping meal type to list of 1-based indices:
 
         return result
 
+    # =========================================================
+    # TIER 2: Haiku-powered plan optimization
+    # =========================================================
+
+    async def ai_optimize_meal_plan(
+        self,
+        plan_summary: Dict[str, Dict[str, Any]],
+        preferences: dict,
+        swap_candidates: Dict[str, List[Dict[str, Any]]],
+    ) -> List[Dict[str, Any]]:
+        """
+        Use Claude Haiku to review an existing meal plan and suggest 2-3 targeted swaps.
+
+        Returns a list of swap dicts: [{day, meal_type, new_recipe_id, reason}, ...]
+        Returns [] if no improvements are warranted or if Claude is unavailable.
+        """
+        if not self.client:
+            logger.warning("Claude not configured, skipping AI optimize")
+            return []
+
+        calorie_target = preferences.get("calorie_target") or 2000
+        protein_target = preferences.get("protein_target_grams") or 150
+
+        # Build compact plan summary text
+        plan_lines = []
+        for day, meals in plan_summary.items():
+            for meal_type, info in meals.items():
+                plan_lines.append(
+                    f"  {day}/{meal_type}: {info['title']} "
+                    f"({info.get('calories', '?')} cal, {info.get('protein_grams', '?')}g protein, "
+                    f"{info.get('cuisine_type', '?')})"
+                )
+
+        # Build swap candidate text (max 5 per meal type)
+        candidate_lines = []
+        for meal_type, recipes in swap_candidates.items():
+            for r in recipes[:5]:
+                candidate_lines.append(
+                    f"  {meal_type}|{r['id']}|{r['title']}|"
+                    f"{r.get('calories', '?')}cal|{r.get('protein_grams', '?')}g protein|"
+                    f"{r.get('cuisine_type', '?')}"
+                )
+
+        prompt = f"""You are a nutrition-aware meal plan optimizer. Review this meal plan and suggest 2-3 targeted swaps.
+
+CURRENT PLAN:
+{chr(10).join(plan_lines)}
+
+DAILY TARGETS: {calorie_target} cal, {protein_target}g protein
+
+AVAILABLE SWAP OPTIONS (format: meal_type|recipe_id|title|calories|protein|cuisine):
+{chr(10).join(candidate_lines)}
+
+SWAP CRITERIA — only swap if there's a clear improvement:
+1. A meal is significantly off calorie target (>25% off)
+2. Protein is very low for a meal type (breakfast/lunch <15g, dinner <25g)
+3. Same cuisine appears 3+ times in the same meal type
+4. A liked recipe is available but not used
+
+Respond ONLY with a valid JSON array. Return [] if no swaps are needed.
+Format: [{{"day": "monday", "meal_type": "dinner", "new_recipe_id": "uuid-here", "reason": "short reason"}}]
+Maximum 3 swaps. Use exact recipe_ids from the swap options above."""
+
+        try:
+            loop = asyncio.get_running_loop()
+            response_text = await asyncio.wait_for(
+                loop.run_in_executor(
+                    self.executor,
+                    self._call_claude_sync,
+                    "claude-haiku-4-5-20251001",
+                    512,
+                    0.3,
+                    [{"role": "user", "content": prompt}]
+                ),
+                timeout=20
+            )
+
+            # Parse JSON array from response
+            start = response_text.find('[')
+            end = response_text.rfind(']') + 1
+            if start == -1 or end == 0:
+                logger.warning("No JSON array in Haiku optimize response")
+                return []
+
+            swaps = json.loads(response_text[start:end])
+            if not isinstance(swaps, list):
+                return []
+
+            # Validate structure of each swap
+            valid_swaps = []
+            for swap in swaps:
+                if (isinstance(swap, dict)
+                        and swap.get("day")
+                        and swap.get("meal_type")
+                        and swap.get("new_recipe_id")):
+                    valid_swaps.append(swap)
+
+            logger.info(f"Haiku suggested {len(valid_swaps)} swap(s)")
+            return valid_swaps
+
+        except asyncio.TimeoutError:
+            logger.warning("Haiku AI optimize timed out")
+            return []
+        except Exception as e:
+            logger.warning(f"Haiku AI optimize failed: {e}")
+            return []
+
 
 # Global AI service instance
 ai_service = AIService()

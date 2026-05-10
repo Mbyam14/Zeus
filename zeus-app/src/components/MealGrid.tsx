@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   ScrollView,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore, ThemeColors } from '../store/themeStore';
 import { Recipe } from '../types/recipe';
 import { DayOfWeek, MealType } from '../types/mealplan';
@@ -49,11 +50,11 @@ const MEAL_LABELS: Record<MealType, string> = {
   dinner: 'D',
   snack: 'S',
 };
-const MEAL_ICONS: Record<MealType, string> = {
-  breakfast: '🌅',
-  lunch: '☀️',
-  dinner: '🌙',
-  snack: '🍎',
+const MEAL_ICONS: Record<MealType, keyof typeof Ionicons.glyphMap> = {
+  breakfast: 'sunny-outline',
+  lunch: 'partly-sunny-outline',
+  dinner: 'moon-outline',
+  snack: 'nutrition-outline',
 };
 
 export const MealGrid: React.FC<MealGridProps> = ({
@@ -66,7 +67,7 @@ export const MealGrid: React.FC<MealGridProps> = ({
   const styles = createStyles(colors, selectedDays.length);
 
   const renderSlot = (day: DayOfWeek, mealType: MealType) => {
-    const slot = mealPlan[day]?.[mealType];
+    const slot = (mealPlan[day] as any)?.[mealType];
     const isHighlighted = highlightedSlot?.day === day && highlightedSlot?.mealType === mealType;
     const hasMeal = slot?.recipe;
 
@@ -129,7 +130,7 @@ export const MealGrid: React.FC<MealGridProps> = ({
             {MEAL_TYPES.map((mealType) => (
               <View key={mealType} style={styles.mealRow}>
                 <View style={styles.mealTypeCell}>
-                  <Text style={styles.mealTypeIcon}>{MEAL_ICONS[mealType]}</Text>
+                  <Ionicons name={MEAL_ICONS[mealType]} size={14} color={colors.textMuted} style={styles.mealTypeIcon} />
                   <Text style={styles.mealTypeText}>{MEAL_LABELS[mealType]}</Text>
                 </View>
                 {selectedDays.map((day) => renderSlot(day, mealType))}
@@ -205,7 +206,6 @@ const createStyles = (colors: ThemeColors, numDays: number) => {
       marginBottom: 6,
     },
     mealTypeIcon: {
-      fontSize: 14,
       marginBottom: 2,
     },
     mealTypeText: {

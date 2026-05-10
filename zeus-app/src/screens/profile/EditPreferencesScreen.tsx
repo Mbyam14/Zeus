@@ -57,7 +57,7 @@ const SKILL_LEVELS: Array<{ value: 'beginner' | 'intermediate' | 'advanced'; lab
   { value: 'advanced', label: 'Advanced', icon: 'trophy-outline', desc: 'Bring it on' },
 ];
 
-const LEFTOVER_OPTIONS: Array<{ value: string; label: string; desc: string; icon: string }> = [
+const LEFTOVER_OPTIONS: Array<{ value: 'low' | 'moderate' | 'high'; label: string; desc: string; icon: string }> = [
   { value: 'low', label: 'Low', desc: 'Max 2x same meal', icon: 'remove-circle-outline' },
   { value: 'moderate', label: 'Moderate', desc: 'Max 3x same meal', icon: 'ellipse-outline' },
   { value: 'high', label: 'High', desc: 'Max 4x same meal', icon: 'add-circle-outline' },
@@ -178,6 +178,14 @@ export const EditPreferencesScreen: React.FC<EditPreferencesScreenProps> = ({ na
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
+          {/* Info card */}
+          <View style={styles.prefsInfoCard}>
+            <Ionicons name="information-circle-outline" size={20} color={colors.primary} />
+            <Text style={styles.prefsInfoText}>
+              These settings personalize your meal plans, recipe suggestions, and grocery lists throughout the app.
+            </Text>
+          </View>
+
           {/* === Dietary Restrictions === */}
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
@@ -469,6 +477,21 @@ const createStyles = (colors: any) =>
     },
     scrollContent: {
       padding: 16,
+    },
+    prefsInfoCard: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      backgroundColor: colors.primary + '10',
+      padding: 14,
+      borderRadius: 12,
+      marginBottom: 20,
+      gap: 10,
+    },
+    prefsInfoText: {
+      flex: 1,
+      fontSize: 13,
+      color: colors.textSecondary,
+      lineHeight: 19,
     },
     loadingContainer: {
       flex: 1,

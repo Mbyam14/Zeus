@@ -6,27 +6,28 @@ import {
   TouchableOpacity,
   SafeAreaView,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useThemeStore, ThemeMode } from '../../store/themeStore';
 
-const themeOptions: { mode: ThemeMode; label: string; description: string; icon: string }[] = [
+const themeOptions: { mode: ThemeMode; label: string; description: string; ionicon: keyof typeof Ionicons.glyphMap }[] = [
   {
     mode: 'light',
     label: 'Light',
     description: 'Always use light theme',
-    icon: '☀️',
+    ionicon: 'sunny-outline',
   },
   {
     mode: 'dark',
     label: 'Dark',
     description: 'Always use dark theme',
-    icon: '🌙',
+    ionicon: 'moon-outline',
   },
   {
     mode: 'system',
     label: 'System',
     description: 'Follow device settings',
-    icon: '📱',
+    ionicon: 'phone-portrait-outline',
   },
 ];
 
@@ -64,7 +65,7 @@ export const ThemeScreen: React.FC = () => {
               onPress={() => handleSelectTheme(option.mode)}
             >
               <View style={styles.optionLeft}>
-                <Text style={styles.optionIcon}>{option.icon}</Text>
+                <Ionicons name={option.ionicon} size={24} color={colors.text} style={styles.optionIcon} />
                 <View style={styles.optionTextContainer}>
                   <Text style={styles.optionLabel}>{option.label}</Text>
                   <Text style={styles.optionDescription}>{option.description}</Text>
@@ -176,7 +177,6 @@ const createStyles = (colors: any) =>
       flex: 1,
     },
     optionIcon: {
-      fontSize: 24,
       marginRight: 16,
     },
     optionTextContainer: {
