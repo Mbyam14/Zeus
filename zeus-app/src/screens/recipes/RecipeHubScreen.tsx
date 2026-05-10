@@ -634,7 +634,7 @@ export const RecipeHubScreen: React.FC = () => {
       {!search            && <HRow title={trendLabel} recipes={trending} onPress={goTo} colors={colors} />}
       {!search            && <HRow title={quickLabel}  recipes={quick}    onPress={goTo} colors={colors} />}
       <Text style={[s.sectionTitle, { paddingHorizontal: 16, marginBottom: 10 }]}>
-        {search ? `Results for "${search}"` : 'All Recipes'}
+        {search ? `Results for "${search}"` : trending.length > 0 ? 'More Recipes' : 'All Recipes'}
       </Text>
     </View>
   );
@@ -728,7 +728,7 @@ export const RecipeHubScreen: React.FC = () => {
             <View style={s.loadingCenter}><ActivityIndicator size="large" color={colors.primary} /></View>
           ) : (
             <FlatList
-              data={recipes}
+              data={search ? recipes : recipes.slice(trending.length)}
               keyExtractor={(item, i) => `${item.id}-${i}`}
               numColumns={2}
               columnWrapperStyle={s.gridRow}
