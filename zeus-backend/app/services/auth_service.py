@@ -1,11 +1,16 @@
+import secrets
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from fastapi import HTTPException, status
 from app.database import get_database
 from app.schemas.user import UserRegister, UserLogin, UserResponse, Token
+from app.services.email_service import send_password_reset_email
 from app.utils.security import (
     verify_password, get_password_hash,
     create_access_token, create_refresh_token, verify_refresh_token,
 )
+
+PASSWORD_RESET_CODE_TTL_MINUTES = 15
 
 
 class AuthService:
@@ -209,6 +214,67 @@ class AuthService:
 
         # Finally delete the user
         self.db.table("users").delete().eq("id", user_id).execute()
+
+    async def request_password_reset(self, email: str) -> None:
+        """Generate a 6-digit reset code, store its hash, and email the plaintext.
+
+        Returns silently regardless of whether the email exists, to avoid
+        leaking which addresses are registered.
+        """
+        user_result = self.db.table("users").select("id").eq("email", email).execute()
+        if not user_result.data:
+            return
+
+        user_id = user_result.data[0]["id"]
+
+        code = f"{secrets.randbelow(1_000_000):06d}"
+        code_hash = get_password_hash(code)
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=PASSWORD_RESET_CODE_TTL_MINUTES)
+
+        self.db.table("password_reset_codes").insert({
+            "user_id": user_id,
+            "code_hash": code_hash,
+            "expires_at": expires_at.isoformat(),
+        }).execute()
+
+        await send_password_reset_email(email, code)
+
+    async def confirm_password_reset(self, email: str, code: str, new_password: str) -> None:
+        """Verify the reset code and update the user's password."""
+        invalid_exc = HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset code",
+        )
+
+        user_result = self.db.table("users").select("id").eq("email", email).execute()
+        if not user_result.data:
+            raise invalid_exc
+
+        user_id = user_result.data[0]["id"]
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        codes = (
+            self.db.table("password_reset_codes")
+            .select("*")
+            .eq("user_id", user_id)
+            .is_("used_at", "null")
+            .gt("expires_at", now_iso)
+            .order("created_at", desc=True)
+            .limit(5)
+            .execute()
+        )
+        if not codes.data:
+            raise invalid_exc
+
+        matched = next((row for row in codes.data if verify_password(code, row["code_hash"])), None)
+        if not matched:
+            raise invalid_exc
+
+        new_hash = get_password_hash(new_password)
+        self.db.table("users").update({"password_hash": new_hash}).eq("id", user_id).execute()
+        self.db.table("password_reset_codes").update(
+            {"used_at": datetime.now(timezone.utc).isoformat()}
+        ).eq("id", matched["id"]).execute()
 
 
 # Global auth service instance

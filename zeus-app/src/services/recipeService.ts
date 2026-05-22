@@ -1,7 +1,23 @@
 import api from './api';
-import { Recipe, RecipeCreate, RecipeFeedFilter } from '../types/recipe';
+import { Recipe, RecipeCreate, RecipeFeedFilter, RecipeCollectionKey } from '../types/recipe';
 
 class RecipeService {
+  // Fetch a named scenario collection (NYT-style discovery).
+  // Backend auto-applies the user's dietary restrictions / allergies.
+  async getCollection(
+    collectionKey: RecipeCollectionKey,
+    limit = 12,
+    offset = 0,
+  ): Promise<Recipe[]> {
+    const params = new URLSearchParams();
+    params.append('limit', limit.toString());
+    params.append('offset', offset.toString());
+    const response = await api.get<Recipe[]>(
+      `/api/recipes/collections/${collectionKey}?${params.toString()}`,
+    );
+    return response.data;
+  }
+
   // Get recipe feed with filters
   async getRecipeFeed(filters?: RecipeFeedFilter): Promise<Recipe[]> {
     const params = new URLSearchParams();
@@ -74,7 +90,10 @@ class RecipeService {
     mealType?: string,
     dietaryTags?: string[],
     cuisineType?: string,
-    maxDifficulty?: string
+    maxDifficulty?: string,
+    cookingMethods?: string[],
+    styleTags?: string[],
+    timeTags?: string[],
   ): Promise<Recipe[]> {
     const params = new URLSearchParams();
     params.append('limit', limit.toString());
@@ -85,6 +104,15 @@ class RecipeService {
     if (maxDifficulty) params.append('max_difficulty', maxDifficulty);
     if (dietaryTags) {
       dietaryTags.forEach(tag => params.append('dietary_tags', tag));
+    }
+    if (cookingMethods) {
+      cookingMethods.forEach(m => params.append('cooking_methods', m));
+    }
+    if (styleTags) {
+      styleTags.forEach(t => params.append('style_tags', t));
+    }
+    if (timeTags) {
+      timeTags.forEach(t => params.append('time_tags', t));
     }
 
     const response = await api.get<Recipe[]>(`/api/recipes/feed?${params.toString()}`);
@@ -131,13 +159,16 @@ class RecipeService {
 
   // Upload image to S3 (using presigned URL)
   async uploadImage(uploadUrl: string, file: Blob): Promise<void> {
-    await fetch(uploadUrl, {
+    const response = await fetch(uploadUrl, {
       method: 'PUT',
       body: file,
       headers: {
         'Content-Type': file.type,
       },
     });
+    if (!response.ok) {
+      throw new Error(`Image upload failed: ${response.status} ${response.statusText}`);
+    }
   }
 }
 

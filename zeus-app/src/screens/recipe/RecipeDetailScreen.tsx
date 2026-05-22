@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  Image,
   TouchableOpacity,
   SafeAreaView,
   Modal,
@@ -16,13 +15,26 @@ import {
   Clipboard,
   ActivityIndicator,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { Recipe, Ingredient } from '../../types/recipe';
+import { DayOfWeek, MealType } from '../../types/mealplan';
 import { recipeService } from '../../services/recipeService';
 import { smartAIService } from '../../services/smartAIService';
+import { mealPlanService } from '../../services/mealPlanService';
+import { groceryListService } from '../../services/groceryListService';
 import { useThemeStore } from '../../store/themeStore';
 import { useAuthStore } from '../../store/authStore';
+import { useDataStore } from '../../store/dataStore';
 import { getDifficultyColor } from '../../utils/colors';
+import { getMondayDateString } from '../../utils/dateHelpers';
+import { Toast } from '../../components/Toast';
+import { ConfirmSheet } from '../../components/ConfirmSheet';
+import { AddToMealPlanSheet } from '../../components/AddToMealPlanSheet';
+
+const DAY_NAMES: DayOfWeek[] = [
+  'sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday',
+];
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 const SWIPE_THRESHOLD = 30;
@@ -44,6 +56,46 @@ export const RecipeDetailScreen: React.FC<RecipeDetailScreenProps> = ({
   const styles = createStyles(colors);
   const { recipe } = route.params;
   const { user } = useAuthStore();
+
+  // User preferences (used for allergen warning, diet-match badge, macro % targets)
+  const userPrefs = (user as any)?.profile_data?.preferences || {};
+  const userAllergies: string[]        = userPrefs.allergies || [];
+  const userDisliked: string[]         = userPrefs.disliked_ingredients || [];
+  const userDietRestrictions: string[] = userPrefs.dietary_restrictions || [];
+  const calorieTarget: number          = userPrefs.calorie_target || 0;
+  const proteinTarget: number          = userPrefs.protein_target_grams || 0;
+
+  // Match allergens / disliked ingredients against the recipe's ingredient names.
+  // Returns the *set of user terms* that hit, not the recipe ingredients themselves.
+  const detectMatches = (terms: string[]): string[] => {
+    if (!terms.length) return [];
+    const names = (recipe.ingredients || []).map(i => (i.name || '').toLowerCase());
+    return terms.filter(t => {
+      const lc = t.toLowerCase();
+      return names.some(n => n.includes(lc));
+    });
+  };
+  const allergenHits = useMemo(() => detectMatches(userAllergies), [recipe.ingredients, userAllergies]);
+  const dislikedHits = useMemo(() => detectMatches(userDisliked), [recipe.ingredients, userDisliked]);
+
+  // Diet-match: does the recipe satisfy ALL of the user's dietary restrictions?
+  const recipeDietTags = (recipe.dietary_tags || []).map(t => t.toLowerCase());
+  const matchesAllDietary = userDietRestrictions.length > 0
+    && userDietRestrictions.every(d => recipeDietTags.includes(d.toLowerCase()));
+
+  // For each recipe ingredient, the set of user terms it contains (for inline flagging)
+  const ingredientAllergenFlags = useMemo(() => {
+    const flags: Record<number, string[]> = {};
+    (recipe.ingredients || []).forEach((ing, idx) => {
+      const name = (ing.name || '').toLowerCase();
+      const hits = [
+        ...userAllergies.filter(a => name.includes(a.toLowerCase())),
+        ...userDisliked.filter(d => name.includes(d.toLowerCase())),
+      ];
+      if (hits.length > 0) flags[idx] = hits;
+    });
+    return flags;
+  }, [recipe.ingredients, userAllergies, userDisliked]);
 
   // Serving size adjustment
   const householdSize = user?.profile_data?.preferences?.household_size || recipe.servings;
@@ -187,6 +239,58 @@ export const RecipeDetailScreen: React.FC<RecipeDetailScreenProps> = ({
   const [isSaved, setIsSaved] = useState(recipe.is_saved || false);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const [showFullImage, setShowFullImage] = useState(false);
+
+  // Cook Tonight / Add to Meal Plan flow state
+  const [showAddToPlanSheet, setShowAddToPlanSheet] = useState(false);
+  const [showCookTonightConfirm, setShowCookTonightConfirm] = useState(false);
+  const [cookingTonight, setCookingTonight] = useState(false);
+  const [toast, setToast] = useState<{ visible: boolean; message: string }>({ visible: false, message: '' });
+  const showToast = (message: string) => setToast({ visible: true, message });
+
+  // Related recipes — "More like this" strip at the bottom
+  const [relatedRecipes, setRelatedRecipes] = useState<Recipe[]>([]);
+  const relatedCollectionKey = useMemo(() => {
+    // Prefer cooking method, fall back to time tag. Maps to a /collections/{key}.
+    const method = (recipe.cooking_method || [])[0];
+    if (method) return method;
+    const time = (recipe.time_tags || []).find(t => t === 'quick' || t === 'weeknight');
+    if (time === 'weeknight') return 'quick_weeknight';
+    if (time === 'quick') return 'quick';
+    return null;
+  }, [recipe.cooking_method, recipe.time_tags]);
+
+  const relatedTitle = useMemo(() => {
+    const labels: Record<string, string> = {
+      one_pot: 'More One-Pot Meals',
+      sheet_pan: 'More Sheet Pan Dinners',
+      slow_cooker: 'More Slow Cooker Recipes',
+      instant_pot: 'More Instant Pot Recipes',
+      air_fryer: 'More Air Fryer Recipes',
+      grilled: 'More Grilled Recipes',
+      stir_fry: 'More Stir-Fry Recipes',
+      no_cook: 'More No-Cook Recipes',
+      quick_weeknight: 'More Quick Weeknight Dinners',
+      quick: 'More Quick Recipes',
+    };
+    return relatedCollectionKey ? (labels[relatedCollectionKey] || 'More Like This') : '';
+  }, [relatedCollectionKey]);
+
+  useEffect(() => {
+    if (!relatedCollectionKey) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await recipeService.getCollection(relatedCollectionKey as any, 10);
+        if (!cancelled) {
+          // Exclude the currently-viewed recipe
+          setRelatedRecipes(list.filter(r => r.id !== recipe.id).slice(0, 8));
+        }
+      } catch {
+        // Silent — strip just won't render
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [relatedCollectionKey, recipe.id]);
 
   // Cooking mode state
   const [cookingMode, setCookingMode] = useState(false);
@@ -403,8 +507,54 @@ Shared from Zeus - Your AI Meal Planner`;
 
   const handleAddToMealPlan = () => {
     setShowOptionsMenu(false);
-    Alert.alert('Add to Meal Plan', 'This feature is coming soon!');
-    // TODO: Navigate to meal plan selector
+    setShowAddToPlanSheet(true);
+  };
+
+  const cookTonightToday = (): DayOfWeek => DAY_NAMES[new Date().getDay()];
+
+  const performCookTonight = async () => {
+    setCookingTonight(true);
+    const today = cookTonightToday();
+    const slotData = { recipe_id: recipe.id };
+    try {
+      const plan = await mealPlanService.getCurrentWeekMealPlan();
+      let updatedPlan;
+      if (!plan) {
+        updatedPlan = await mealPlanService.createManualMealPlan(
+          getMondayDateString(0),
+          [today],
+          { [today]: { dinner: slotData } }
+        );
+      } else {
+        const existingDay = (plan.meals as any)[today] || {};
+        const nextMeals = {
+          ...plan.meals,
+          [today]: { ...existingDay, dinner: slotData },
+        };
+        updatedPlan = await mealPlanService.updateMealPlanMeals(plan.id, nextMeals);
+      }
+      groceryListService.generateGroceryList(updatedPlan.id).catch(() => {});
+      useDataStore.getState().setMealPlan(updatedPlan);
+      showToast('Added to tonight · Grocery list updated');
+    } catch (err: any) {
+      showToast(err?.response?.data?.detail || 'Could not add to meal plan');
+    } finally {
+      setCookingTonight(false);
+    }
+  };
+
+  const handleCookTonight = async () => {
+    setShowOptionsMenu(false);
+    try {
+      const plan = await mealPlanService.getCurrentWeekMealPlan();
+      if (!plan) {
+        setShowCookTonightConfirm(true);
+      } else {
+        await performCookTonight();
+      }
+    } catch (err: any) {
+      showToast(err?.response?.data?.detail || 'Could not check meal plan');
+    }
   };
 
   return (
@@ -452,6 +602,41 @@ Shared from Zeus - Your AI Meal Planner`;
         <View style={[styles.content, !recipe.image_url && styles.contentNoImage]}>
           <Text style={styles.title}>{recipe.title}</Text>
 
+          {/* Allergen warning — SAFETY CRITICAL. Loud red banner when the recipe
+              contains anything in the user's allergies list. */}
+          {allergenHits.length > 0 && (
+            <View style={styles.allergenBanner}>
+              <Ionicons name="warning" size={20} color="#FFF" style={{ marginRight: 8 }} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.allergenBannerTitle}>Allergy warning</Text>
+                <Text style={styles.allergenBannerText}>
+                  Contains: {allergenHits.join(', ')}
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {/* Disliked-ingredient warning — softer, advisory */}
+          {dislikedHits.length > 0 && allergenHits.length === 0 && (
+            <View style={styles.dislikedBanner}>
+              <Ionicons name="information-circle-outline" size={18} color={colors.warning || '#F59E0B'} style={{ marginRight: 8 }} />
+              <Text style={styles.dislikedBannerText}>
+                Contains ingredients you usually avoid: {dislikedHits.join(', ')}
+              </Text>
+            </View>
+          )}
+
+          {/* "Matches your diet" — positive reassurance when the user has
+              dietary restrictions and the recipe satisfies all of them. */}
+          {matchesAllDietary && allergenHits.length === 0 && (
+            <View style={styles.matchBadge}>
+              <Ionicons name="checkmark-circle" size={16} color="#22C55E" style={{ marginRight: 6 }} />
+              <Text style={styles.matchBadgeText}>
+                Matches your {userDietRestrictions.join(' + ')} preferences
+              </Text>
+            </View>
+          )}
+
           {/* Creator Info - only show for user-created recipes, not AI generated */}
           {recipe.creator_username && !recipe.is_ai_generated && recipe.creator_username.toLowerCase() !== 'ai' && (
             <View style={styles.creatorRow}>
@@ -463,33 +648,60 @@ Shared from Zeus - Your AI Meal Planner`;
               <View style={styles.creatorInfo}>
                 <Text style={styles.creatorName}>@{recipe.creator_username}</Text>
                 <Text style={styles.creatorSubtext}>
-                  {new Date(recipe.created_at).toLocaleDateString()}
+                  {recipe.created_at ? new Date(recipe.created_at).toLocaleDateString() : ''}
                 </Text>
               </View>
             </View>
           )}
 
-          {/* Stats */}
-          <View style={styles.statsRow}>
-            <View style={styles.statItem}>
-              <Ionicons name="time-outline" size={16} color={colors.textMuted} />
-              <Text style={styles.statText}>
-                {(recipe.prep_time || 0) + (recipe.cook_time || 0)}m
-              </Text>
-            </View>
-            <View style={styles.statItem}>
-              <Ionicons name="heart" size={16} color={colors.error || '#EF4444'} />
-              <Text style={styles.statText}>{recipe.likes_count}</Text>
-            </View>
-            <View
-              style={[
-                styles.difficultyBadge,
-                { backgroundColor: getDifficultyColor(recipe.difficulty, colors) },
-              ]}
-            >
-              <Text style={styles.difficultyText}>{recipe.difficulty}</Text>
-            </View>
-          </View>
+          {/* Stats — time, likes, difficulty + method/quick chips when present */}
+          {(() => {
+            const methodLabels: Record<string, string> = {
+              one_pot: '🥘 One-Pot',
+              sheet_pan: '🍳 Sheet Pan',
+              slow_cooker: '🐢 Slow Cooker',
+              instant_pot: '⚡ Instant Pot',
+              air_fryer: '💨 Air Fryer',
+              grilled: '🔥 Grilled',
+              no_cook: '🥒 No-Cook',
+              stir_fry: '🥢 Stir Fry',
+            };
+            const primaryMethod = (recipe.cooking_method || []).find(m => methodLabels[m]);
+            const isQuick = (recipe.time_tags || []).includes('quick');
+            return (
+              <View style={styles.statsRow}>
+                <View style={styles.statItem}>
+                  <Ionicons name="time-outline" size={16} color={colors.textMuted} />
+                  <Text style={styles.statText}>
+                    {(recipe.prep_time || 0) + (recipe.cook_time || 0)}m
+                  </Text>
+                </View>
+                <View style={styles.statItem}>
+                  <Ionicons name="heart" size={16} color={colors.error || '#EF4444'} />
+                  <Text style={styles.statText}>{recipe.likes_count}</Text>
+                </View>
+                <View
+                  style={[
+                    styles.difficultyBadge,
+                    { backgroundColor: getDifficultyColor(recipe.difficulty, colors) },
+                  ]}
+                >
+                  <Text style={styles.difficultyText}>{recipe.difficulty}</Text>
+                </View>
+                {primaryMethod && (
+                  <View style={styles.heroChip}>
+                    <Text style={styles.heroChipText}>{methodLabels[primaryMethod]}</Text>
+                  </View>
+                )}
+                {isQuick && (
+                  <View style={[styles.heroChip, { backgroundColor: '#EA580C' + '20', borderColor: '#EA580C' }]}>
+                    <Ionicons name="flash" size={11} color="#EA580C" style={{ marginRight: 3 }} />
+                    <Text style={[styles.heroChipText, { color: '#EA580C' }]}>Quick</Text>
+                  </View>
+                )}
+              </View>
+            );
+          })()}
 
           {/* Serving Size Adjuster */}
           <View style={styles.servingAdjuster}>
@@ -512,47 +724,118 @@ Shared from Zeus - Your AI Meal Planner`;
             </View>
           </View>
 
-          {/* Nutrition/Macros */}
-          {(recipe.calories > 0 || recipe.protein_grams > 0 || recipe.carbs_grams > 0 || recipe.fat_grams > 0) && (
-            <View style={styles.macrosSection}>
-              <Text style={styles.macrosTitle}>
-                {servingScale === 1 ? 'Nutrition per Serving' : `Nutrition (${adjustedServings} servings)`}
+          {/* Nutrition placeholder when macros aren't available (USDA pipeline couldn't
+              match enough ingredients). Surfaces a clear "calculation pending" message
+              so users aren't confused by a missing section. */}
+          {!(recipe.calories > 0 || recipe.protein_grams > 0 || recipe.carbs_grams > 0 || recipe.fat_grams > 0) && (
+            <View style={[styles.macrosSection, { alignItems: 'center' }]}>
+              <Ionicons name="analytics-outline" size={20} color={colors.textMuted} style={{ marginBottom: 4 }} />
+              <Text style={{ fontSize: 13, color: colors.textMuted, fontWeight: '500', textAlign: 'center' }}>
+                Nutrition data not yet available for this recipe
               </Text>
-              {recipe.serving_size && servingScale === 1 && (
-                <Text style={styles.servingSize}>Serving: {recipe.serving_size}</Text>
-              )}
-              <View style={styles.macrosRow}>
-                {recipe.calories > 0 && (
-                  <View style={styles.macroCard}>
-                    <Ionicons name="flame-outline" size={18} color={colors.primary} style={styles.macroIconSpacing} />
-                    <Text style={styles.macroValue}>{scaleNutrition(recipe.calories)}</Text>
-                    <Text style={styles.macroLabel}>Calories</Text>
+            </View>
+          )}
+
+          {/* Nutrition/Macros — with macro distribution bar + target % when targets set */}
+          {(recipe.calories > 0 || recipe.protein_grams > 0 || recipe.carbs_grams > 0 || recipe.fat_grams > 0) && (() => {
+            const cal     = scaleNutrition(recipe.calories) || 0;
+            const protein = scaleNutrition(recipe.protein_grams) || 0;
+            const carbs   = scaleNutrition(recipe.carbs_grams) || 0;
+            const fat     = scaleNutrition(recipe.fat_grams) || 0;
+
+            // Calorie-share distribution: 4 cal/g protein+carbs, 9 cal/g fat.
+            // Used to draw a single stacked horizontal bar showing macro split.
+            const proteinCal = protein * 4;
+            const carbsCal   = carbs   * 4;
+            const fatCal     = fat     * 9;
+            const totalMacroCal = proteinCal + carbsCal + fatCal;
+            const proteinPct = totalMacroCal > 0 ? (proteinCal / totalMacroCal) * 100 : 0;
+            const carbsPct   = totalMacroCal > 0 ? (carbsCal   / totalMacroCal) * 100 : 0;
+            const fatPct     = totalMacroCal > 0 ? (fatCal     / totalMacroCal) * 100 : 0;
+
+            // % of user's daily targets (only shown when targets are set)
+            const calPctTarget     = calorieTarget > 0 ? Math.round((cal     / calorieTarget) * 100) : null;
+            const proteinPctTarget = proteinTarget > 0 ? Math.round((protein / proteinTarget) * 100) : null;
+
+            return (
+              <View style={styles.macrosSection}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <Text style={styles.macrosTitle}>
+                    {servingScale === 1 ? 'Nutrition per Serving' : `Nutrition (${adjustedServings} servings)`}
+                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                    <Ionicons name="shield-checkmark-outline" size={12} color={colors.textMuted} />
+                    <Text style={{ fontSize: 10, color: colors.textMuted, fontWeight: '500' }}>USDA-calculated</Text>
                   </View>
+                </View>
+                {recipe.serving_size && servingScale === 1 && (
+                  <Text style={styles.servingSize}>Serving: {recipe.serving_size}</Text>
                 )}
-                {recipe.protein_grams > 0 && (
-                  <View style={styles.macroCard}>
-                    <Ionicons name="barbell-outline" size={18} color="#4ECDC4" style={styles.macroIconSpacing} />
-                    <Text style={styles.macroValue}>{scaleNutrition(recipe.protein_grams)}g</Text>
-                    <Text style={styles.macroLabel}>Protein</Text>
-                  </View>
-                )}
-                {recipe.carbs_grams > 0 && (
-                  <View style={styles.macroCard}>
-                    <Ionicons name="nutrition-outline" size={18} color="#F59E0B" style={styles.macroIconSpacing} />
-                    <Text style={styles.macroValue}>{scaleNutrition(recipe.carbs_grams)}g</Text>
-                    <Text style={styles.macroLabel}>Carbs</Text>
-                  </View>
-                )}
-                {recipe.fat_grams > 0 && (
-                  <View style={styles.macroCard}>
-                    <Ionicons name="water-outline" size={18} color="#EF4444" style={styles.macroIconSpacing} />
-                    <Text style={styles.macroValue}>{scaleNutrition(recipe.fat_grams)}g</Text>
-                    <Text style={styles.macroLabel}>Fat</Text>
+
+                <View style={styles.macrosRow}>
+                  {cal > 0 && (
+                    <View style={styles.macroCard}>
+                      <Ionicons name="flame-outline" size={18} color={colors.primary} style={styles.macroIconSpacing} />
+                      <Text style={styles.macroValue}>{cal}</Text>
+                      <Text style={styles.macroLabel}>Calories</Text>
+                      {calPctTarget !== null && (
+                        <Text style={styles.macroTargetPct}>{calPctTarget}% of daily</Text>
+                      )}
+                    </View>
+                  )}
+                  {protein > 0 && (
+                    <View style={styles.macroCard}>
+                      <Ionicons name="barbell-outline" size={18} color="#4ECDC4" style={styles.macroIconSpacing} />
+                      <Text style={styles.macroValue}>{protein}g</Text>
+                      <Text style={styles.macroLabel}>Protein</Text>
+                      {proteinPctTarget !== null && (
+                        <Text style={styles.macroTargetPct}>{proteinPctTarget}% of daily</Text>
+                      )}
+                    </View>
+                  )}
+                  {carbs > 0 && (
+                    <View style={styles.macroCard}>
+                      <Ionicons name="nutrition-outline" size={18} color="#F59E0B" style={styles.macroIconSpacing} />
+                      <Text style={styles.macroValue}>{carbs}g</Text>
+                      <Text style={styles.macroLabel}>Carbs</Text>
+                    </View>
+                  )}
+                  {fat > 0 && (
+                    <View style={styles.macroCard}>
+                      <Ionicons name="water-outline" size={18} color="#EF4444" style={styles.macroIconSpacing} />
+                      <Text style={styles.macroValue}>{fat}g</Text>
+                      <Text style={styles.macroLabel}>Fat</Text>
+                    </View>
+                  )}
+                </View>
+
+                {/* Macro distribution bar — visual share of calories from each macro */}
+                {totalMacroCal > 0 && (
+                  <View style={styles.macroBarSection}>
+                    <View style={styles.macroBar}>
+                      {proteinPct > 0 && <View style={[styles.macroBarSeg, { flex: proteinPct, backgroundColor: '#4ECDC4' }]} />}
+                      {carbsPct > 0   && <View style={[styles.macroBarSeg, { flex: carbsPct,   backgroundColor: '#F59E0B' }]} />}
+                      {fatPct > 0     && <View style={[styles.macroBarSeg, { flex: fatPct,     backgroundColor: '#EF4444' }]} />}
+                    </View>
+                    <View style={styles.macroLegend}>
+                      <View style={styles.macroLegendItem}>
+                        <View style={[styles.macroLegendDot, { backgroundColor: '#4ECDC4' }]} />
+                        <Text style={styles.macroLegendText}>Protein {Math.round(proteinPct)}%</Text>
+                      </View>
+                      <View style={styles.macroLegendItem}>
+                        <View style={[styles.macroLegendDot, { backgroundColor: '#F59E0B' }]} />
+                        <Text style={styles.macroLegendText}>Carbs {Math.round(carbsPct)}%</Text>
+                      </View>
+                      <View style={styles.macroLegendItem}>
+                        <View style={[styles.macroLegendDot, { backgroundColor: '#EF4444' }]} />
+                        <Text style={styles.macroLegendText}>Fat {Math.round(fatPct)}%</Text>
+                      </View>
+                    </View>
                   </View>
                 )}
               </View>
-            </View>
-          )}
+            );
+          })()}
 
           {/* Description */}
           {recipe.description && (
@@ -562,23 +845,79 @@ Shared from Zeus - Your AI Meal Planner`;
             </View>
           )}
 
-          {/* Tags */}
-          {(recipe.meal_type.length > 0 || recipe.dietary_tags.length > 0) && (
-            <View style={styles.section}>
-              <View style={styles.tagsContainer}>
-                {recipe.meal_type.map((type, index) => (
-                  <View key={`meal-${index}`} style={styles.tag}>
-                    <Text style={styles.tagText}>{type}</Text>
+          {/* Tags — grouped by type with subtle section labels */}
+          {(recipe.meal_type.length > 0
+            || recipe.dietary_tags.length > 0
+            || (recipe.cooking_method && recipe.cooking_method.length > 0)
+            || (recipe.time_tags && recipe.time_tags.length > 0)
+            || (recipe.style_tags && recipe.style_tags.length > 0)
+            || !!recipe.cuisine_type) && (() => {
+            const methodLabels: Record<string, string> = {
+              one_pot: '🥘 One-Pot',
+              sheet_pan: '🍳 Sheet Pan',
+              slow_cooker: '🐢 Slow Cooker',
+              instant_pot: '⚡ Instant Pot',
+              air_fryer: '💨 Air Fryer',
+              grilled: '🔥 Grilled',
+              no_cook: '🥒 No-Cook',
+              baked: '🥖 Baked',
+              stir_fry: '🥢 Stir Fry',
+            };
+            const timeLabels: Record<string, string> = {
+              quick: '⏱️ Quick (≤30m)',
+              weeknight: '🌙 Weeknight',
+              weekend_project: '🛠️ Weekend Project',
+            };
+            const styleLabels: Record<string, string> = {
+              make_ahead: '📦 Make Ahead',
+              meal_prep: '🥡 Meal Prep',
+              comfort_food: '🤗 Comfort Food',
+            };
+
+            const TagGroup: React.FC<{ label: string; items: { key: string; label: string; emphasis?: boolean }[] }> = ({ label, items }) => {
+              if (items.length === 0) return null;
+              return (
+                <View style={styles.tagGroup}>
+                  <Text style={styles.tagGroupLabel}>{label}</Text>
+                  <View style={styles.tagsContainer}>
+                    {items.map(item => (
+                      <View key={item.key} style={[styles.tag, item.emphasis && styles.dietaryTag]}>
+                        <Text style={styles.tagText}>{item.label}</Text>
+                      </View>
+                    ))}
                   </View>
-                ))}
-                {recipe.dietary_tags.map((tag, index) => (
-                  <View key={`dietary-${index}`} style={[styles.tag, styles.dietaryTag]}>
-                    <Text style={styles.tagText}>{tag}</Text>
-                  </View>
-                ))}
+                </View>
+              );
+            };
+
+            return (
+              <View style={styles.section}>
+                <TagGroup
+                  label="Diet"
+                  items={recipe.dietary_tags.map(t => ({ key: `diet-${t}`, label: t, emphasis: true }))}
+                />
+                <TagGroup
+                  label="Meal & Cuisine"
+                  items={[
+                    ...recipe.meal_type.map(t => ({ key: `meal-${t}`, label: t })),
+                    ...(recipe.cuisine_type ? [{ key: 'cuisine', label: recipe.cuisine_type }] : []),
+                  ]}
+                />
+                <TagGroup
+                  label="Method"
+                  items={(recipe.cooking_method || [])
+                    .map(m => ({ key: `method-${m}`, label: methodLabels[m] || m }))}
+                />
+                <TagGroup
+                  label="Time & Style"
+                  items={[
+                    ...(recipe.time_tags  || []).map(t => ({ key: `time-${t}`,  label: timeLabels[t]  || t })),
+                    ...(recipe.style_tags || []).map(t => ({ key: `style-${t}`, label: styleLabels[t] || t })),
+                  ]}
+                />
               </View>
-            </View>
-          )}
+            );
+          })()}
 
           {/* Start Cooking Button */}
           {recipe.instructions && recipe.instructions.length > 0 && (
@@ -600,6 +939,8 @@ Shared from Zeus - Your AI Meal Planner`;
                 // Show section header when section changes
                 const prevSection = index > 0 ? scaledIngredients[index - 1]?.section : undefined;
                 const showSection = ingredient.section && ingredient.section !== prevSection;
+                // Flag if this ingredient matches any user allergen/disliked term
+                const flagged = ingredientAllergenFlags[index];
                 return (
                   <View key={index}>
                     {showSection && (
@@ -607,17 +948,24 @@ Shared from Zeus - Your AI Meal Planner`;
                         {ingredient.section}
                       </Text>
                     )}
-                    <View style={styles.ingredientItem}>
-                      <View style={styles.ingredientBullet} />
-                      <Text style={[styles.ingredientText, { flex: 1 }]}>
-                        {formatIngredient(ingredient)}
-                      </Text>
+                    <View style={[styles.ingredientItem, flagged && styles.ingredientItemFlagged]}>
+                      <View style={[styles.ingredientBullet, flagged && { backgroundColor: '#EF4444' }]} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.ingredientText, flagged && { color: '#DC2626', fontWeight: '600' }]}>
+                          {formatIngredient(ingredient)}
+                        </Text>
+                        {flagged && (
+                          <Text style={styles.ingredientFlagNote}>
+                            ⚠️ Contains {flagged.join(', ')}
+                          </Text>
+                        )}
+                      </View>
                       <TouchableOpacity
                         onPress={() => handleSubstitution(ingredient.name)}
                         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                         style={{ paddingLeft: 8 }}
                       >
-                        <Ionicons name="swap-horizontal-outline" size={18} color={colors.textMuted} />
+                        <Ionicons name="swap-horizontal-outline" size={18} color={flagged ? '#DC2626' : colors.textMuted} />
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -657,6 +1005,43 @@ Shared from Zeus - Your AI Meal Planner`;
             )}
           </View>
 
+          {/* Related recipes — drives discovery of similar items */}
+          {relatedRecipes.length >= 3 && (
+            <View style={[styles.section, { marginHorizontal: -20 }]}>
+              <Text style={[styles.sectionTitle, { paddingHorizontal: 20, marginBottom: 12 }]}>
+                {relatedTitle}
+              </Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingHorizontal: 20, gap: 12 }}
+              >
+                {relatedRecipes.map(r => (
+                  <TouchableOpacity
+                    key={r.id}
+                    activeOpacity={0.85}
+                    onPress={() => navigation.replace('RecipeDetail', { recipe: r })}
+                    style={styles.relatedCard}
+                  >
+                    {r.image_url ? (
+                      <Image source={{ uri: r.image_url }} style={styles.relatedImage} />
+                    ) : (
+                      <View style={[styles.relatedImage, { backgroundColor: colors.border, justifyContent: 'center', alignItems: 'center' }]}>
+                        <Ionicons name="restaurant-outline" size={24} color={colors.textMuted} />
+                      </View>
+                    )}
+                    <View style={{ padding: 8 }}>
+                      <Text style={styles.relatedTitle} numberOfLines={2}>{r.title}</Text>
+                      {r.calories != null && r.calories > 0 && (
+                        <Text style={styles.relatedMeta}>{r.calories} cal</Text>
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          )}
+
         </View>
       </ScrollView>
 
@@ -676,7 +1061,7 @@ Shared from Zeus - Your AI Meal Planner`;
             <Image
               source={{ uri: recipe.image_url }}
               style={styles.fullImage}
-              resizeMode="contain"
+              contentFit="contain"
             />
             <TouchableOpacity
               style={styles.fullImageCloseButton}
@@ -719,6 +1104,23 @@ Shared from Zeus - Your AI Meal Planner`;
                 <Ionicons name="share-outline" size={20} color={colors.text} />
               </View>
               <Text style={styles.optionsMenuText}>Share Recipe</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.optionsMenuItem}
+              onPress={handleCookTonight}
+              disabled={cookingTonight}
+            >
+              <View style={styles.optionsMenuIconContainer}>
+                {cookingTonight ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Ionicons name="flame-outline" size={20} color={colors.primary} />
+                )}
+              </View>
+              <Text style={[styles.optionsMenuText, { color: colors.primary, fontWeight: '600' }]}>
+                Cook Tonight
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.optionsMenuItem} onPress={handleAddToMealPlan}>
@@ -1064,6 +1466,32 @@ Shared from Zeus - Your AI Meal Planner`;
           </View>
         </View>
       </Modal>
+
+      <AddToMealPlanSheet
+        visible={showAddToPlanSheet}
+        recipe={recipe}
+        onClose={() => setShowAddToPlanSheet(false)}
+        onAdded={(day, slot) => showToast(`Added to ${day} ${slot}`)}
+      />
+
+      <ConfirmSheet
+        visible={showCookTonightConfirm}
+        title="No plan for this week yet"
+        message="Start a meal plan with this recipe for tonight?"
+        confirmLabel="Start plan"
+        cancelLabel="Not now"
+        onConfirm={() => {
+          setShowCookTonightConfirm(false);
+          performCookTonight();
+        }}
+        onCancel={() => setShowCookTonightConfirm(false)}
+      />
+
+      <Toast
+        visible={toast.visible}
+        message={toast.message}
+        onHide={() => setToast({ visible: false, message: '' })}
+      />
     </SafeAreaView>
   );
 };
@@ -1346,6 +1774,131 @@ const createStyles = (colors: any) =>
       color: colors.text,
       fontWeight: '500',
     },
+    tagGroup: {
+      marginBottom: 14,
+    },
+    tagGroupLabel: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: colors.textMuted,
+      textTransform: 'uppercase',
+      letterSpacing: 0.6,
+      marginBottom: 6,
+    },
+    // Allergen / preference banners
+    allergenBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: '#DC2626',
+      borderRadius: 12,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      marginBottom: 12,
+    },
+    allergenBannerTitle: {
+      color: '#FFF',
+      fontSize: 13,
+      fontWeight: '800',
+      letterSpacing: 0.3,
+      textTransform: 'uppercase',
+    },
+    allergenBannerText: {
+      color: '#FFF',
+      fontSize: 14,
+      fontWeight: '500',
+      marginTop: 1,
+    },
+    dislikedBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: (colors.warning || '#F59E0B') + '15',
+      borderRadius: 12,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      marginBottom: 12,
+      borderWidth: 1,
+      borderColor: (colors.warning || '#F59E0B') + '40',
+    },
+    dislikedBannerText: {
+      flex: 1,
+      fontSize: 13,
+      color: colors.warning || '#F59E0B',
+      fontWeight: '500',
+    },
+    matchBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      alignSelf: 'flex-start',
+      backgroundColor: '#22C55E' + '15',
+      borderRadius: 12,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      marginBottom: 12,
+      borderWidth: 1,
+      borderColor: '#22C55E' + '40',
+    },
+    matchBadgeText: {
+      fontSize: 12,
+      color: '#16A34A',
+      fontWeight: '600',
+    },
+    // Hero method/quick chip in stats row
+    heroChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.primary + '15',
+      borderRadius: 12,
+      paddingHorizontal: 9,
+      paddingVertical: 4,
+      borderWidth: 1,
+      borderColor: colors.primary + '30',
+    },
+    heroChipText: {
+      fontSize: 12,
+      color: colors.primary,
+      fontWeight: '600',
+    },
+    // Macro distribution bar
+    macroBarSection: {
+      marginTop: 12,
+    },
+    macroBar: {
+      flexDirection: 'row',
+      height: 8,
+      borderRadius: 4,
+      overflow: 'hidden',
+      backgroundColor: colors.border,
+    },
+    macroBarSeg: {
+      height: '100%',
+    },
+    macroLegend: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      marginTop: 8,
+    },
+    macroLegendItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    macroLegendDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+    },
+    macroLegendText: {
+      fontSize: 11,
+      color: colors.textMuted,
+      fontWeight: '500',
+    },
+    macroTargetPct: {
+      fontSize: 9,
+      color: colors.textMuted,
+      fontWeight: '500',
+      marginTop: 2,
+    },
+    // Ingredient allergen highlighting
     ingredientItem: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -1353,6 +1906,13 @@ const createStyles = (colors: any) =>
       marginBottom: 4,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.border,
+    },
+    ingredientItemFlagged: {
+      backgroundColor: '#FEF2F2',
+      borderRadius: 8,
+      paddingHorizontal: 10,
+      marginHorizontal: -4,
+      borderBottomColor: '#FECACA',
     },
     ingredientBullet: {
       width: 8,
@@ -1365,6 +1925,37 @@ const createStyles = (colors: any) =>
       fontSize: 16,
       color: colors.text,
       flex: 1,
+    },
+    ingredientFlagNote: {
+      fontSize: 11,
+      color: '#DC2626',
+      fontWeight: '600',
+      marginTop: 2,
+    },
+    relatedCard: {
+      width: 140,
+      backgroundColor: colors.background,
+      borderRadius: 12,
+      overflow: 'hidden',
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    relatedImage: {
+      width: '100%',
+      height: 90,
+      resizeMode: 'cover',
+    },
+    relatedTitle: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.text,
+      lineHeight: 16,
+      marginBottom: 2,
+    },
+    relatedMeta: {
+      fontSize: 10,
+      color: colors.textMuted,
+      fontWeight: '500',
     },
     instructionItem: {
       flexDirection: 'row',

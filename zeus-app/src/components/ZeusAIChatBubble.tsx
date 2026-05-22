@@ -1,15 +1,17 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   TouchableOpacity,
   View,
   Text,
   StyleSheet,
   Animated,
+  Easing,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useChatStore } from '../store/chatStore';
 import { useThemeStore } from '../store/themeStore';
+import { useOnboardingStore } from '../store/onboardingStore';
 
 export const ZeusAIChatBubble: React.FC = () => {
   const insets = useSafeAreaInsets();
@@ -17,8 +19,54 @@ export const ZeusAIChatBubble: React.FC = () => {
   const toggleChat = useChatStore((s) => s.toggleChat);
   const isOpen = useChatStore((s) => s.isOpen);
   const unreadCount = useChatStore((s) => s.unreadCount);
+  const aiBubblePulseSeen = useOnboardingStore((s) => s.aiBubblePulseSeen);
+  const markAiBubblePulseSeen = useOnboardingStore((s) => s.markAiBubblePulseSeen);
 
   const scaleAnim = React.useRef(new Animated.Value(1)).current;
+  const pulseScale = React.useRef(new Animated.Value(1)).current;
+  const pulseOpacity = React.useRef(new Animated.Value(0)).current;
+
+  // One-time discovery pulse the first time the user lands on the main app.
+  useEffect(() => {
+    if (aiBubblePulseSeen || isOpen) return;
+
+    const delay = setTimeout(() => {
+      Animated.loop(
+        Animated.parallel([
+          Animated.sequence([
+            Animated.timing(pulseScale, {
+              toValue: 1.8,
+              duration: 900,
+              easing: Easing.out(Easing.quad),
+              useNativeDriver: true,
+            }),
+            Animated.timing(pulseScale, {
+              toValue: 1,
+              duration: 0,
+              useNativeDriver: true,
+            }),
+          ]),
+          Animated.sequence([
+            Animated.timing(pulseOpacity, {
+              toValue: 0.4,
+              duration: 200,
+              useNativeDriver: true,
+            }),
+            Animated.timing(pulseOpacity, {
+              toValue: 0,
+              duration: 700,
+              useNativeDriver: true,
+            }),
+          ]),
+        ]),
+        { iterations: 3 }
+      ).start(() => {
+        markAiBubblePulseSeen();
+      });
+    }, 800);
+
+    return () => clearTimeout(delay);
+  }, [aiBubblePulseSeen, isOpen, pulseScale, pulseOpacity, markAiBubblePulseSeen]);
 
   const handlePress = () => {
     Animated.sequence([
@@ -49,10 +97,26 @@ export const ZeusAIChatBubble: React.FC = () => {
         },
       ]}
     >
+      {/* Discovery pulse ring — fires once for new users. */}
+      {!aiBubblePulseSeen && (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.pulseRing,
+            {
+              backgroundColor: colors.primary,
+              opacity: pulseOpacity,
+              transform: [{ scale: pulseScale }],
+            },
+          ]}
+        />
+      )}
+
       <TouchableOpacity
         onPress={handlePress}
         activeOpacity={0.8}
         style={[styles.bubble, { backgroundColor: colors.primary }]}
+        accessibilityLabel="Open Zeus AI chat"
       >
         <Ionicons name="flash" size={22} color="#FFF" />
       </TouchableOpacity>
@@ -85,7 +149,14 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.3,
     shadowRadius: 6,
-    opacity: 0.85,
+  },
+  pulseRing: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
   },
   badge: {
     position: 'absolute',

@@ -11,7 +11,23 @@ export interface Instruction {
 }
 
 export type DifficultyLevel = 'Easy' | 'Medium' | 'Hard';
-export type MealType = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack' | 'Dessert';
+export type MealType = 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack' | 'Dessert' | 'Sides';
+
+// Named scenario collection keys understood by the /api/recipes/collections/{key} endpoint.
+export type RecipeCollectionKey =
+  | 'quick_weeknight'
+  | 'quick'
+  | 'one_pot'
+  | 'sheet_pan'
+  | 'slow_cooker'
+  | 'instant_pot'
+  | 'air_fryer'
+  | 'no_cook'
+  | 'healthy_light'
+  | 'make_ahead'
+  | 'meal_prep'
+  | 'comfort_food'
+  | 'family_favorites';
 
 export interface Recipe {
   id: string;
@@ -28,6 +44,10 @@ export interface Recipe {
   difficulty: DifficultyLevel;
   meal_type: string[];
   dietary_tags: string[];
+  // New uniform tagging dimensions (populated by detection pipeline)
+  cooking_method?: string[];   // e.g. ['one_pot'], ['sheet_pan']
+  time_tags?: string[];        // e.g. ['quick', 'weeknight']
+  style_tags?: string[];       // e.g. ['make_ahead', 'comfort_food']
   is_ai_generated: boolean;
   likes_count: number;
   created_at: string;

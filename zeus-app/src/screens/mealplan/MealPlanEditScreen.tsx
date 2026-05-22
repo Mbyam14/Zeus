@@ -9,10 +9,10 @@ import {
   ScrollView,
   FlatList,
   TextInput,
-  Image,
   Modal,
   Dimensions,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useThemeStore, ThemeColors } from '../../store/themeStore';
@@ -123,13 +123,11 @@ export const MealPlanEditScreen: React.FC<MealPlanBuilderProps> = ({ navigation,
     { key: 'Snack', label: 'Snack' },
   ];
 
-  // Load recipes for the picker — no dietary filter so manual selection always has results
-  const loadRecipes = useCallback(async (query?: string, mealType?: string | null) => {
+  // Load all recipes once — 300 covers all meal types so we can filter client-side
+  const loadRecipes = useCallback(async () => {
     setLoadingRecipes(true);
     try {
-      const recipes = await recipeService.getAllRecipes(
-        100, 0, query || undefined, mealType || undefined,
-      );
+      const recipes = await recipeService.getAllRecipes(300, 0);
       setAllRecipes(recipes);
     } catch (err) {
       console.error('[MealPlanEdit] loadRecipes error:', err);
@@ -159,7 +157,8 @@ export const MealPlanEditScreen: React.FC<MealPlanBuilderProps> = ({ navigation,
     setSearchQuery('');
     setActiveFilter(null);
     setPickerOpen(true);
-    loadRecipes('', null);
+    // Recipes are already loaded on mount; reload only if empty (e.g., initial load failed)
+    if (allRecipes.length === 0) loadRecipes();
   };
 
   const assignRecipe = (recipe: Recipe) => {
@@ -183,13 +182,25 @@ export const MealPlanEditScreen: React.FC<MealPlanBuilderProps> = ({ navigation,
 
   const handleSearch = (text: string) => {
     setSearchQuery(text);
-    loadRecipes(text, activeFilter);
+    // Client-side filtering — no API call needed
   };
 
   const handleFilter = (filterKey: string | null) => {
     setActiveFilter(filterKey);
-    loadRecipes(searchQuery, filterKey);
+    // Client-side filtering — no API call needed
   };
+
+  // Derived list: filter allRecipes by current search/category without API round-trips
+  const visibleRecipes = allRecipes.filter((r) => {
+    if (activeFilter) {
+      const types = ((r as any).meal_type || []).map((t: string) => t.toLowerCase());
+      if (!types.includes(activeFilter.toLowerCase())) return false;
+    }
+    if (searchQuery.trim()) {
+      if (!r.title.toLowerCase().includes(searchQuery.trim().toLowerCase())) return false;
+    }
+    return true;
+  });
 
   const getStartDate = (): string => {
     const weekOffset = route.params.weekOffset ?? 0;
@@ -197,7 +208,10 @@ export const MealPlanEditScreen: React.FC<MealPlanBuilderProps> = ({ navigation,
     const dow = today.getDay();
     const monday = new Date(today);
     monday.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1) + weekOffset * 7);
-    return monday.toISOString().split('T')[0];
+    const y = monday.getFullYear();
+    const m = String(monday.getMonth() + 1).padStart(2, '0');
+    const d = String(monday.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
   };
 
   const convertToApiFormat = () => {
@@ -468,7 +482,7 @@ export const MealPlanEditScreen: React.FC<MealPlanBuilderProps> = ({ navigation,
             </View>
           ) : (
             <FlatList
-              data={allRecipes}
+              data={visibleRecipes}
               keyExtractor={(item) => item.id}
               style={styles.pickerList}
               contentContainerStyle={{ paddingBottom: 40 }}

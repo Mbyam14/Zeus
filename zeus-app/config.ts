@@ -22,7 +22,7 @@ interface EnvConfig {
 const ENV: Record<string, EnvConfig> = {
   development: {
     // Local backend for development
-    API_BASE_URL: 'http://192.168.0.16:8000',
+    API_BASE_URL: 'http://192.168.254.76:8000',
     API_TIMEOUT: 20000,
   },
   preview: {

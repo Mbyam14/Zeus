@@ -143,3 +143,9 @@ alembic/versions/
 # Logs
 logs/
 *.log
+
+# Debug/dev scripts and their output
+debug_*.py
+debug_*.json
+debug_*.txt
+nul

@@ -15,12 +15,14 @@ interface OnboardingState {
   isFirstRun: boolean;
   currentStep: OnboardingStep;
   dismissed: boolean;
+  aiBubblePulseSeen: boolean;
 
   // Actions
   startOnboarding: () => void;
   advanceStep: () => void;
   completeOnboarding: () => void;
   dismissBanner: () => void;
+  markAiBubblePulseSeen: () => void;
   reset: () => void;
 }
 
@@ -32,9 +34,14 @@ export const useOnboardingStore = create<OnboardingState>()(
       isFirstRun: false,
       currentStep: 'pantry',
       dismissed: false,
+      aiBubblePulseSeen: false,
 
       startOnboarding: () => {
         set({ isFirstRun: true, currentStep: 'pantry', dismissed: false });
+      },
+
+      markAiBubblePulseSeen: () => {
+        set({ aiBubblePulseSeen: true });
       },
 
       advanceStep: () => {
@@ -54,7 +61,7 @@ export const useOnboardingStore = create<OnboardingState>()(
       },
 
       reset: () => {
-        set({ isFirstRun: false, currentStep: 'pantry', dismissed: false });
+        set({ isFirstRun: false, currentStep: 'pantry', dismissed: false, aiBubblePulseSeen: false });
       },
     }),
     {

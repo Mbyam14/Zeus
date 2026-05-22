@@ -4,18 +4,18 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   ScrollView,
   Alert,
   Platform,
-  Image,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/authStore';
 import { useThemeStore } from '../../store/themeStore';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { ProfileStackParamList } from '../../navigation/ProfileNavigator';
+import { TabHeader } from '../../components/TabHeader';
 
 type ProfileScreenNavigationProp = StackNavigationProp<ProfileStackParamList, 'ProfileMain'>;
 
@@ -80,11 +80,8 @@ export const ProfileScreen: React.FC = () => {
   const styles = createStyles(colors);
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Profile</Text>
-      </View>
+    <View style={styles.container}>
+      <TabHeader title="Profile" />
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         {/* Profile Card */}
@@ -178,7 +175,7 @@ export const ProfileScreen: React.FC = () => {
 
         <Text style={styles.versionText}>Zeus v1.4.0</Text>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -187,19 +184,6 @@ const createStyles = (colors: any) =>
     container: {
       flex: 1,
       backgroundColor: colors.background,
-    },
-    header: {
-      paddingHorizontal: 20,
-      paddingVertical: 16,
-      backgroundColor: colors.backgroundSecondary,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.border,
-    },
-    headerTitle: {
-      fontSize: 28,
-      fontWeight: '800',
-      color: colors.primary,
-      letterSpacing: -0.5,
     },
     scrollContent: {
       paddingBottom: 40,

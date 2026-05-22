@@ -20,7 +20,9 @@ import * as ImagePicker from 'expo-image-picker';
 import { PantryItem, PantryCategory, PantryItemCreate, IngredientLibraryItem, DetectedPantryItem } from '../../types/pantry';
 import { pantryService } from '../../services/pantryService';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useThemeStore } from '../../store/themeStore';
+import { TabHeader } from '../../components/TabHeader';
 import { CATEGORY_ICONS } from '../../constants/categoryIcons';
 import { useOnboardingStore } from '../../store/onboardingStore';
 import { PantryItemSkeleton } from '../../components/SkeletonLoader';
@@ -219,11 +221,7 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
   const [editingItem, setEditingItem] = useState<PantryItem | null>(null);
 
   const { colors } = useThemeStore();
-  const onboardingStep = useOnboardingStore((s) => s.currentStep);
-  const isFirstRun = useOnboardingStore((s) => s.isFirstRun);
-  const advanceOnboarding = useOnboardingStore((s) => s.advanceStep);
-  const dismissBanner = useOnboardingStore((s) => s.dismissBanner);
-  const onboardingDismissed = useOnboardingStore((s) => s.dismissed);
+  const insets = useSafeAreaInsets();
   const styles = createStyles(colors);
   const [newItem, setNewItem] = useState<PantryItemCreate>({
     item_name: '',
@@ -953,20 +951,19 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
           </TouchableOpacity>
         </View>
       ) : (
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Pantry</Text>
-        <View style={styles.headerButtons}>
-          <TouchableOpacity
-            style={styles.addButton}
-            onPress={() => setShowAddDropdown(!showAddDropdown)}
-          >
-            <Text style={styles.addButtonText}>{showAddDropdown ? '×' : '+'}</Text>
-          </TouchableOpacity>
-        </View>
+      <View style={styles.headerWrapper}>
+        <TabHeader
+          title="Pantry"
+          primaryAction={{
+            icon: showAddDropdown ? 'close' : 'add',
+            onPress: () => setShowAddDropdown(!showAddDropdown),
+            accessibilityLabel: showAddDropdown ? 'Close add menu' : 'Add to pantry',
+          }}
+        />
 
         {/* Add Dropdown Menu */}
         {showAddDropdown && (
-          <View style={styles.dropdownMenu}>
+          <View style={[styles.dropdownMenu, { top: insets.top + 60 }]}>
             <TouchableOpacity
               style={styles.dropdownMenuItem}
               onPress={() => {
@@ -1084,23 +1081,6 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
       </View>
       )}
 
-      {/* Onboarding Guide */}
-      {isFirstRun && onboardingStep === 'pantry' && !onboardingDismissed && (
-        <View style={[styles.onboardingBanner, { backgroundColor: colors.primary + '12', borderColor: colors.primary + '30' }]}>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.onboardingTitle, { color: colors.primary }]}>
-              Step 1: Stock Your Pantry
-            </Text>
-            <Text style={[styles.onboardingText, { color: colors.textSecondary }]}>
-              Add what you have at home so Zeus can create personalized meal plans. Use Quick Add for common items!
-            </Text>
-          </View>
-          <TouchableOpacity onPress={dismissBanner} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <Ionicons name="close" size={20} color={colors.textMuted} />
-          </TouchableOpacity>
-        </View>
-      )}
-
       {/* Dropdown Backdrop */}
       {showAddDropdown && (
         <TouchableOpacity
@@ -1197,6 +1177,17 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
           <Ionicons name="search-outline" size={48} color={colors.textMuted} />
           <Text style={{ fontSize: 16, fontWeight: '600', color: colors.text, marginTop: 12 }}>No items found</Text>
           <Text style={{ fontSize: 14, color: colors.textMuted, marginTop: 4, textAlign: 'center' }}>Try a different search or category</Text>
+          {(searchQuery || selectedCategory) && (
+            <TouchableOpacity
+              onPress={() => { setSearchQuery(''); setSelectedCategory(null); }}
+              activeOpacity={0.7}
+              style={{ marginTop: 16, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8, backgroundColor: colors.primary + '15' }}
+            >
+              <Text style={{ fontSize: 14, fontWeight: '600', color: colors.primary }}>
+                Clear {searchQuery && selectedCategory ? 'filters' : searchQuery ? 'search' : 'category'}
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
       ) : (
         <>
@@ -1676,12 +1667,10 @@ export const PantryScreen: React.FC<PantryScreenProps> = ({ navigation }) => {
 
 const createStyles = (colors: any) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
+  headerWrapper: { position: 'relative', zIndex: 100 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, paddingTop: Platform.OS === 'ios' ? 60 : 16, paddingBottom: 16, backgroundColor: colors.backgroundSecondary, borderBottomWidth: 1, borderBottomColor: colors.border, zIndex: 100 },
   headerTitle: { fontSize: 28, fontWeight: 'bold', color: colors.primary },
-  headerButtons: { flexDirection: 'row', gap: 12 },
-  addButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center' },
-  addButtonText: { fontSize: 28, fontWeight: 'bold', color: colors.backgroundSecondary },
-  dropdownMenu: { position: 'absolute', top: 70, right: 24, backgroundColor: colors.card, borderRadius: 12, shadowColor: colors.shadow, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 8, overflow: 'hidden', minWidth: 160, zIndex: 101 },
+  dropdownMenu: { position: 'absolute', right: 24, backgroundColor: colors.card, borderRadius: 12, shadowColor: colors.shadow, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 8, overflow: 'hidden', minWidth: 160, zIndex: 101 },
   dropdownMenuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: colors.border },
   dropdownMenuItemDisabled: { opacity: 0.5 },
   dropdownMenuIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
@@ -1794,26 +1783,6 @@ const createStyles = (colors: any) => StyleSheet.create({
   expiringBannerButtonText: { color: '#FFF', fontSize: 12, fontWeight: '600' },
   expiringBannerDismiss: { padding: 4, marginLeft: 6 },
   expiringBannerDismissText: { fontSize: 14, color: colors.warningDark },
-  onboardingBanner: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginHorizontal: 16,
-    marginTop: 8,
-    marginBottom: 4,
-    padding: 14,
-    borderRadius: 14,
-    borderWidth: 1,
-    gap: 12,
-  },
-  onboardingTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  onboardingText: {
-    fontSize: 13,
-    lineHeight: 19,
-  },
   // Inline Quick Add
   inlineAddBar: {
     flexDirection: 'row' as const,

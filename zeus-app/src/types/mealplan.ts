@@ -83,8 +83,6 @@ export interface MealPlan {
     saturday?: DayMeals;
     sunday?: DayMeals;
   };
-  ai_optimize_uses?: number;
-  ai_optimize_remaining?: number;
   created_at: string;
 }
 

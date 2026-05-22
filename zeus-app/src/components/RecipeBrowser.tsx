@@ -7,8 +7,8 @@ import {
   FlatList,
   TouchableOpacity,
   ActivityIndicator,
-  Image,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useThemeStore, ThemeColors } from '../store/themeStore';
 import { useAuthStore } from '../store/authStore';
 import { recipeService } from '../services/recipeService';
@@ -34,6 +34,8 @@ export const RecipeBrowser: React.FC<RecipeBrowserProps> = ({
   const [loading, setLoading] = useState(!preloadedRecipes);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeMealType, setActiveMealType] = useState<string | undefined>(filterMealType);
+  // Scenario quick-filters (Quick, One-Pot, Sheet Pan, Healthy)
+  const [activeScenario, setActiveScenario] = useState<string | undefined>();
   const { colors } = useThemeStore();
   const { user } = useAuthStore();
   const styles = createStyles(colors);
@@ -69,16 +71,35 @@ export const RecipeBrowser: React.FC<RecipeBrowserProps> = ({
     return () => clearTimeout(debounce);
   }, [loadRecipes, isClientSide]);
 
+  // Scenario filter predicates — applied client-side on top of meal type / search
+  const scenarioPredicate = (r: Recipe, scenario: string): boolean => {
+    switch (scenario) {
+      case 'quick':
+        return (r.time_tags || []).includes('quick')
+            || ((r.prep_time || 0) + (r.cook_time || 0)) <= 30;
+      case 'one_pot':
+        return (r.cooking_method || []).includes('one_pot');
+      case 'sheet_pan':
+        return (r.cooking_method || []).includes('sheet_pan');
+      case 'healthy':
+        return r.calories != null && r.calories < 500;
+      default:
+        return true;
+    }
+  };
+
   // Client-side filtering (instant, no API calls)
   const filteredRecipes = useMemo(() => {
-    if (!isClientSide) return apiRecipes;
-
-    let filtered = preloadedRecipes!;
+    let filtered = isClientSide ? preloadedRecipes! : apiRecipes;
 
     if (activeMealType) {
       filtered = filtered.filter(r =>
         r.meal_type?.some(mt => mt.toLowerCase() === activeMealType.toLowerCase())
       );
+    }
+
+    if (activeScenario) {
+      filtered = filtered.filter(r => scenarioPredicate(r, activeScenario));
     }
 
     if (searchQuery.trim()) {
@@ -90,13 +111,21 @@ export const RecipeBrowser: React.FC<RecipeBrowserProps> = ({
     }
 
     return filtered;
-  }, [isClientSide, preloadedRecipes, apiRecipes, activeMealType, searchQuery]);
+  }, [isClientSide, preloadedRecipes, apiRecipes, activeMealType, activeScenario, searchQuery]);
 
   const mealTypes = [
     { key: undefined, label: 'All' },
     { key: 'Breakfast', label: 'Breakfast' },
     { key: 'Lunch', label: 'Lunch' },
     { key: 'Dinner', label: 'Dinner' },
+  ];
+
+  // Scenario chips — let users build plans around real cooking constraints
+  const scenarios = [
+    { key: 'quick',     label: '⏱️ Quick' },
+    { key: 'one_pot',   label: '🥘 One-Pot' },
+    { key: 'sheet_pan', label: '🍳 Sheet Pan' },
+    { key: 'healthy',   label: '🥗 Healthy' },
   ];
 
   const handleSearchChange = (text: string) => {
@@ -180,6 +209,33 @@ export const RecipeBrowser: React.FC<RecipeBrowserProps> = ({
         ))}
       </View>
 
+      {/* Scenario chips — Quick / One-Pot / Sheet Pan / Healthy */}
+      <View style={styles.scenarioRow}>
+        <FlatList
+          horizontal
+          data={scenarios}
+          keyExtractor={(s) => s.key}
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: 10, gap: 6 }}
+          renderItem={({ item: s }) => (
+            <TouchableOpacity
+              key={s.key}
+              style={[
+                styles.scenarioChip,
+                activeScenario === s.key && styles.scenarioChipActive,
+              ]}
+              onPress={() => setActiveScenario(activeScenario === s.key ? undefined : s.key)}
+              activeOpacity={0.7}
+            >
+              <Text style={[
+                styles.scenarioChipText,
+                activeScenario === s.key && styles.scenarioChipTextActive,
+              ]}>{s.label}</Text>
+            </TouchableOpacity>
+          )}
+        />
+      </View>
+
       {/* Recipe List */}
       {loading ? (
         <View style={styles.loadingContainer}>
@@ -256,6 +312,30 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   },
   filterChipTextActive: {
     color: colors.primary,
+  },
+  scenarioRow: {
+    paddingBottom: 6,
+    marginTop: -4,
+  },
+  scenarioChip: {
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  scenarioChipActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  scenarioChipText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.textMuted,
+  },
+  scenarioChipTextActive: {
+    color: '#FFF',
   },
   loadingContainer: {
     height: 100,

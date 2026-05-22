@@ -96,6 +96,10 @@ api.interceptors.response.use(
 
         const { access_token, refresh_token: newRefreshToken } = response.data;
 
+        if (!access_token) {
+          throw new Error('Invalid refresh response: missing access_token');
+        }
+
         await SecureStore.setItemAsync('auth_token', access_token);
         if (newRefreshToken) {
           await SecureStore.setItemAsync('refresh_token', newRefreshToken);

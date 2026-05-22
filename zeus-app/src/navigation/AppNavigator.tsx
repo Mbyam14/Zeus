@@ -52,7 +52,7 @@ export const AppNavigator: React.FC = () => {
         tasks.push(
           mealPlanService.getCurrentWeekMealPlan().then(plan => {
             if (plan) useDataStore.getState().setMealPlan(plan);
-          }).catch(() => {})
+          }).catch((err) => console.warn('[Prefetch] meal plan failed:', err?.message))
         );
       }
 
@@ -60,13 +60,13 @@ export const AppNavigator: React.FC = () => {
         tasks.push(
           pantryService.getPantryItems().then(items => {
             useDataStore.getState().setPantryItems(items);
-          }).catch(() => {})
+          }).catch((err) => console.warn('[Prefetch] pantry failed:', err?.message))
         );
       }
 
       // Prefetch recipe feed (first page) silently
       tasks.push(
-        recipeService.getAllRecipes(20, 0).then(() => {}).catch(() => {})
+        recipeService.getAllRecipes(20, 0).then(() => {}).catch((err) => console.warn('[Prefetch] recipe feed failed:', err?.message))
       );
 
       await Promise.allSettled(tasks);

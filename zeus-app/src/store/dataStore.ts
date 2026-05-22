@@ -6,6 +6,11 @@ import { Recipe as FeedRecipe } from '../types/recipe';
 import { PantryItem } from '../types/pantry';
 import { GroceryList } from '../types/grocerylist';
 
+interface RecipeCollectionCache {
+  recipes: FeedRecipe[];
+  fetchedAt: number;
+}
+
 interface DataState {
   // Cached data
   mealPlan: MealPlan | null;
@@ -14,6 +19,8 @@ interface DataState {
   pantryItems: PantryItem[];
   groceryList: GroceryList | null;
   recipeFeed: FeedRecipe[];
+  // Keyed cache of named scenario collections (quick_weeknight, one_pot, etc.)
+  recipeCollections: Record<string, RecipeCollectionCache>;
 
   // Timestamps for staleness checks (ms since epoch)
   mealPlanFetchedAt: number | null;
@@ -36,8 +43,13 @@ interface DataState {
   setPantryItems: (items: PantryItem[]) => void;
   setGroceryList: (list: GroceryList | null) => void;
   setRecipeFeed: (recipes: FeedRecipe[]) => void;
+  setRecipeCollection: (key: string, recipes: FeedRecipe[]) => void;
   isFresh: (key: 'mealPlan' | 'pantry' | 'groceryList' | 'recipeFeed', maxAgeMs?: number) => boolean;
-  invalidate: (key: 'mealPlan' | 'pantry' | 'groceryList' | 'recipeFeed' | 'all') => void;
+  isCollectionFresh: (key: string, maxAgeMs?: number) => boolean;
+  invalidate: (key: 'mealPlan' | 'pantry' | 'groceryList' | 'recipeFeed' | 'recipeCollections' | 'all') => void;
+  // Full reset — called on logout / login (account switch). Wipes both the
+  // in-memory state AND the persisted copy so User B never sees User A's data.
+  resetAll: () => void;
   getCachedWeekDate: () => string | null;
   setCachedWeekDate: (date: string) => void;
   setOffline: (offline: boolean) => void;
@@ -50,6 +62,7 @@ const STALE_THRESHOLDS = {
   pantry: 10 * 60 * 1000,     // 10 minutes
   groceryList: 5 * 60 * 1000, // 5 minutes
   recipeFeed: 5 * 60 * 1000,  // 5 minutes
+  recipeCollection: 10 * 60 * 1000, // 10 minutes per collection
 };
 
 export const useDataStore = create<DataState>()(
@@ -62,6 +75,7 @@ export const useDataStore = create<DataState>()(
       pantryItems: [],
       groceryList: null,
       recipeFeed: [],
+      recipeCollections: {},
       mealPlanFetchedAt: null,
       pantryFetchedAt: null,
       groceryListFetchedAt: null,
@@ -101,6 +115,22 @@ export const useDataStore = create<DataState>()(
           lastSyncedAt: Date.now(),
         }),
 
+      setRecipeCollection: (key, recipes) =>
+        set((state) => ({
+          recipeCollections: {
+            ...state.recipeCollections,
+            [key]: { recipes, fetchedAt: Date.now() },
+          },
+          lastSyncedAt: Date.now(),
+        })),
+
+      isCollectionFresh: (key, maxAgeMs) => {
+        const entry = get().recipeCollections[key];
+        if (!entry) return false;
+        const threshold = maxAgeMs ?? STALE_THRESHOLDS.recipeCollection;
+        return Date.now() - entry.fetchedAt < threshold;
+      },
+
       isFresh: (key, maxAgeMs) => {
         const state = get();
         const threshold = maxAgeMs ?? STALE_THRESHOLDS[key];
@@ -132,6 +162,7 @@ export const useDataStore = create<DataState>()(
             pantryFetchedAt: null,
             groceryListFetchedAt: null,
             recipeFeedFetchedAt: null,
+            recipeCollections: {},
           });
         } else {
           switch (key) {
@@ -147,6 +178,9 @@ export const useDataStore = create<DataState>()(
             case 'recipeFeed':
               set({ recipeFeedFetchedAt: null });
               break;
+            case 'recipeCollections':
+              set({ recipeCollections: {} });
+              break;
           }
         }
       },
@@ -155,6 +189,24 @@ export const useDataStore = create<DataState>()(
       setCachedWeekDate: (date) => set({ cachedWeekDate: date }),
       setOffline: (offline) => set({ isOffline: offline }),
       markSynced: () => set({ lastSyncedAt: Date.now() }),
+
+      resetAll: () => {
+        set({
+          mealPlan: null,
+          mealPlanRecipes: {},
+          macroSummary: null,
+          pantryItems: [],
+          groceryList: null,
+          recipeFeed: [],
+          recipeCollections: {},
+          mealPlanFetchedAt: null,
+          pantryFetchedAt: null,
+          groceryListFetchedAt: null,
+          recipeFeedFetchedAt: null,
+          cachedWeekDate: null,
+          lastSyncedAt: null,
+        });
+      },
     }),
     {
       name: 'zeus-data-store',
@@ -171,6 +223,7 @@ export const useDataStore = create<DataState>()(
         groceryListFetchedAt: state.groceryListFetchedAt,
         recipeFeed: state.recipeFeed,
         recipeFeedFetchedAt: state.recipeFeedFetchedAt,
+        recipeCollections: state.recipeCollections,
         cachedWeekDate: state.cachedWeekDate,
         lastSyncedAt: state.lastSyncedAt,
       }),

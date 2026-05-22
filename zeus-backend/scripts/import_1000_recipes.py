@@ -176,7 +176,7 @@ def main():
         random.shuffle(names)
 
         for name in names:
-            if len(candidates) >= 1100:
+            if len(candidates) >= 8000:
                 break
             try:
                 with z.open(name) as f:
@@ -195,7 +195,21 @@ def main():
                 servings_match = re.match(r"(\d+)", str(servings_str))
                 servings = int(servings_match.group(1)) if servings_match else 0
 
-                if len(raw_ings) < 3 or calories <= 0 or servings <= 0:
+                # Rating filter — must be >= 4.0
+                try:
+                    rating = float(data.get("rating", 0) or 0)
+                except (ValueError, TypeError):
+                    rating = 0
+                if rating < 4.0:
+                    continue
+
+                # Must have image, at least 5 ingredients, calories, and servings
+                if not images or len(raw_ings) < 5 or calories <= 0 or servings <= 0:
+                    continue
+
+                # Must have at least 3 instruction steps
+                steps = data.get("steps", [])
+                if len(steps) < 3:
                     continue
 
                 # Skip non-edible recipes
@@ -213,7 +227,7 @@ def main():
                     if ing and ing.get("name"):
                         parsed_ings.append(ing)
 
-                if len(parsed_ings) < 3:
+                if len(parsed_ings) < 1:
                     continue
 
                 # Parse times
@@ -278,7 +292,7 @@ def main():
     # Insert in batches of 50
     inserted = 0
     batch_size = 50
-    for i in range(0, min(1000, len(candidates)), batch_size):
+    for i in range(0, min(5000, len(candidates)), batch_size):
         batch = candidates[i : i + batch_size]
         try:
             result = db.table("recipes").insert(batch).execute()

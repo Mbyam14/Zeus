@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from app.schemas.user import UserRegister, UserLogin, UserProfile, UserResponse, Token, RefreshRequest, ChangePasswordRequest, DeleteAccountRequest
+from app.schemas.user import UserRegister, UserLogin, UserProfile, UserResponse, Token, RefreshRequest, ChangePasswordRequest, DeleteAccountRequest, PasswordResetRequest, PasswordResetConfirm
 from app.services.auth_service import auth_service
 from app.utils.dependencies import get_current_active_user
 from app.config import settings
@@ -57,6 +57,25 @@ async def change_password(
     """Change user password. Requires current password verification."""
     await auth_service.change_password(current_user.id, body.current_password, body.new_password)
     return {"message": "Password changed successfully"}
+
+
+@router.post("/password-reset/request")
+@limiter.limit(settings.rate_limit_auth)
+async def request_password_reset(request: Request, body: PasswordResetRequest):
+    """Send a password reset code to the given email if an account exists.
+
+    Always returns 200 to avoid leaking which emails are registered.
+    """
+    await auth_service.request_password_reset(body.email)
+    return {"message": "If an account exists for that email, a reset code has been sent."}
+
+
+@router.post("/password-reset/confirm")
+@limiter.limit(settings.rate_limit_auth)
+async def confirm_password_reset(request: Request, body: PasswordResetConfirm):
+    """Verify the emailed code and set a new password."""
+    await auth_service.confirm_password_reset(body.email, body.code, body.new_password)
+    return {"message": "Password reset successfully"}
 
 
 @router.delete("/account")

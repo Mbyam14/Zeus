@@ -184,23 +184,6 @@ export const mealPlanService = {
     return response.data;
   },
 
-  /**
-   * Use Claude Haiku to review and improve the existing plan (Tier 2, 3 uses/plan)
-   */
-  async aiOptimizeMealPlan(mealPlanId: string): Promise<{
-    optimized: boolean;
-    message: string;
-    uses_remaining: number;
-    swaps: Array<{ day: string; meal_type: string; old_recipe: string; new_recipe: string; reason: string }>;
-    meals?: Record<string, any>;
-  }> {
-    const response = await api.post(
-      `/api/meal-plans/${mealPlanId}/ai-optimize`,
-      null,
-      { timeout: 30000 }
-    );
-    return response.data;
-  },
 
   /**
    * Create a meal plan with manually selected recipes

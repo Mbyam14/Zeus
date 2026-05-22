@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { User, AuthToken, LoginRequest, RegisterRequest } from '../types/user';
 import { authService } from '../services/authService';
+import { useDataStore } from './dataStore';
 
 // Helper to check if preferences exist in profile_data
 const hasPreferencesSet = (user: User | null): boolean => {
@@ -39,6 +40,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       set({ isLoading: true });
       const authToken = await authService.login(data);
+      // Wipe any previous user's cached data before settling new auth state.
+      // Without this, User B would see User A's meal plan / recipe feed /
+      // liked-and-saved state from AsyncStorage.
+      useDataStore.getState().resetAll();
       set({
         user: authToken.user,
         isAuthenticated: true,
@@ -55,6 +60,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       set({ isLoading: true });
       const authToken = await authService.register(data);
+      useDataStore.getState().resetAll();
       set({
         user: authToken.user,
         isAuthenticated: true,
@@ -70,20 +76,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   logout: async () => {
     try {
       await authService.logout();
-      set({
-        user: null,
-        isAuthenticated: false,
-        hasCompletedSetup: false
-      });
     } catch (error) {
       console.error('Logout error:', error);
       // Still clear state even if logout API fails
-      set({
-        user: null,
-        isAuthenticated: false,
-        hasCompletedSetup: false
-      });
     }
+    // Always wipe data + auth on logout, regardless of API success.
+    useDataStore.getState().resetAll();
+    set({
+      user: null,
+      isAuthenticated: false,
+      hasCompletedSetup: false
+    });
   },
 
   loadUser: async () => {

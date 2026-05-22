@@ -111,6 +111,18 @@ class ChangePasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=8, max_length=72)
 
 
+class PasswordResetRequest(BaseModel):
+    """Request a password reset code be emailed to the user."""
+    email: EmailStr
+
+
+class PasswordResetConfirm(BaseModel):
+    """Confirm a password reset with the emailed code and a new password."""
+    email: EmailStr
+    code: str = Field(..., min_length=6, max_length=6)
+    new_password: str = Field(..., min_length=8, max_length=72)
+
+
 class NotificationPreferences(BaseModel):
     """User notification preferences"""
     meal_reminders: bool = True

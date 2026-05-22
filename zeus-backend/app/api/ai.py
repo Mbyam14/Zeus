@@ -65,39 +65,6 @@ async def generate_meal_plan(
     return await ai_service.generate_meal_plan(meal_plan_request, current_user.id)
 
 
-@router.post("/recipe-suggestions")
-async def get_recipe_suggestions(
-    current_user: UserResponse = Depends(get_current_active_user)
-) -> Dict[str, Any]:
-    """
-    Get personalized recipe suggestions based on:
-    - User's pantry items
-    - Past recipe preferences
-    - Dietary restrictions from profile
-    - Current trending recipes
-    
-    Returns a list of suggested recipes without creating them.
-    """
-    # This could be implemented to analyze user's pantry and suggest existing recipes
-    # or generate quick AI suggestions without full recipe creation
-    
-    return {
-        "message": "Recipe suggestions feature coming soon!",
-        "suggestions": [
-            {
-                "title": "Quick Pasta with Pantry Ingredients",
-                "reason": "Based on your available ingredients",
-                "confidence": 0.85
-            },
-            {
-                "title": "30-Minute Stir Fry",
-                "reason": "Matches your cooking skill level",
-                "confidence": 0.78
-            }
-        ]
-    }
-
-
 class AskAIRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=1000, description="User's question or prompt")
 

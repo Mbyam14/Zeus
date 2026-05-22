@@ -39,6 +39,9 @@ async def get_recipe_feed(
     max_prep_time: Optional[int] = Query(None, description="Maximum prep time in minutes"),
     meal_type: Optional[MealType] = Query(None, description="Filter by meal type"),
     dietary_tags: Optional[List[str]] = Query(None, description="Filter by dietary tags"),
+    cooking_methods: Optional[List[str]] = Query(None, description="Filter by cooking method tags (any match)"),
+    style_tags: Optional[List[str]] = Query(None, description="Filter by style tags (any match)"),
+    time_tags: Optional[List[str]] = Query(None, description="Filter by time tags (any match)"),
     search: Optional[str] = Query(None, description="Search by recipe title"),
     use_pantry_items: bool = Query(False, description="Prioritize recipes using pantry items"),
     limit: int = Query(20, ge=1, le=500, description="Number of recipes to return"),
@@ -58,6 +61,9 @@ async def get_recipe_feed(
         max_prep_time=max_prep_time,
         meal_type=meal_type,
         dietary_tags=dietary_tags,
+        cooking_methods=cooking_methods,
+        style_tags=style_tags,
+        time_tags=time_tags,
         search=search,
         use_pantry_items=use_pantry_items,
         limit=limit,
@@ -79,6 +85,24 @@ async def get_recipe_feed(
         cache.set(cache_key, result, TTL_RECIPE_FEED)
 
     return result
+
+
+@router.get("/collections/{collection_key}", response_model=List[RecipeResponse])
+async def get_recipe_collection(
+    collection_key: str,
+    limit: int = Query(12, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    current_user: Optional[UserResponse] = Depends(get_current_user_optional),
+):
+    """
+    Get recipes for a named scenario collection (e.g. "quick_weeknight",
+    "one_pot", "sheet_pan", "healthy_light", "make_ahead", "family_favorites").
+
+    If authenticated, applies the user's dietary restrictions, allergies, and
+    disliked ingredients automatically.
+    """
+    user_id = current_user.id if current_user else None
+    return await recipe_service.get_collection(collection_key, user_id, limit, offset)
 
 
 @router.get("/saved/my", response_model=List[RecipeResponse])

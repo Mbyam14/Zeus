@@ -2,6 +2,7 @@ import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import { ProfileNavigator } from './ProfileNavigator';
+import { HomeScreen } from '../screens/home/HomeScreen';
 import { MealPlanScreen } from '../screens/mealplan/MealPlanScreen';
 import { MealPlanEditScreen } from '../screens/mealplan/MealPlanEditScreen';
 import { CreateScreen } from '../screens/create/CreateScreen';
@@ -16,8 +17,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { DetectedPantryItem } from '../types/pantry';
 import { useThemeStore } from '../store/themeStore';
+import { useOnboardingStore } from '../store/onboardingStore';
 import { ZeusAIChatBubble } from '../components/ZeusAIChatBubble';
 import { ZeusAIChatPanel } from '../components/ZeusAIChatPanel';
+import { OnboardingCoachMark } from '../components/OnboardingCoachMark';
 
 export type RecipesStackParamList = {
   RecipeHubMain: undefined;
@@ -41,7 +44,13 @@ export type PantryStackParamList = {
   };
 };
 
+export type HomeStackParamList = {
+  HomeMain: undefined;
+  RecipeDetail: { recipe: any };
+};
+
 export type MainTabParamList = {
+  Home: undefined;
   Pantry: undefined;
   MealPlan: undefined;
   Recipes: undefined;
@@ -53,6 +62,16 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
 const RecipesStack = createStackNavigator<RecipesStackParamList>();
 const MealPlanStack = createStackNavigator<MealPlanStackParamList>();
 const PantryStack = createStackNavigator<PantryStackParamList>();
+const HomeStack = createStackNavigator<HomeStackParamList>();
+
+const HomeStackNavigator = () => {
+  return (
+    <HomeStack.Navigator screenOptions={{ headerShown: false }}>
+      <HomeStack.Screen name="HomeMain" component={HomeScreen} />
+      <HomeStack.Screen name="RecipeDetail" component={RecipeDetailScreen} />
+    </HomeStack.Navigator>
+  );
+};
 
 const PantryStackNavigator = () => {
   return (
@@ -84,14 +103,41 @@ const MealPlanStackNavigator = () => {
   );
 };
 
+const COACH_MARKS: Record<string, { tabIndex: number; title: string; message: string } | null> = {
+  pantry: {
+    tabIndex: 1,
+    title: 'Stock your kitchen',
+    message: 'Tap Pantry to add what you have at home — Zeus uses it to plan meals around what you already own.',
+  },
+  meal_plan: {
+    tabIndex: 2,
+    title: "Let's plan the week",
+    message: 'Open Meal Plan to generate a week of meals from your pantry and preferences.',
+  },
+  grocery: {
+    tabIndex: 4,
+    title: 'Your shopping list is ready',
+    message: "Tap Grocery to see what you'll need this week, cross-referenced with your pantry.",
+  },
+  complete: null,
+};
+const TAB_COUNT = 6;
+
 export const MainTabNavigator: React.FC = () => {
   const insets = useSafeAreaInsets();
   const { colors } = useThemeStore();
+  const isFirstRun = useOnboardingStore((s) => s.isFirstRun);
+  const onboardingStep = useOnboardingStore((s) => s.currentStep);
+  const dismissed = useOnboardingStore((s) => s.dismissed);
+  const completeOnboarding = useOnboardingStore((s) => s.completeOnboarding);
+  const tabBarHeight = 60 + Math.max(insets.bottom, 8);
+
+  const coachMark = isFirstRun && !dismissed ? COACH_MARKS[onboardingStep] : null;
 
   return (
     <View style={{ flex: 1 }}>
       <Tab.Navigator
-        initialRouteName="Recipes"
+        initialRouteName="Home"
         screenOptions={{
           headerShown: false,
           tabBarStyle: {
@@ -112,6 +158,15 @@ export const MainTabNavigator: React.FC = () => {
           },
         }}
       >
+        <Tab.Screen
+          name="Home"
+          component={HomeStackNavigator}
+          options={{
+            tabBarIcon: ({ color, focused }) => (
+              <Ionicons name={focused ? 'home' : 'home-outline'} size={24} color={color} />
+            ),
+          }}
+        />
         <Tab.Screen
           name="Pantry"
           component={PantryStackNavigator}
@@ -161,6 +216,17 @@ export const MainTabNavigator: React.FC = () => {
           }}
         />
       </Tab.Navigator>
+      {coachMark && (
+        <OnboardingCoachMark
+          visible
+          title={coachMark.title}
+          message={coachMark.message}
+          tabIndex={coachMark.tabIndex}
+          tabCount={TAB_COUNT}
+          bottomOffset={tabBarHeight}
+          onSkipAll={completeOnboarding}
+        />
+      )}
       <ZeusAIChatBubble />
       <ZeusAIChatPanel />
     </View>

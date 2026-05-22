@@ -8,10 +8,10 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
-  Image,
   Modal,
   Dimensions,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { mealPlanService } from '../../services/mealPlanService';
@@ -33,6 +33,7 @@ import { useDataStore } from '../../store/dataStore';
 import { useOnboardingStore } from '../../store/onboardingStore';
 import { MealPlanSkeleton } from '../../components/SkeletonLoader';
 import { EmptyState } from '../../components/EmptyState';
+import { TabHeader } from '../../components/TabHeader';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const DAY_CELL_WIDTH = (SCREEN_WIDTH - 32) / 7; // 7 days, 16px padding each side
@@ -53,6 +54,7 @@ const DAY_LABELS: Record<string, string> = {
 
 export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [mealPlan, setMealPlan] = useState<MealPlan | null>(null);
   const [recipes, setRecipes] = useState<Record<string, Recipe>>({});
   const [selectedDay, setSelectedDay] = useState<DayOfWeek>('monday');
@@ -64,17 +66,11 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
   const [showCreateSheet, setShowCreateSheet] = useState(false);
   const [selectedCreateDays, setSelectedCreateDays] = useState<Set<DayOfWeek>>(new Set(ALL_DAYS));
   const [generating, setGenerating] = useState(false);
-  const [aiOptimizing, setAiOptimizing] = useState(false);
 
   const insets = useSafeAreaInsets();
   const { colors } = useThemeStore();
   const styles = createStyles(colors);
   const isMountedRef = useRef(true);
-  const onboardingStep = useOnboardingStore((s) => s.currentStep);
-  const isFirstRun = useOnboardingStore((s) => s.isFirstRun);
-  const advanceOnboarding = useOnboardingStore((s) => s.advanceStep);
-  const dismissOnboarding = useOnboardingStore((s) => s.dismissBanner);
-  const onboardingDismissed = useOnboardingStore((s) => s.dismissed);
   const regeneratingMealsRef = useRef(new Set<string>());
 
   useEffect(() => {
@@ -101,15 +97,21 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
     const dow = today.getDay();
     const monday = new Date(today);
     monday.setDate(today.getDate() + (dow === 0 ? -6 : 1 - dow) + offset * 7);
-    return monday.toISOString().split('T')[0];
+    const y = monday.getFullYear();
+    const m = String(monday.getMonth() + 1).padStart(2, '0');
+    const d = String(monday.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
   };
 
   // ------- Data Loading -------
 
   const loadMealPlan = async () => {
+    // Capture weekOffset at call time to guard against stale async results
+    const targetOffset = weekOffset;
+
     // Show cached data immediately if fresh and matching week
     const cached = useDataStore.getState();
-    const mondayKey = getMondayDateString(weekOffset);
+    const mondayKey = getMondayDateString(targetOffset);
     if (cached.mealPlan && cached.isFresh('mealPlan') && cached.getCachedWeekDate() === mondayKey) {
       setMealPlan(cached.mealPlan);
       setRecipes(cached.mealPlanRecipes);
@@ -120,15 +122,31 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
 
     try {
       if (isMountedRef.current) setLoading(true);
-      const plan = weekOffset === 0
+      const plan = targetOffset === 0
         ? await mealPlanService.getCurrentWeekMealPlan()
-        : await mealPlanService.getMealPlanByWeekOffset(weekOffset);
+        : await mealPlanService.getMealPlanByWeekOffset(targetOffset);
+
+      // Discard result if the user navigated to a different week while this fetch was in-flight
+      if (weekOffset !== targetOffset) return;
 
       if (plan) {
         if (isMountedRef.current) setMealPlan(plan);
-        await Promise.all([loadRecipes(plan), loadMacroSummary(plan.id)]);
-        useDataStore.getState().setMealPlan(plan, recipes, macroSummary);
-        useDataStore.getState().setCachedWeekDate(getMondayDateString(weekOffset));
+
+        // Load recipes and macros, capture the fresh values to avoid stale closure in cache write
+        const [freshRecipes, freshMacros] = await Promise.all([
+          fetchRecipesForPlan(plan),
+          fetchMacroSummary(plan.id),
+        ]);
+
+        if (weekOffset !== targetOffset) return;
+
+        if (isMountedRef.current) {
+          setRecipes(freshRecipes);
+          setMacroSummary(freshMacros);
+        }
+
+        useDataStore.getState().setMealPlan(plan, freshRecipes, freshMacros);
+        useDataStore.getState().setCachedWeekDate(getMondayDateString(targetOffset));
 
         // Advance onboarding when meal plan exists
         const onboarding = useOnboardingStore.getState();
@@ -154,13 +172,17 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
         }
       }
     } catch (error) {
-      if (isMountedRef.current) { setMealPlan(null); setRecipes({}); }
+      if (isMountedRef.current) {
+        setMealPlan(null);
+        setRecipes({});
+        setLoadError('Failed to load meal plan. Check your connection and try again.');
+      }
     } finally {
       if (isMountedRef.current) setLoading(false);
     }
   };
 
-  const loadRecipes = async (plan: MealPlan) => {
+  const fetchRecipesForPlan = async (plan: MealPlan): Promise<Record<string, Recipe>> => {
     const recipeIds: string[] = [];
     Object.values(plan.meals).forEach((dayMeals) => {
       if (!dayMeals || typeof dayMeals !== 'object') return;
@@ -169,21 +191,27 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
         if (id && !recipeIds.includes(id)) recipeIds.push(id);
       });
     });
-    if (recipeIds.length === 0) { setRecipes({}); return; }
+    if (recipeIds.length === 0) return {};
     try {
       const loaded = await mealPlanService.getRecipes(recipeIds);
       const map: Record<string, Recipe> = {};
       loaded.forEach((r) => { if (r?.id) map[r.id] = r; });
-      if (isMountedRef.current) setRecipes(map);
-    } catch { /* partial results OK */ }
+      return map;
+    } catch {
+      return {};
+    }
   };
 
-  const loadMacroSummary = async (mealPlanId: string) => {
+  const fetchMacroSummary = async (mealPlanId: string): Promise<MacroSummaryResponse | null> => {
     try {
-      const summary = await mealPlanService.getMacroSummary(mealPlanId);
-      if (isMountedRef.current) setMacroSummary(summary);
-    } catch { /* non-critical */ }
+      return await mealPlanService.getMacroSummary(mealPlanId);
+    } catch {
+      return null;
+    }
   };
+
+  const loadMacroSummary = (mealPlanId: string) =>
+    fetchMacroSummary(mealPlanId).then((s) => { if (isMountedRef.current) setMacroSummary(s); });
 
   // ------- Helpers -------
 
@@ -325,65 +353,37 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
     navigation.navigate('MealPlanEdit', { selectedDays: days, weekOffset });
   };
 
-  const handleAIOptimize = async () => {
-    if (!mealPlan || aiOptimizing) return;
-    if ((mealPlan.ai_optimize_remaining ?? 0) <= 0) {
-      Alert.alert('Limit Reached', 'You\'ve used all AI boosts for this plan. Create a new plan to reset.');
-      return;
-    }
-    setShowMenu(false);
-    setAiOptimizing(true);
-    try {
-      const result = await mealPlanService.aiOptimizeMealPlan(mealPlan.id);
-      if (result.optimized && result.meals) {
-        setMealPlan((prev) => prev ? { ...prev, meals: result.meals!, ai_optimize_remaining: result.uses_remaining } : prev);
-        await loadRecipes({ ...mealPlan, meals: result.meals });
-        loadMacroSummary(mealPlan.id);
-        const swapText = result.swaps.map((s) => `· ${s.day} ${s.meal_type}: ${s.new_recipe}`).join('\n');
-        Alert.alert('Plan Improved!', `${result.message}\n\n${swapText}\n\n${result.uses_remaining} AI boost${result.uses_remaining !== 1 ? 's' : ''} remaining.`);
-      } else {
-        Alert.alert('No Changes', result.message);
-      }
-    } catch {
-      Alert.alert('Error', 'AI optimize failed. Please try again.');
-    } finally {
-      setAiOptimizing(false);
-    }
-  };
-
   // ------- Render -------
 
   if (loading) {
     return (
-      <View style={[styles.container, { paddingTop: insets.top }]}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Meal Plan</Text>
-        </View>
+      <View style={styles.container}>
+        <TabHeader title="Meal Plan" />
         <MealPlanSkeleton />
+      </View>
+    );
+  }
+
+  if (loadError && !mealPlan && !loading) {
+    return (
+      <View style={styles.container}>
+        <TabHeader title="Meal Plan" />
+        <EmptyState
+          icon="cloud-offline-outline"
+          title="Couldn't Load Meal Plan"
+          description={loadError}
+          actionLabel="Try Again"
+          onAction={() => { setLoadError(null); loadMealPlan(); }}
+        />
       </View>
     );
   }
 
   if (!mealPlan) {
     return (
-      <View style={[styles.container, { paddingTop: insets.top }]}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Meal Plan</Text>
-        </View>
+      <View style={styles.container}>
+        <TabHeader title="Meal Plan" />
         <WeekNav weekOffset={weekOffset} setWeekOffset={setWeekOffset} getWeekLabel={getWeekLabel} getWeekDateRange={getWeekDateRange} colors={colors} />
-        {isFirstRun && onboardingStep === 'meal_plan' && !onboardingDismissed && (
-          <View style={styles.onboardingBanner}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.onboardingTitle}>Step 2: Create Your Meal Plan</Text>
-              <Text style={styles.onboardingText}>
-                Now let Zeus create a personalized meal plan based on your pantry and preferences!
-              </Text>
-            </View>
-            <TouchableOpacity onPress={dismissOnboarding} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-              <Ionicons name="close" size={20} color={colors.textMuted} />
-            </TouchableOpacity>
-          </View>
-        )}
         <EmptyState
           icon="calendar-outline"
           title="No Meal Plan"
@@ -406,14 +406,17 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
   const mealTypes = getMealTypes();
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Meal Plan</Text>
-        <TouchableOpacity style={styles.menuButton} onPress={() => setShowMenu(!showMenu)}>
-          <Ionicons name="ellipsis-horizontal" size={20} color={colors.text} />
-        </TouchableOpacity>
-      </View>
+    <View style={styles.container}>
+      <TabHeader
+        title="Meal Plan"
+        secondaryActions={[
+          {
+            icon: 'ellipsis-horizontal',
+            onPress: () => setShowMenu(!showMenu),
+            accessibilityLabel: 'Meal plan options',
+          },
+        ]}
+      />
 
       {/* Action Menu Dropdown */}
       {showMenu && (
@@ -423,20 +426,6 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
             <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); setSelectedCreateDays(new Set(ALL_DAYS)); setShowCreateSheet(true); }}>
               <Ionicons name="calendar-outline" size={18} color={colors.primary} />
               <Text style={[styles.menuItemText, { color: colors.text }]}>Create New Plan</Text>
-            </TouchableOpacity>
-            <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
-            <TouchableOpacity style={[styles.menuItem, aiOptimizing && { opacity: 0.5 }]} onPress={handleAIOptimize} disabled={aiOptimizing}>
-              <Ionicons name="sparkles-outline" size={18} color={colors.primary} />
-              <Text style={[styles.menuItemText, { color: colors.text }]}>
-                {aiOptimizing ? 'Optimizing…' : '✨ AI Optimize'}
-              </Text>
-              {!aiOptimizing && (
-                <View style={[styles.aiUsageBadge, { backgroundColor: colors.primary + '20' }]}>
-                  <Text style={[styles.aiUsageText, { color: colors.primary }]}>
-                    {mealPlan?.ai_optimize_remaining ?? 3} left
-                  </Text>
-                </View>
-              )}
             </TouchableOpacity>
             <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />
             <TouchableOpacity style={styles.menuItem} onPress={() => { setShowMenu(false); navigation.navigate('MealPlanEdit', { mealPlan, recipes }); }}>
@@ -454,21 +443,6 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
 
       {/* Week Navigation */}
       <WeekNav weekOffset={weekOffset} setWeekOffset={setWeekOffset} getWeekLabel={getWeekLabel} getWeekDateRange={getWeekDateRange} colors={colors} />
-
-      {/* Onboarding Guide */}
-      {isFirstRun && onboardingStep === 'meal_plan' && !onboardingDismissed && (
-        <View style={styles.onboardingBanner}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.onboardingTitle}>Step 2: Your Meal Plan</Text>
-            <Text style={styles.onboardingText}>
-              Your AI-powered meal plan is ready! Tap any meal to view the recipe, or swipe through your week. Next up: your grocery list!
-            </Text>
-          </View>
-          <TouchableOpacity onPress={dismissOnboarding} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <Ionicons name="close" size={20} color={colors.textMuted} />
-          </TouchableOpacity>
-        </View>
-      )}
 
       {/* Day Strip — all 7 days visible */}
       <View style={styles.dayStrip}>
@@ -553,31 +527,6 @@ export const MealPlanScreen: React.FC<MealPlanScreenProps> = ({ navigation }) =>
               />
             </View>
           </View>
-        )}
-
-        {/* AI Optimize pill — visible above meals when boosts remain */}
-        {(mealPlan.ai_optimize_remaining ?? 3) > 0 && (
-          <TouchableOpacity
-            style={[styles.aiOptimizePill, { borderColor: colors.primary + '40', backgroundColor: colors.primary + '10' }]}
-            onPress={handleAIOptimize}
-            disabled={aiOptimizing}
-            activeOpacity={0.75}
-          >
-            {aiOptimizing ? (
-              <>
-                <ActivityIndicator size="small" color={colors.primary} />
-                <Text style={[styles.aiOptimizePillText, { color: colors.primary }]}>Optimizing your plan…</Text>
-              </>
-            ) : (
-              <>
-                <Ionicons name="sparkles" size={15} color={colors.primary} />
-                <Text style={[styles.aiOptimizePillText, { color: colors.primary }]}>AI Optimize</Text>
-                <View style={[styles.aiOptimizePillBadge, { backgroundColor: colors.primary }]}>
-                  <Text style={styles.aiOptimizePillBadgeText}>{mealPlan.ai_optimize_remaining ?? 3} left</Text>
-                </View>
-              </>
-            )}
-          </TouchableOpacity>
         )}
 
         {/* Meal Cards */}
@@ -929,15 +878,6 @@ const nutritionStyles = StyleSheet.create({
 const createStyles = (colors: ThemeColors) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
-    header: {
-      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-      paddingHorizontal: 20, paddingBottom: 12, paddingTop: 8,
-      backgroundColor: colors.backgroundSecondary,
-      borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
-    },
-    headerTitle: { fontSize: 28, fontWeight: '700', color: colors.primary },
-    menuButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.background, alignItems: 'center', justifyContent: 'center' },
-    menuButtonText: { fontSize: 22, fontWeight: '700', color: colors.text, marginTop: -2 },
     menuBackdrop: { ...StyleSheet.absoluteFillObject, zIndex: 99 },
     menuDropdown: {
       position: 'absolute', top: 56, right: 16, borderRadius: 14, borderWidth: 1, zIndex: 100,
@@ -947,8 +887,6 @@ const createStyles = (colors: ThemeColors) =>
     menuItemIcon: { fontSize: 18 },
     menuItemText: { fontSize: 15, flex: 1 },
     menuDivider: { height: StyleSheet.hairlineWidth },
-    aiUsageBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
-    aiUsageText: { fontSize: 12, fontWeight: '600' },
 
     // Day strip
     dayStrip: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 10, justifyContent: 'space-between' },
@@ -965,16 +903,6 @@ const createStyles = (colors: ThemeColors) =>
     // Nutrition
     nutritionBar: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 4 },
     macroRow: { flexDirection: 'row', gap: 12, marginTop: 4 },
-
-    // AI Optimize pill
-    aiOptimizePill: {
-      flexDirection: 'row', alignItems: 'center', alignSelf: 'center',
-      marginHorizontal: 16, marginBottom: 10, paddingHorizontal: 14, paddingVertical: 8,
-      borderRadius: 20, borderWidth: 1, gap: 6,
-    },
-    aiOptimizePillText: { fontSize: 14, fontWeight: '600' },
-    aiOptimizePillBadge: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 10 },
-    aiOptimizePillBadgeText: { fontSize: 11, fontWeight: '700', color: '#FFF' },
 
     // Meals
     mealsContainer: { paddingHorizontal: 16, paddingTop: 0 },
@@ -1045,30 +973,4 @@ const createStyles = (colors: ThemeColors) =>
     createButtonText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
     createButtonSecondary: { borderWidth: 1, borderRadius: 14, paddingVertical: 16, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 },
     createButtonSecondaryText: { fontSize: 16, fontWeight: '600' },
-
-    // Onboarding
-    onboardingBanner: {
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-      marginHorizontal: 16,
-      marginTop: 4,
-      marginBottom: 4,
-      padding: 14,
-      borderRadius: 14,
-      borderWidth: 1,
-      borderColor: colors.primary + '30',
-      backgroundColor: colors.primary + '12',
-      gap: 12,
-    },
-    onboardingTitle: {
-      fontSize: 15,
-      fontWeight: '700',
-      color: colors.primary,
-      marginBottom: 4,
-    },
-    onboardingText: {
-      fontSize: 13,
-      lineHeight: 19,
-      color: colors.textSecondary,
-    },
   });

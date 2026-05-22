@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     instacart_api_url: str = "https://connect.instacart.com/idp/v1"
     instacart_webhook_secret: str = ""
 
+    # Email (Resend) — used for password reset and transactional email
+    resend_api_key: str = ""
+    resend_from_email: str = "onboarding@resend.dev"
+
     # CORS
     allowed_origins: str = "http://localhost:19006"
 

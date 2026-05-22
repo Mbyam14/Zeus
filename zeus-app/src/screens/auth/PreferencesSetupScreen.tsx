@@ -33,6 +33,12 @@ const DIETARY_OPTIONS = [
   { label: 'Pescatarian', icon: 'fish-outline' as const },
 ];
 
+// FDA top-9 allergens. User can also add custom ones later in AllergiesScreen.
+const COMMON_ALLERGENS = [
+  'Peanuts', 'Tree Nuts', 'Milk', 'Eggs', 'Wheat',
+  'Soy', 'Fish', 'Shellfish', 'Sesame',
+];
+
 const CUISINE_OPTIONS = [
   { label: 'Italian', emoji: '🇮🇹' },
   { label: 'Mexican', emoji: '🇲🇽' },
@@ -126,6 +132,15 @@ export const PreferencesSetupScreen: React.FC<PreferencesSetupScreenProps> = ({ 
     }));
   };
 
+  const toggleAllergen = (item: string) => {
+    setPreferences(prev => ({
+      ...prev,
+      allergies: prev.allergies.includes(item)
+        ? prev.allergies.filter(a => a !== item)
+        : [...prev.allergies, item],
+    }));
+  };
+
   const handleSave = async () => {
     try {
       setLoading(true);
@@ -145,7 +160,17 @@ export const PreferencesSetupScreen: React.FC<PreferencesSetupScreenProps> = ({ 
     }
   };
 
-  const handleSkip = () => {
+  const handleSkip = async () => {
+    // Persist whatever the user has entered so far. Skipping shouldn't throw
+    // away partial input (e.g., allergies selected on step 1 before skipping on step 2).
+    try {
+      await userService.updatePreferences({
+        ...preferences,
+        household_size: preferences.household_size || 2,
+      });
+    } catch (error) {
+      console.error('Failed to save partial preferences on skip:', error);
+    }
     startOnboarding();
     setSetupCompleted();
   };
@@ -191,6 +216,34 @@ export const PreferencesSetupScreen: React.FC<PreferencesSetupScreenProps> = ({ 
                   <Ionicons name="checkmark" size={12} color="#FFF" />
                 </View>
               )}
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {/* Allergies sub-section — quick-select for FDA top 9 */}
+      <Text style={[styles.fieldLabel, { marginTop: 28 }]}>Any allergies?</Text>
+      <Text style={[styles.stepSubtitle, { textAlign: 'left', marginBottom: 12 }]}>
+        We'll hide recipes containing these ingredients. You can add custom allergies later.
+      </Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        {COMMON_ALLERGENS.map(allergen => {
+          const selected = preferences.allergies.includes(allergen);
+          return (
+            <TouchableOpacity
+              key={allergen}
+              style={{
+                paddingHorizontal: 14, paddingVertical: 9, borderRadius: 22,
+                borderWidth: 1.5,
+                borderColor: selected ? colors.error : colors.border,
+                backgroundColor: selected ? colors.error + '15' : colors.backgroundSecondary,
+              }}
+              onPress={() => toggleAllergen(allergen)}
+              activeOpacity={0.7}
+            >
+              <Text style={{ fontSize: 13, fontWeight: '600', color: selected ? colors.error : colors.textMuted }}>
+                {allergen}
+              </Text>
             </TouchableOpacity>
           );
         })}
@@ -330,7 +383,7 @@ export const PreferencesSetupScreen: React.FC<PreferencesSetupScreenProps> = ({ 
 
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      {/* Progress bar */}
+      {/* Progress bar + persistent skip */}
       <View style={[styles.progressContainer, { backgroundColor: colors.background }]}>
         <View style={styles.progressBarTrack}>
           {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
@@ -349,9 +402,21 @@ export const PreferencesSetupScreen: React.FC<PreferencesSetupScreenProps> = ({ 
             />
           ))}
         </View>
-        <Text style={[styles.progressText, { color: colors.textMuted }]}>
-          {currentStep + 1} of {TOTAL_STEPS}
-        </Text>
+        <View style={styles.progressMetaRow}>
+          <Text style={[styles.progressText, { color: colors.textMuted }]}>
+            {currentStep + 1} of {TOTAL_STEPS}
+          </Text>
+          <TouchableOpacity
+            onPress={handleSkip}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityRole="button"
+            accessibilityLabel="Skip setup for now"
+          >
+            <Text style={[styles.progressSkipText, { color: colors.textMuted }]}>
+              Skip for now
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Step content */}
@@ -425,7 +490,16 @@ const createStyles = (colors: any) =>
     progressDot: {},
     progressText: {
       fontSize: 13,
-      textAlign: 'center',
+    },
+    progressMetaRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    progressSkipText: {
+      fontSize: 13,
+      fontWeight: '600',
+      textDecorationLine: 'underline',
     },
 
     // Scroll

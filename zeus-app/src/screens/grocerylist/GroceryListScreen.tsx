@@ -42,6 +42,7 @@ import { useThemeStore } from '../../store/themeStore';
 import { useOnboardingStore } from '../../store/onboardingStore';
 import { GroceryItemSkeleton } from '../../components/SkeletonLoader';
 import { EmptyState } from '../../components/EmptyState';
+import { TabHeader } from '../../components/TabHeader';
 
 export const GroceryListScreen: React.FC = () => {
   const { colors } = useThemeStore();
@@ -51,17 +52,13 @@ export const GroceryListScreen: React.FC = () => {
   const [groceryList, setGroceryList] = useState<GroceryList | null>(null);
   const [mealPlanId, setMealPlanId] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [generating, setGenerating] = useState<boolean>(false);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [filter, setFilter] = useState<GroceryListFilter>('all');
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [showInstacartModal, setShowInstacartModal] = useState<boolean>(false);
 
-  const onboardingStep = useOnboardingStore((s) => s.currentStep);
-  const isFirstRun = useOnboardingStore((s) => s.isFirstRun);
-  const completeOnboarding = useOnboardingStore((s) => s.completeOnboarding);
-  const onboardingDismissed = useOnboardingStore((s) => s.dismissed);
-  const dismissOnboarding = useOnboardingStore((s) => s.dismissBanner);
 
   useFocusEffect(
     useCallback(() => {
@@ -72,6 +69,7 @@ export const GroceryListScreen: React.FC = () => {
   const loadGroceryList = async () => {
     try {
       setLoading(true);
+      setLoadError(null);
       const currentMealPlan = await mealPlanService.getCurrentWeekMealPlan();
       if (!currentMealPlan) {
         setMealPlanId(null);
@@ -84,6 +82,7 @@ export const GroceryListScreen: React.FC = () => {
       setGroceryList(existingList || null);
     } catch (error: any) {
       console.error('Error loading grocery list:', error);
+      setLoadError('Failed to load. Check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -139,6 +138,11 @@ export const GroceryListScreen: React.FC = () => {
     });
     try {
       await groceryListService.toggleItemPurchased(item.id, !item.is_purchased);
+      // First interaction with the grocery list completes the guided tour.
+      const onboarding = useOnboardingStore.getState();
+      if (onboarding.isFirstRun && onboarding.currentStep === 'grocery') {
+        onboarding.completeOnboarding();
+      }
     } catch {
       setGroceryList(previousList);
     }
@@ -282,11 +286,25 @@ export const GroceryListScreen: React.FC = () => {
   if (loading && !groceryList) {
     return (
       <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Grocery List</Text>
-        </View>
+        <TabHeader title="Grocery List" />
         <GroceryItemSkeleton />
         <GroceryItemSkeleton />
+      </View>
+    );
+  }
+
+  // === ERROR STATE ===
+  if (loadError && !groceryList && !loading) {
+    return (
+      <View style={styles.container}>
+        <TabHeader title="Grocery List" />
+        <EmptyState
+          icon="cloud-offline-outline"
+          title="Couldn't Load List"
+          description={loadError}
+          actionLabel="Try Again"
+          onAction={loadGroceryList}
+        />
       </View>
     );
   }
@@ -295,34 +313,16 @@ export const GroceryListScreen: React.FC = () => {
   if (!groceryList && !loading) {
     return (
       <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Grocery List</Text>
-        </View>
+        <TabHeader title="Grocery List" />
         {!mealPlanId ? (
           <EmptyState
             icon="calendar-outline"
             title="No Meal Plan Yet"
             description="Create a meal plan first, then come back to generate your smart shopping list."
             actionLabel="Go to Meal Plans"
+            onAction={() => navigation.getParent()?.navigate('MealPlan')}
           />
         ) : (
-          <>
-          {isFirstRun && onboardingStep === 'grocery' && !onboardingDismissed && (
-            <View style={styles.onboardingBanner}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.onboardingTitle}>Step 3: Generate Your Grocery List</Text>
-                <Text style={styles.onboardingText}>
-                  Almost done! Generate a smart grocery list from your meal plan — it checks what you already have in your pantry.
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={dismissOnboarding}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <Ionicons name="close" size={20} color={colors.textMuted} />
-              </TouchableOpacity>
-            </View>
-          )}
           <EmptyState
             icon="cart-outline"
             title="Ready to Shop?"
@@ -330,7 +330,6 @@ export const GroceryListScreen: React.FC = () => {
             actionLabel={generating ? 'Generating...' : 'Generate List'}
             onAction={generating ? undefined : handleGenerateList}
           />
-          </>
         )}
       </View>
     );
@@ -420,36 +419,22 @@ export const GroceryListScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Grocery List</Text>
-        <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.headerBtn} onPress={handleRefresh}>
-            <Ionicons name="refresh-outline" size={20} color={colors.primary} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.headerBtn} onPress={handleClearList}>
-            <Ionicons name="trash-outline" size={20} color={colors.error || '#FF3B30'} />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Onboarding Guide */}
-      {isFirstRun && onboardingStep === 'grocery' && !onboardingDismissed && (
-        <View style={styles.onboardingBanner}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.onboardingTitle}>Step 3: Your Grocery List!</Text>
-            <Text style={styles.onboardingText}>
-              Here's everything you need to buy, cross-referenced with your pantry. Check items off as you shop!
-            </Text>
-          </View>
-          <TouchableOpacity
-            onPress={() => { completeOnboarding(); }}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Ionicons name="close" size={20} color={colors.textMuted} />
-          </TouchableOpacity>
-        </View>
-      )}
+      <TabHeader
+        title="Grocery List"
+        secondaryActions={[
+          {
+            icon: 'refresh-outline',
+            onPress: handleRefresh,
+            accessibilityLabel: 'Refresh grocery list',
+          },
+          {
+            icon: 'trash-outline',
+            onPress: handleClearList,
+            accessibilityLabel: 'Clear grocery list',
+            variant: 'destructive',
+          },
+        ]}
+      />
 
       {/* Progress Card */}
       <View style={styles.progressCard}>
@@ -572,37 +557,6 @@ const createStyles = (colors: any) =>
   StyleSheet.create({
     container: {
       flex: 1,
-      backgroundColor: colors.background,
-    },
-
-    // Header
-    header: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      paddingHorizontal: 20,
-      paddingTop: Platform.OS === 'ios' ? 60 : 16,
-      paddingBottom: 12,
-      backgroundColor: colors.backgroundSecondary,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.border,
-    },
-    headerTitle: {
-      fontSize: 28,
-      fontWeight: '700',
-      color: colors.primary,
-    },
-    headerActions: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-    },
-    headerBtn: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      justifyContent: 'center',
-      alignItems: 'center',
       backgroundColor: colors.background,
     },
 
@@ -954,29 +908,4 @@ const createStyles = (colors: any) =>
       fontWeight: '600',
     },
 
-    // Onboarding
-    onboardingBanner: {
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-      marginHorizontal: 16,
-      marginTop: 8,
-      marginBottom: 4,
-      padding: 14,
-      borderRadius: 14,
-      borderWidth: 1,
-      borderColor: colors.primary + '30',
-      backgroundColor: colors.primary + '12',
-      gap: 12,
-    },
-    onboardingTitle: {
-      fontSize: 15,
-      fontWeight: '700',
-      color: colors.primary,
-      marginBottom: 4,
-    },
-    onboardingText: {
-      fontSize: 13,
-      lineHeight: 19,
-      color: colors.textSecondary,
-    },
   });

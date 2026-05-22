@@ -17,8 +17,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/meal-plans", tags=["Meal Plans"])
 
-# AI optimize rate limit: 3 uses per meal plan lifetime
-AI_OPTIMIZE_MAX_USES = 3
+
 
 
 def _calculate_unique_recipe_counts(
@@ -218,11 +217,10 @@ async def _run_generation(
         "week_start_date": target_monday,
         "selected_days": normalized_days,
         "meals": assignments,
-        "ai_optimize_uses": 0,
     }
     result = None
     last_insert_err = None
-    for attempt, drop_keys in enumerate([[], ["ai_optimize_uses"], ["ai_optimize_uses", "selected_days"]], 1):
+    for attempt, drop_keys in enumerate([[], ["selected_days"]], 1):
         record = {k: v for k, v in meal_plan_record.items() if k not in drop_keys}
         try:
             result = db.table("meal_plans").insert(record).execute()
@@ -319,186 +317,6 @@ async def generate_meal_plan_for_week(
         raise HTTPException(status_code=500, detail=f"Failed to generate meal plan: {repr(e)}")
 
 
-@router.post("/{meal_plan_id}/ai-optimize")
-async def ai_optimize_meal_plan(
-    meal_plan_id: str,
-    current_user: UserResponse = Depends(get_current_active_user),
-) -> Dict[str, Any]:
-    """
-    Tier 2: Use Claude Haiku to review and improve the existing meal plan.
-
-    Reviews the current plan and swaps 2-3 meals that are nutritionally off,
-    repetitive, or mismatched. Rate limited to 3 uses per plan.
-    """
-    try:
-        db = get_database()
-
-        # Fetch plan and verify ownership
-        mp_result = db.table("meal_plans").select("*").eq("id", meal_plan_id).eq(
-            "user_id", current_user.id
-        ).execute()
-        if not mp_result.data:
-            raise HTTPException(status_code=404, detail="Meal plan not found")
-
-        meal_plan = mp_result.data[0]
-        uses_so_far = meal_plan.get("ai_optimize_uses", 0) or 0
-
-        if uses_so_far >= AI_OPTIMIZE_MAX_USES:
-            return {
-                "optimized": False,
-                "message": f"AI optimize limit reached ({AI_OPTIMIZE_MAX_USES} uses per plan). Create a new plan to reset.",
-                "uses_remaining": 0,
-                "swaps": [],
-            }
-
-        meals = meal_plan.get("meals", {})
-        selected_days = meal_plan.get("selected_days") or [
-            "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"
-        ]
-
-        # Get user preferences
-        user_result = db.table("users").select("profile_data").eq("id", current_user.id).execute()
-        profile_data = user_result.data[0].get("profile_data", {}) if user_result.data else {}
-        preferences = profile_data.get("preferences", {})
-
-        # Collect current recipe IDs
-        current_recipe_ids = set()
-        for day_meals in meals.values():
-            if isinstance(day_meals, dict):
-                for slot in day_meals.values():
-                    if isinstance(slot, str):
-                        current_recipe_ids.add(slot)
-                    elif isinstance(slot, dict):
-                        rid = slot.get("recipe_id")
-                        if rid:
-                            current_recipe_ids.add(rid)
-
-        # Fetch current recipe details for the plan summary
-        recipes_result = db.table("recipes").select(
-            "id, title, calories, protein_grams, carbs_grams, cuisine_type"
-        ).in_("id", list(current_recipe_ids)).execute()
-        recipes_by_id = {r["id"]: r for r in (recipes_result.data or [])}
-
-        # Build compact plan summary for Haiku
-        plan_summary: Dict[str, Dict[str, Any]] = {}
-        for day in selected_days:
-            day_meals = meals.get(day, {})
-            for meal_type, slot in day_meals.items():
-                rid = slot if isinstance(slot, str) else (slot.get("recipe_id") if isinstance(slot, dict) else None)
-                if rid and rid in recipes_by_id:
-                    r = recipes_by_id[rid]
-                    plan_summary.setdefault(day, {})[meal_type] = {
-                        "recipe_id": rid,
-                        "title": r.get("title", "?"),
-                        "calories": r.get("calories", 0),
-                        "protein_grams": r.get("protein_grams", 0),
-                        "cuisine_type": r.get("cuisine_type", "?"),
-                    }
-
-        # Fetch swap candidates for meal types in the plan
-        pantry_result = db.table("pantry_items").select(
-            "item_name, quantity, unit, category"
-        ).eq("user_id", current_user.id).execute()
-        pantry_items = pantry_result.data or []
-
-        liked_result = db.table("recipe_likes").select("recipe_id").eq("user_id", current_user.id).execute()
-        liked_ids = [r["recipe_id"] for r in (liked_result.data or [])]
-        if liked_ids:
-            preferences["liked_recipe_ids"] = liked_ids
-
-        swap_candidates = await recipe_shortlist_service.shortlist_candidates(
-            preferences=preferences,
-            selected_days=selected_days,
-            meal_types=["breakfast", "snack", "lunch", "dinner"],
-            exclude_recipe_ids=list(current_recipe_ids),
-            target_per_meal_type=8,
-            pantry_items=pantry_items,
-        )
-
-        # Call Haiku for targeted swap suggestions
-        swaps = await ai_service.ai_optimize_meal_plan(
-            plan_summary=plan_summary,
-            preferences=preferences,
-            swap_candidates=swap_candidates,
-        )
-
-        if not swaps:
-            return {
-                "optimized": False,
-                "message": "Your plan already looks great! No swaps needed.",
-                "uses_remaining": AI_OPTIMIZE_MAX_USES - uses_so_far,
-                "swaps": [],
-            }
-
-        # Apply validated swaps to the plan
-        swaps_applied = 0
-        swap_log = []
-        new_recipe_ids = set()
-
-        for swap in swaps:
-            day = swap.get("day", "").lower()
-            meal_type = swap.get("meal_type", "").lower()
-            new_recipe_id = swap.get("new_recipe_id", "")
-
-            if not day or not meal_type or not new_recipe_id:
-                continue
-            if day not in meals:
-                continue
-            if new_recipe_id in current_recipe_ids or new_recipe_id in new_recipe_ids:
-                continue
-
-            # Validate recipe exists
-            recipe_check = db.table("recipes").select("id, title, calories").eq("id", new_recipe_id).execute()
-            if not recipe_check.data:
-                continue
-
-            new_recipe = recipe_check.data[0]
-            old_slot = meals[day].get(meal_type)
-            old_rid = old_slot if isinstance(old_slot, str) else (old_slot.get("recipe_id") if isinstance(old_slot, dict) else None)
-
-            meals[day][meal_type] = {
-                "recipe_id": new_recipe_id,
-                "is_repeat": False,
-                "original_day": None,
-                "order": {"breakfast": 1, "snack": 2, "lunch": 3, "dinner": 4}.get(meal_type, 1),
-            }
-            new_recipe_ids.add(new_recipe_id)
-            swaps_applied += 1
-            swap_log.append({
-                "day": day,
-                "meal_type": meal_type,
-                "old_recipe": recipes_by_id.get(old_rid, {}).get("title", "?") if old_rid else "?",
-                "new_recipe": new_recipe["title"],
-                "reason": swap.get("reason", ""),
-            })
-
-        if swaps_applied > 0:
-            new_uses = uses_so_far + 1
-            db.table("meal_plans").update({
-                "meals": meals,
-                "ai_optimize_uses": new_uses,
-            }).eq("id", meal_plan_id).execute()
-            logger.info(f"AI optimized plan {meal_plan_id}: {swaps_applied} swaps (use {new_uses}/{AI_OPTIMIZE_MAX_USES})")
-            analytics.track("meal_plan_ai_optimized", current_user.id, {"plan_id": meal_plan_id, "swaps": swaps_applied})
-        else:
-            new_uses = uses_so_far
-
-        return {
-            "optimized": swaps_applied > 0,
-            "message": f"Made {swaps_applied} swap{'s' if swaps_applied != 1 else ''} to improve your plan." if swaps_applied > 0 else "Could not find suitable improvements.",
-            "uses_remaining": AI_OPTIMIZE_MAX_USES - new_uses,
-            "swaps": swap_log,
-            "meals": meals,
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        import traceback
-        logger.error(f"AI optimize failed: {e}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"AI optimize failed: {str(e)}")
-
-
 @router.post("/create-manual/")
 async def create_manual_meal_plan(
     start_date: str = Query(..., description="Start date (YYYY-MM-DD)"),
@@ -528,11 +346,10 @@ async def create_manual_meal_plan(
             "week_start_date": start_date,
             "selected_days": normalized_days,
             "meals": meals,
-            "ai_optimize_uses": 0,
         }
         result = None
         last_insert_err = None
-        for attempt, drop_keys in enumerate([[], ["ai_optimize_uses"], ["ai_optimize_uses", "selected_days"]], 1):
+        for attempt, drop_keys in enumerate([[], ["selected_days"]], 1):
             record = {k: v for k, v in meal_plan_record.items() if k not in drop_keys}
             try:
                 result = db.table("meal_plans").insert(record).execute()
@@ -1127,7 +944,5 @@ def _format_meal_plan(meal_plan: dict) -> dict:
         "week_start_date": meal_plan["week_start_date"],
         "selected_days": meal_plan.get("selected_days") or all_days,
         "meals": meal_plan["meals"],
-        "ai_optimize_uses": meal_plan.get("ai_optimize_uses", 0),
-        "ai_optimize_remaining": max(0, AI_OPTIMIZE_MAX_USES - (meal_plan.get("ai_optimize_uses", 0) or 0)),
         "created_at": meal_plan["created_at"],
     }

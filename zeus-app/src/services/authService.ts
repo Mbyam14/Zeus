@@ -49,6 +49,18 @@ class AuthService {
     });
   }
 
+  async requestPasswordReset(email: string): Promise<void> {
+    await api.post('/api/auth/password-reset/request', { email });
+  }
+
+  async confirmPasswordReset(email: string, code: string, newPassword: string): Promise<void> {
+    await api.post('/api/auth/password-reset/confirm', {
+      email,
+      code,
+      new_password: newPassword,
+    });
+  }
+
   async deleteAccount(password: string): Promise<void> {
     await api.delete('/api/auth/account', {
       data: { password },
