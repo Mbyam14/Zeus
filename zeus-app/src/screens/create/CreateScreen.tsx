@@ -18,6 +18,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Ingredient, Instruction, DifficultyLevel, MealType } from '../../types/recipe';
 import { recipeService } from '../../services/recipeService';
 import { useThemeStore } from '../../store/themeStore';
+import { consumePendingCreateHandler } from '../../lib/pendingRecipeCreate';
 
 interface RecipeForm {
   title: string;
@@ -230,8 +231,13 @@ export const CreateScreen: React.FC<CreateScreenProps> = ({ navigation }) => {
         const createdRecipe = await recipeService.createRecipe(recipeData);
         console.log('✅ Recipe created successfully:', createdRecipe);
 
-        // Navigate to the recipe detail screen
-        if (navigation) {
+        // If a caller is waiting on this new recipe (e.g. meal plan slot),
+        // hand it off and pop back to where they were instead of opening detail.
+        const pendingHandler = consumePendingCreateHandler();
+        if (pendingHandler && navigation) {
+          pendingHandler(createdRecipe);
+          navigation.goBack();
+        } else if (navigation) {
           console.log('🧭 Navigating to RecipeDetail');
           navigation.navigate('RecipeDetail', { recipe: createdRecipe });
         }

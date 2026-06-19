@@ -1,0 +1,33 @@
+{
+  "//": "Copy this file to the REPO ROOT as .mcp.json (that is the path Claude Code auto-loads; .claude/.mcp.json is NOT loaded). Replace the project ref and tokens, then reload the window.",
+  "//windows": "On Windows, MCP clients spawn the command directly without a shell, so bare 'npx' (a shell script) fails to launch. Wrap it as 'cmd /c npx ...' as shown. On macOS/Linux, you can use \"command\": \"npx\" with the leading 'cmd','/c' removed from args.",
+  "mcpServers": {
+    "supabase-readonly": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "@supabase/mcp-server-supabase",
+        "--read-only",
+        "--project-ref=YOUR_PROJECT_REF"
+      ],
+      "env": {
+        "SUPABASE_ACCESS_TOKEN": "REPLACE_WITH_PERSONAL_ACCESS_TOKEN"
+      }
+    },
+    "supabase-write-recipes": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "@supabase/mcp-server-supabase",
+        "--project-ref=YOUR_PROJECT_REF"
+      ],
+      "env": {
+        "SUPABASE_ACCESS_TOKEN": "REPLACE_WITH_SECOND_TOKEN_SCOPED_NARROWLY"
+      }
+    }
+  }
+}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -7,10 +7,6 @@ import {
   Alert,
   ActivityIndicator,
   ScrollView,
-  FlatList,
-  TextInput,
-  Modal,
-  Dimensions,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,18 +15,15 @@ import { useThemeStore, ThemeColors } from '../../store/themeStore';
 import { useAuthStore } from '../../store/authStore';
 import { useDataStore } from '../../store/dataStore';
 import { mealPlanService } from '../../services/mealPlanService';
-import { recipeService } from '../../services/recipeService';
 import {
   MealPlan,
   Recipe,
   DayOfWeek,
-  MealType,
   MealTypeConfig,
   DEFAULT_MEAL_TYPES,
   getRecipeIdFromSlot,
 } from '../../types/mealplan';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+import { setPendingPickHandler } from '../../lib/pendingRecipePick';
 
 interface MealPlanBuilderProps {
   navigation: any;
@@ -105,36 +98,9 @@ export const MealPlanEditScreen: React.FC<MealPlanBuilderProps> = ({ navigation,
   });
 
   const [selectedDay, setSelectedDay] = useState<DayOfWeek>(selectedDays[0]);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerMealKey, setPickerMealKey] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [activeFilter, setActiveFilter] = useState<string | null>(null);
-  const [allRecipes, setAllRecipes] = useState<Recipe[]>([]);
-  const [loadingRecipes, setLoadingRecipes] = useState(false);
   const [saving, setSaving] = useState(false);
   const [fillingWithAI, setFillingWithAI] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
-
-  const RECIPE_FILTERS = [
-    { key: null, label: 'All' },
-    { key: 'Breakfast', label: 'Breakfast' },
-    { key: 'Lunch', label: 'Lunch' },
-    { key: 'Dinner', label: 'Dinner' },
-    { key: 'Snack', label: 'Snack' },
-  ];
-
-  // Load all recipes once — 300 covers all meal types so we can filter client-side
-  const loadRecipes = useCallback(async () => {
-    setLoadingRecipes(true);
-    try {
-      const recipes = await recipeService.getAllRecipes(300, 0);
-      setAllRecipes(recipes);
-    } catch (err) {
-      console.error('[MealPlanEdit] loadRecipes error:', err);
-    } finally { setLoadingRecipes(false); }
-  }, []);
-
-  useEffect(() => { loadRecipes(); }, []);
 
   // ------- Helpers -------
 
@@ -152,24 +118,26 @@ export const MealPlanEditScreen: React.FC<MealPlanBuilderProps> = ({ navigation,
 
   // ------- Actions -------
 
+  // Open the RecipePicker as a stack screen so its sub-navigations
+  // (View Recipe / Created / Create) get the native iOS right-slide push
+  // instead of the bottom-slide that a nested Modal would force.
   const openPicker = (mealKey: string) => {
-    setPickerMealKey(mealKey);
-    setSearchQuery('');
-    setActiveFilter(null);
-    setPickerOpen(true);
-    // Recipes are already loaded on mount; reload only if empty (e.g., initial load failed)
-    if (allRecipes.length === 0) loadRecipes();
-  };
+    // Snapshot the slot — when the picker returns a recipe, this handler
+    // runs (registered via the module-level pending-pick registry)
+    const targetDay = selectedDay;
+    const targetMealKey = mealKey;
+    setPendingPickHandler((recipe) => {
+      setAssignments((prev) => ({
+        ...prev,
+        [targetDay]: { ...prev[targetDay], [targetMealKey]: recipe as any },
+      }));
+      setHasChanges(true);
+    });
 
-  const assignRecipe = (recipe: Recipe) => {
-    if (!pickerMealKey) return;
-    setAssignments((prev) => ({
-      ...prev,
-      [selectedDay]: { ...prev[selectedDay], [pickerMealKey]: recipe },
-    }));
-    setHasChanges(true);
-    setPickerOpen(false);
-    setPickerMealKey(null);
+    const mealLabel = mealKey.charAt(0).toUpperCase() + mealKey.slice(1);
+    const mealTypeHint = ['Breakfast', 'Lunch', 'Dinner', 'Snack'].includes(mealLabel) ? mealLabel : undefined;
+
+    navigation.navigate('RecipePicker', { mealLabel, mealTypeHint, source: 'browse' });
   };
 
   const removeRecipe = (mealKey: string) => {
@@ -179,28 +147,6 @@ export const MealPlanEditScreen: React.FC<MealPlanBuilderProps> = ({ navigation,
     }));
     setHasChanges(true);
   };
-
-  const handleSearch = (text: string) => {
-    setSearchQuery(text);
-    // Client-side filtering — no API call needed
-  };
-
-  const handleFilter = (filterKey: string | null) => {
-    setActiveFilter(filterKey);
-    // Client-side filtering — no API call needed
-  };
-
-  // Derived list: filter allRecipes by current search/category without API round-trips
-  const visibleRecipes = allRecipes.filter((r) => {
-    if (activeFilter) {
-      const types = ((r as any).meal_type || []).map((t: string) => t.toLowerCase());
-      if (!types.includes(activeFilter.toLowerCase())) return false;
-    }
-    if (searchQuery.trim()) {
-      if (!r.title.toLowerCase().includes(searchQuery.trim().toLowerCase())) return false;
-    }
-    return true;
-  });
 
   const getStartDate = (): string => {
     const weekOffset = route.params.weekOffset ?? 0;
@@ -429,89 +375,6 @@ export const MealPlanEditScreen: React.FC<MealPlanBuilderProps> = ({ navigation,
         })}
       </ScrollView>
 
-      {/* Recipe Picker Modal */}
-      <Modal visible={pickerOpen} animationType="slide" onRequestClose={() => setPickerOpen(false)}>
-        <View style={[styles.pickerContainer, { paddingTop: insets.top }]}>
-          {/* Fixed top section: header + search + filters */}
-          <View style={styles.pickerHeader}>
-            <TouchableOpacity onPress={() => setPickerOpen(false)}>
-              <Text style={styles.pickerCancel}>Cancel</Text>
-            </TouchableOpacity>
-            <Text style={styles.pickerTitle}>Choose Recipe</Text>
-            <View style={{ width: 60 }} />
-          </View>
-
-          <View style={styles.pickerSearchRow}>
-            <TextInput
-              style={styles.pickerSearchInput}
-              placeholder="Search recipes..."
-              placeholderTextColor={colors.textMuted}
-              value={searchQuery}
-              onChangeText={handleSearch}
-              autoCapitalize="none"
-              returnKeyType="search"
-            />
-          </View>
-
-          <View style={styles.filterRowContainer}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-              {RECIPE_FILTERS.map((f) => (
-                <TouchableOpacity
-                  key={f.label}
-                  style={[
-                    styles.filterChip,
-                    activeFilter === f.key && styles.filterChipActive,
-                  ]}
-                  onPress={() => handleFilter(f.key)}
-                >
-                  <Text style={[
-                    styles.filterChipText,
-                    activeFilter === f.key && styles.filterChipTextActive,
-                  ]}>
-                    {f.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-
-          {/* Recipe List — takes remaining space */}
-          {loadingRecipes ? (
-            <View style={styles.pickerLoading}>
-              <ActivityIndicator size="large" color={colors.primary} />
-            </View>
-          ) : (
-            <FlatList
-              data={visibleRecipes}
-              keyExtractor={(item) => item.id}
-              style={styles.pickerList}
-              contentContainerStyle={{ paddingBottom: 40 }}
-              renderItem={({ item }) => (
-                <TouchableOpacity style={styles.pickerRecipeRow} onPress={() => assignRecipe(item)}>
-                  {item.image_url ? (
-                    <Image source={{ uri: item.image_url }} style={styles.pickerRecipeImage} />
-                  ) : (
-                    <View style={[styles.pickerRecipeImagePlaceholder, { backgroundColor: colors.backgroundSecondary }]}>
-                      <Ionicons name="restaurant-outline" size={24} color={colors.textMuted} />
-                    </View>
-                  )}
-                  <View style={styles.pickerRecipeInfo}>
-                    <Text style={styles.pickerRecipeTitle} numberOfLines={2}>{item.title}</Text>
-                    <View style={styles.pickerRecipeStats}>
-                      {item.calories != null && <Text style={styles.pickerRecipeMeta}>{item.calories} cal</Text>}
-                      {item.cook_time != null && <Text style={styles.pickerRecipeMeta}> · {item.cook_time} min</Text>}
-                      {item.cuisine_type && <Text style={styles.pickerRecipeMeta}> · {item.cuisine_type}</Text>}
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              )}
-              ListEmptyComponent={
-                <Text style={styles.pickerEmpty}>No recipes found. Try a different search.</Text>
-              }
-            />
-          )}
-        </View>
-      </Modal>
     </View>
   );
 };
@@ -584,42 +447,4 @@ const createStyles = (colors: ThemeColors) =>
     slotEmptyPlus: { fontSize: 22, color: colors.primary, fontWeight: '300' },
     slotEmptyText: { fontSize: 14, color: colors.textMuted },
 
-    // Picker
-    pickerContainer: { flex: 1, backgroundColor: colors.background },
-    pickerHeader: {
-      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-      paddingHorizontal: 16, paddingVertical: 12,
-      borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
-    },
-    pickerCancel: { fontSize: 16, color: colors.primary },
-    pickerTitle: { fontSize: 17, fontWeight: '700', color: colors.text },
-    pickerSearchRow: { paddingHorizontal: 16, paddingVertical: 10 },
-    pickerSearchInput: {
-      backgroundColor: colors.inputBackground, borderWidth: 1, borderColor: colors.border,
-      borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, color: colors.text,
-    },
-    filterRowContainer: {
-      borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
-    },
-    filterRow: { paddingHorizontal: 16, paddingVertical: 10, gap: 8 },
-    pickerList: { flex: 1 },
-    filterChip: {
-      paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20,
-      backgroundColor: colors.backgroundSecondary, borderWidth: 1, borderColor: colors.border,
-    },
-    filterChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-    filterChipText: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
-    filterChipTextActive: { color: '#FFF' },
-    pickerLoading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    pickerRecipeRow: {
-      flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12,
-      borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border, gap: 12,
-    },
-    pickerRecipeImage: { width: 56, height: 56, borderRadius: 10 },
-    pickerRecipeImagePlaceholder: { width: 56, height: 56, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-    pickerRecipeInfo: { flex: 1 },
-    pickerRecipeTitle: { fontSize: 15, fontWeight: '600', color: colors.text },
-    pickerRecipeStats: { flexDirection: 'row', marginTop: 2 },
-    pickerRecipeMeta: { fontSize: 13, color: colors.textMuted },
-    pickerEmpty: { textAlign: 'center', color: colors.textMuted, fontSize: 15, paddingTop: 40 },
   });

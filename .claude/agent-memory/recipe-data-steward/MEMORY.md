@@ -1,0 +1,7 @@
+- [Recipe Pipeline Scripts](pipeline_scripts.md) — what each script in zeus-backend/scripts/ does, progress file conventions, known fragility
+- [Detector Recall Gaps](detector_recall_gaps.md) — keyword sets known to under-tag TheMealDB recipes (cooking method, style, dietary)
+- [Recipe Source Reliability](source_reliability.md) — which recipe import sources are trustworthy vs flaky, legal posture per source
+- [Macro Calc False Positives](macro_false_positives.md) — substring-match traps in recalculate_nutrition.py BUILTIN_NUTRITION lookup
+- [Schema Provenance Gap](schema_provenance_gap.md) — recipes table missing source_url/source_platform/imported_at; design proposed but not yet migrated
+- [User Preferences](user_preferences.md) — communication style, planning vs implementation expectations
+- [Social Import Design (Shelved)](social_import_design.md) — preserved Instagram/TikTok/YouTube import design; do not propose unprompted

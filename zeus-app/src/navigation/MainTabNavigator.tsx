@@ -5,6 +5,7 @@ import { ProfileNavigator } from './ProfileNavigator';
 import { HomeScreen } from '../screens/home/HomeScreen';
 import { MealPlanScreen } from '../screens/mealplan/MealPlanScreen';
 import { MealPlanEditScreen } from '../screens/mealplan/MealPlanEditScreen';
+import { RecipePickerScreen } from '../screens/mealplan/RecipePickerScreen';
 import { CreateScreen } from '../screens/create/CreateScreen';
 import { PantryScreen } from '../screens/pantry/PantryScreen';
 import { ImageReviewScreen } from '../screens/pantry/ImageReviewScreen';
@@ -32,6 +33,8 @@ export type MealPlanStackParamList = {
   MealPlanMain: undefined;
   RecipeDetail: { recipe: any };
   MealPlanEdit: { mealPlan?: any; recipes?: Record<string, any>; selectedDays?: string[]; weekOffset?: number };
+  RecipePicker: { mealLabel?: string; mealTypeHint?: string; source?: 'browse' | 'created' } | undefined;
+  CreateRecipe: undefined;
 };
 
 export type PantryStackParamList = {
@@ -99,6 +102,8 @@ const MealPlanStackNavigator = () => {
       <MealPlanStack.Screen name="MealPlanMain" component={MealPlanScreen} />
       <MealPlanStack.Screen name="RecipeDetail" component={RecipeDetailScreen} />
       <MealPlanStack.Screen name="MealPlanEdit" component={MealPlanEditScreen as any} />
+      <MealPlanStack.Screen name="RecipePicker" component={RecipePickerScreen as any} />
+      <MealPlanStack.Screen name="CreateRecipe" component={CreateScreen} />
     </MealPlanStack.Navigator>
   );
 };

@@ -216,7 +216,11 @@ const RecipeCard: React.FC<{
   showActions?: boolean;
   onLikeChange?: (id: string, liked: boolean) => void;
   onSaveChange?: (id: string, saved: boolean) => void;
-}> = ({ recipe, onPress, colors, width, compact = false, showActions = false, onLikeChange, onSaveChange }) => {
+  /** When 'pick', card body is inert and shows View/Add buttons instead of like/save. */
+  mode?: 'browse' | 'pick';
+  onView?: (recipe: Recipe) => void;
+  onAdd?: (recipe: Recipe) => void;
+}> = ({ recipe, onPress, colors, width, compact = false, showActions = false, onLikeChange, onSaveChange, mode = 'browse', onView, onAdd }) => {
   const cardW     = width ?? CARD_W;
   const imgH      = compact ? 108 : Math.round(cardW * 0.88);
   const [liked,  setLiked]  = useState(recipe.is_liked  || false);
@@ -243,14 +247,37 @@ const RecipeCard: React.FC<{
   const dietaryDots = (recipe.dietary_tags || []).slice(0, 2);
   const extraDietary = Math.max(0, (recipe.dietary_tags || []).length - 2);
 
+  const isPick = mode === 'pick';
+  const Container: any = isPick ? View : TouchableOpacity;
+  const containerProps = isPick ? {} : { activeOpacity: 0.88, onPress };
+
   return (
-    <TouchableOpacity activeOpacity={0.88} onPress={onPress} style={[cs.card, { width: cardW, marginRight: compact ? 12 : 0 }]}>
+    <Container {...containerProps} style={[cs.card, { width: cardW, marginRight: compact ? 12 : 0 }]}>
       <View style={[cs.imgWrap, { height: imgH }]}>
         {recipe.image_url
           ? <Image source={{ uri: recipe.image_url }} style={cs.img} />
           : <View style={cs.imgPlaceholder}><Ionicons name="restaurant-outline" size={28} color={colors.textMuted} /></View>
         }
-        {showActions && (
+        {isPick ? (
+          <View style={cs.pickActionCol}>
+            <TouchableOpacity
+              style={cs.pickActionBtn}
+              onPress={() => onView?.(recipe)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityLabel="View recipe"
+            >
+              <Ionicons name="eye-outline" size={18} color="#FFF" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[cs.pickActionBtn, { backgroundColor: colors.primary }]}
+              onPress={() => onAdd?.(recipe)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityLabel="Add to meal plan"
+            >
+              <Ionicons name="add" size={20} color="#FFF" />
+            </TouchableOpacity>
+          </View>
+        ) : showActions && (
           <View style={cs.actionCol}>
             <TouchableOpacity style={cs.actionBtn} onPress={handleLike} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <Ionicons name={liked ? 'heart' : 'heart-outline'} size={15} color={liked ? '#EF4444' : '#FFF'} />
@@ -312,7 +339,7 @@ const RecipeCard: React.FC<{
           </View>
         )}
       </View>
-    </TouchableOpacity>
+    </Container>
   );
 };
 
@@ -329,6 +356,8 @@ const rcS = (colors: ThemeColors) => StyleSheet.create({
   imgPlaceholder:{ width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center', backgroundColor: colors.border },
   actionCol:     { position: 'absolute', top: 8, right: 8, gap: 6 },
   actionBtn:     { width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(0,0,0,0.42)', justifyContent: 'center', alignItems: 'center' },
+  pickActionCol: { position: 'absolute', bottom: 8, right: 8, flexDirection: 'row', gap: 8 },
+  pickActionBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(0,0,0,0.58)', justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.85)' },
   badge:         { position: 'absolute', top: 8, left: 8, paddingHorizontal: 7, paddingVertical: 3, borderRadius: 8 },
   badgeText:     { color: '#FFF', fontSize: 10, fontWeight: '700' },
   methodOverlay: {
@@ -366,7 +395,10 @@ const HRow: React.FC<{
   onPress: (r: Recipe) => void;
   colors: ThemeColors;
   onSeeAll?: () => void;
-}> = ({ title, recipes, onPress, colors, onSeeAll }) => {
+  mode?: 'browse' | 'pick';
+  onView?: (r: Recipe) => void;
+  onAdd?: (r: Recipe) => void;
+}> = ({ title, recipes, onPress, colors, onSeeAll, mode = 'browse', onView, onAdd }) => {
   if (!recipes.length) return null;
   return (
     <View style={{ marginBottom: 24 }}>
@@ -380,7 +412,11 @@ const HRow: React.FC<{
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}>
         {recipes.map(r => (
-          <RecipeCard key={r.id} recipe={r} onPress={() => onPress(r)} colors={colors} width={H_CARD_W} compact showActions />
+          <RecipeCard
+            key={r.id} recipe={r} onPress={() => onPress(r)} colors={colors}
+            width={H_CARD_W} compact showActions={mode === 'browse'}
+            mode={mode} onView={onView} onAdd={onAdd}
+          />
         ))}
       </ScrollView>
     </View>
@@ -398,7 +434,10 @@ const CollectionStrip: React.FC<{
   colors: ThemeColors;
   /** invalidation token — bump to force refetch (e.g. pull-to-refresh) */
   refreshToken: number;
-}> = ({ def, onPress, onSeeAll, colors, refreshToken }) => {
+  mode?: 'browse' | 'pick';
+  onView?: (r: Recipe) => void;
+  onAdd?: (r: Recipe) => void;
+}> = ({ def, onPress, onSeeAll, colors, refreshToken, mode = 'browse', onView, onAdd }) => {
   const cached      = useDataStore(s => s.recipeCollections[def.key]);
   const isFresh     = useDataStore(s => s.isCollectionFresh(def.key));
   const setColl     = useDataStore(s => s.setRecipeCollection);
@@ -433,7 +472,13 @@ const CollectionStrip: React.FC<{
       </View>
     );
   }
-  return <HRow title={def.title} recipes={recipes} onPress={onPress} colors={colors} onSeeAll={() => onSeeAll(def)} />;
+  return (
+    <HRow
+      title={def.title} recipes={recipes} onPress={onPress} colors={colors}
+      onSeeAll={() => onSeeAll(def)}
+      mode={mode} onView={onView} onAdd={onAdd}
+    />
+  );
 };
 
 // ─── Dietary Indicator Banner ────────────────────────────────────────────────
@@ -766,10 +811,31 @@ const FilterSheet: React.FC<{
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
-export const RecipeHubScreen: React.FC = () => {
+export interface RecipeHubPickMode {
+  /** Called when the user taps the "+" (add) button on a card. */
+  onAdd: (recipe: Recipe) => void;
+  /** Called when the user taps the eye (view) button on a card. Defaults to navigating to RecipeDetail. */
+  onView?: (recipe: Recipe) => void;
+  /** Pre-applies a meal type filter (e.g. 'Breakfast') when opening the picker for a specific slot. */
+  mealTypeHint?: string;
+  /** When 'created', the picker shows only the user's created (non-AI) recipes — no hero/strips/filters. */
+  source?: 'browse' | 'created';
+}
+
+interface RecipeHubScreenProps {
+  /** When provided, the screen renders in "pick" mode for the meal plan builder:
+   *  - Hides TabHeader, Browse/MyRecipes tabs, and Today's Menu strip
+   *  - Each RecipeCard shows two action buttons (view, add) instead of being tappable
+   *  - Pre-applies mealTypeHint to the filters */
+  pickMode?: RecipeHubPickMode;
+}
+
+export const RecipeHubScreen: React.FC<RecipeHubScreenProps> = ({ pickMode }) => {
   const { colors }        = useThemeStore();
   const navigation        = useNavigation<any>();
   const insets            = useSafeAreaInsets();
+  const isPickMode        = !!pickMode;
+  const pickSource        = pickMode?.source ?? 'browse';
   const cachedFeed        = useDataStore(s => s.recipeFeed);
   const feedFresh         = useDataStore(s => s.isFresh('recipeFeed'));
   const user              = useAuthStore(s => s.user);
@@ -779,8 +845,8 @@ export const RecipeHubScreen: React.FC = () => {
   const userAllergies     = (user as any)?.profile_data?.preferences?.allergies || [];
 
   // Tabs
-  const [mainTab,      setMainTab]      = useState<MainTab>('browse');
-  const [myTab,        setMyTab]        = useState<MyRecipesTab>('liked');
+  const [mainTab,      setMainTab]      = useState<MainTab>(pickSource === 'created' ? 'myRecipes' : 'browse');
+  const [myTab,        setMyTab]        = useState<MyRecipesTab>(pickSource === 'created' ? 'created' : 'liked');
 
   // Active filters — the FilterSheet is now the single source of truth
   // (pills were removed because they conflicted with the sheet's state).
@@ -790,7 +856,7 @@ export const RecipeHubScreen: React.FC = () => {
   const [cookingMethods, setCookingMethods] = useState<string[]>([]);
   const [styleTags,   setStyleTags]   = useState<string[]>([]);
   const [difficulties, setDifficulties] = useState<string[]>([]);
-  const [mealTypes,   setMealTypes]   = useState<string[]>([]);
+  const [mealTypes,   setMealTypes]   = useState<string[]>(pickMode?.mealTypeHint ? [pickMode.mealTypeHint] : []);
   const [cuisines,    setCuisines]    = useState<string[]>([]);
   const [filterOpen,  setFilterOpen]  = useState(false);
 
@@ -1009,11 +1075,20 @@ export const RecipeHubScreen: React.FC = () => {
 
   useFocusEffect(
     React.useCallback(() => {
+      if (isPickMode) return;   // pick mode uses mount effect below; not focus-driven
       if (mainTab === 'browse') { loadRecipes(true); loadTodayMenu(); }
       else loadMyRecipes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [mainTab]),
+    }, [mainTab, isPickMode]),
   );
+
+  // Pick mode: load on mount since we live inside a Modal (no focus event fires)
+  useEffect(() => {
+    if (!isPickMode) return;
+    if (pickSource === 'created') loadMyRecipes();
+    else                          loadRecipes(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPickMode, pickSource]);
 
   // Reload when any filter / search changes
   const prevKey = useRef('');
@@ -1045,6 +1120,9 @@ export const RecipeHubScreen: React.FC = () => {
 
   const goTo    = (r: Recipe) => navigation.navigate('RecipeDetail', { recipe: r });
   const goCreate = () => navigation.navigate('CreateRecipe');
+  const cardMode: 'browse' | 'pick' = isPickMode ? 'pick' : 'browse';
+  const cardOnView = isPickMode ? (pickMode!.onView ?? goTo) : undefined;
+  const cardOnAdd  = isPickMode ? pickMode!.onAdd          : undefined;
   const heroLabel   = "Today's Pick";
   const trendLabel  = 'Trending This Week';
   const quickLabel  = 'Quick & Easy';
@@ -1138,21 +1216,24 @@ export const RecipeHubScreen: React.FC = () => {
       />
       {/* Active filter chips — tap × to remove */}
       <FilterSummary pills={summaryPills} onClearAll={clearAllFilters} colors={colors} />
-      {!search && hero    && <HeroCard recipe={hero} label={heroLabel} onPress={() => goTo(hero)} colors={colors} />}
-      {!search            && <TodayStrip meals={todayMeals} onPress={goTo} colors={colors} />}
+      {!search && hero    && <HeroCard recipe={hero} label={isPickMode ? 'Featured' : heroLabel} onPress={() => (isPickMode ? cardOnView!(hero) : goTo(hero))} colors={colors} />}
+      {!search && !isPickMode && <TodayStrip meals={todayMeals} onPress={goTo} colors={colors} />}
       {/* Scenario collections — NYT-style named discovery (only on home view) */}
       {showScenarioStrips && SCENARIO_STRIPS.map(def => (
         <CollectionStrip
           key={def.key}
           def={def}
-          onPress={goTo}
+          onPress={isPickMode ? cardOnView! : goTo}
           onSeeAll={openCollection}
           colors={colors}
           refreshToken={refreshToken}
+          mode={cardMode}
+          onView={cardOnView}
+          onAdd={cardOnAdd}
         />
       ))}
-      {!search && !showScenarioStrips && <HRow title={trendLabel} recipes={trending} onPress={goTo} colors={colors} />}
-      {!search && !showScenarioStrips && <HRow title={quickLabel}  recipes={quick}    onPress={goTo} colors={colors} />}
+      {!search && !showScenarioStrips && <HRow title={trendLabel} recipes={trending} onPress={isPickMode ? cardOnView! : goTo} colors={colors} mode={cardMode} onView={cardOnView} onAdd={cardOnAdd} />}
+      {!search && !showScenarioStrips && <HRow title={quickLabel}  recipes={quick}    onPress={isPickMode ? cardOnView! : goTo} colors={colors} mode={cardMode} onView={cardOnView} onAdd={cardOnAdd} />}
       <Text style={[s.sectionTitle, { paddingHorizontal: 16, marginBottom: 10 }]}>
         {search ? `Results for "${search}"` : showScenarioStrips ? 'Browse All' : 'More Recipes'}
       </Text>
@@ -1161,24 +1242,46 @@ export const RecipeHubScreen: React.FC = () => {
 
   return (
     <View style={s.root}>
-      <TabHeader
-        title="Recipes"
-        secondaryActions={[
-          {
-            icon: searchOpen ? 'close' : 'search',
-            onPress: () => { if (searchOpen) clearSearch(); else setSearchOpen(true); },
-            accessibilityLabel: searchOpen ? 'Close search' : 'Search recipes',
-          },
-        ]}
-        primaryAction={{
-          icon: 'add',
-          onPress: goCreate,
-          accessibilityLabel: 'Create recipe',
-        }}
-      />
+      {!isPickMode && (
+        <TabHeader
+          title="Recipes"
+          secondaryActions={[
+            {
+              icon: searchOpen ? 'close' : 'search',
+              onPress: () => { if (searchOpen) clearSearch(); else setSearchOpen(true); },
+              accessibilityLabel: searchOpen ? 'Close search' : 'Search recipes',
+            },
+          ]}
+          primaryAction={{
+            icon: 'add',
+            onPress: goCreate,
+            accessibilityLabel: 'Create recipe',
+          }}
+        />
+      )}
 
-      {/* ── Inline search bar ── */}
-      {searchOpen && (
+      {/* In pick mode, the search bar is always visible (no TabHeader to toggle it) */}
+      {isPickMode && (
+        <View style={s.searchBar}>
+          <Ionicons name="search-outline" size={17} color={colors.textMuted} style={{ marginRight: 8 }} />
+          <TextInput
+            style={s.searchInput}
+            placeholder="Search recipes..."
+            placeholderTextColor={colors.textMuted}
+            value={searchText}
+            onChangeText={onSearchChange}
+            returnKeyType="search"
+          />
+          {searchText.length > 0 && (
+            <TouchableOpacity onPress={() => { setSearchText(''); setSearch(''); }} activeOpacity={0.6}>
+              <Ionicons name="close-circle" size={19} color={colors.textMuted} />
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+
+      {/* ── Inline search bar (browse mode toggle) ── */}
+      {!isPickMode && searchOpen && (
         <View style={s.searchBar}>
           <Ionicons name="search-outline" size={17} color={colors.textMuted} style={{ marginRight: 8 }} />
           <TextInput
@@ -1197,22 +1300,24 @@ export const RecipeHubScreen: React.FC = () => {
         </View>
       )}
 
-      {/* ── Browse / My Recipes tabs ── */}
-      <View style={s.tabRow}>
-        {(['browse', 'myRecipes'] as MainTab[]).map(tab => (
-          <TouchableOpacity
-            key={tab} activeOpacity={0.7}
-            onPress={() => { setMainTab(tab); if (tab === 'myRecipes') loadMyRecipes(); }}
-            style={[s.tab, mainTab === tab && s.tabActive]}
-          >
-            <Text style={[s.tabText, mainTab === tab && s.tabTextActive]}>
-              {tab === 'browse' ? 'Browse' : 'My Recipes'}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+      {/* ── Browse / My Recipes tabs (hidden in pick mode) ── */}
+      {!isPickMode && (
+        <View style={s.tabRow}>
+          {(['browse', 'myRecipes'] as MainTab[]).map(tab => (
+            <TouchableOpacity
+              key={tab} activeOpacity={0.7}
+              onPress={() => { setMainTab(tab); if (tab === 'myRecipes') loadMyRecipes(); }}
+              style={[s.tab, mainTab === tab && s.tabActive]}
+            >
+              <Text style={[s.tabText, mainTab === tab && s.tabTextActive]}>
+                {tab === 'browse' ? 'Browse' : 'My Recipes'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
 
-      {mainTab === 'browse' ? (
+      {((isPickMode && pickSource === 'browse') || (!isPickMode && mainTab === 'browse')) ? (
         <>
           {/* ── Prominent full-width filter button ── */}
           {/* Replaces the previous pill row. The filter sheet is now the single
@@ -1324,25 +1429,37 @@ export const RecipeHubScreen: React.FC = () => {
                   tintColor={colors.primary}
                 />
               }
-              renderItem={({ item }) => <RecipeCard recipe={item} onPress={() => goTo(item)} colors={colors} showActions />}
+              renderItem={({ item }) => (
+                <RecipeCard
+                  recipe={item}
+                  onPress={() => goTo(item)}
+                  colors={colors}
+                  showActions={!isPickMode}
+                  mode={cardMode}
+                  onView={cardOnView}
+                  onAdd={cardOnAdd}
+                />
+              )}
             />
           )}
         </>
       ) : (
         <>
-          {/* ── My Recipes sub-tabs ── */}
-          <View style={s.myTabRow}>
-            {(['liked', 'saved', 'created'] as MyRecipesTab[]).map(tab => {
-              const active = myTab === tab;
-              const icon: keyof typeof Ionicons.glyphMap = tab === 'liked' ? 'heart-outline' : tab === 'saved' ? 'bookmark-outline' : 'create-outline';
-              return (
-                <TouchableOpacity key={tab} activeOpacity={0.7} onPress={() => setMyTab(tab)} style={[s.myTab, active && s.myTabActive]}>
-                  <Ionicons name={icon} size={14} color={active ? colors.primary : colors.textMuted} />
-                  <Text style={[s.myTabText, active && s.myTabTextActive]}>{tab.charAt(0).toUpperCase() + tab.slice(1)}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+          {/* ── My Recipes sub-tabs (hidden in pick mode — locked to "Created") ── */}
+          {!isPickMode && (
+            <View style={s.myTabRow}>
+              {(['liked', 'saved', 'created'] as MyRecipesTab[]).map(tab => {
+                const active = myTab === tab;
+                const icon: keyof typeof Ionicons.glyphMap = tab === 'liked' ? 'heart-outline' : tab === 'saved' ? 'bookmark-outline' : 'create-outline';
+                return (
+                  <TouchableOpacity key={tab} activeOpacity={0.7} onPress={() => setMyTab(tab)} style={[s.myTab, active && s.myTabActive]}>
+                    <Ionicons name={icon} size={14} color={active ? colors.primary : colors.textMuted} />
+                    <Text style={[s.myTabText, active && s.myTabTextActive]}>{tab.charAt(0).toUpperCase() + tab.slice(1)}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
 
           {myLoading ? (
             <View style={s.loadingCenter}><ActivityIndicator size="large" color={colors.primary} /></View>
@@ -1351,7 +1468,7 @@ export const RecipeHubScreen: React.FC = () => {
               <Ionicons name={myTab === 'liked' ? 'heart-outline' : myTab === 'saved' ? 'bookmark-outline' : 'create-outline'} size={48} color={colors.textMuted} />
               <Text style={s.emptyTitle}>{myTab === 'liked' ? 'No liked recipes' : myTab === 'saved' ? 'No saved recipes' : 'No recipes yet'}</Text>
               <Text style={s.emptySub}>{myTab === 'created' ? "Create your own and they'll show up here" : "Explore recipes and save your favourites"}</Text>
-              {myTab === 'created' && (
+              {myTab === 'created' && !isPickMode && (
                 <TouchableOpacity style={s.ctaBtn} onPress={goCreate} activeOpacity={0.8}>
                   <Ionicons name="add-circle-outline" size={20} color="#FFF" />
                   <Text style={s.ctaBtnText}>Create Recipe</Text>
@@ -1370,7 +1487,9 @@ export const RecipeHubScreen: React.FC = () => {
               refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await loadMyRecipes(); setRefreshing(false); }} tintColor={colors.primary} />}
               renderItem={({ item }) => (
                 <RecipeCard
-                  recipe={item} onPress={() => goTo(item)} colors={colors} showActions
+                  recipe={item} onPress={() => goTo(item)} colors={colors}
+                  showActions={!isPickMode}
+                  mode={cardMode} onView={cardOnView} onAdd={cardOnAdd}
                   onLikeChange={(id, lk) => { if (!lk && myTab === 'liked') setLiked(prev => prev.filter(r => r.id !== id)); }}
                   onSaveChange={(id, sv) => { if (!sv && myTab === 'saved') setSaved(prev => prev.filter(r => r.id !== id)); }}
                 />

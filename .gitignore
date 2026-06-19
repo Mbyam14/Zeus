@@ -82,3 +82,19 @@ logs/
 
 # Misc
 *.bak
+# Claude MCP config (contains tokens)
+.claude/.mcp.json
+/.mcp.json
+
+# Generated API specs
+openapi.json
+
+# Recipe import data dumps (large binaries - do not commit)
+zeus-backend/data/
+zeus-backend/scripts/allrecipes_import/*.zip
+zeus-backend/scripts/allrecipes_import/database/
+zeus-backend/scripts/allrecipes_import/recipes/
+
+# Script run artifacts / progress state
+zeus-backend/scripts/*_progress.json
+zeus-backend/scripts/recipe_audit.csv
