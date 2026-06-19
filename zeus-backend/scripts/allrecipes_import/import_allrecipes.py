@@ -573,4 +573,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(
+        "DISABLED 2026-06-19: This importer DELETES the licensed TheMealDB system "
+        "corpus (line ~540) and inserts a redistributed AllRecipes scrape that "
+        "contains copyrighted recipe text + hot-linked photos — not legally "
+        "distributable. Running it caused a production contamination incident "
+        "(36,088 infringing rows, remediated). DO NOT RUN. "
+        "See .claude/agent-memory/recipe-data-steward/ for the incident record."
+    )
+    # main()  # intentionally unreachable

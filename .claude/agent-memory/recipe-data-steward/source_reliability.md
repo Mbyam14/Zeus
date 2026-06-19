@@ -18,7 +18,10 @@ metadata:
 - **Pinterest**: pins are usually backlinks → falls back to whatever the destination supports.
 
 ## Blocked
-- **AllRecipes.com**: 403 bot protection. Do not propose scraping. Use TheMealDB or licensed APIs instead.
+- **AllRecipes.com (live scrape)**: 403 bot protection. `zeus-backend/scripts/scrape_allrecipes.py` is the live scraper that hit the 403 wall — it DOES set source_url. Do not propose live scraping.
+- **AllRecipes.com bulk dump (RECONCILED 2026-06-19)**: There is now 358MB of AllRecipes data on disk that bypassed the 403 — it is NOT a live scrape. It is a redistributed bulk database dump: `zeus-backend/scripts/allrecipes_import/database/allrecipes.com_database_12042020000000.json` (the `12042020000000` = 2020-12-04 snapshot timestamp is the signature of a circulated scraped archive/torrent, not a licensed feed). Loaded by `import_allrecipes.py`, which curates ~650 recipes and INSERTs them as the system user (UUID 0...001), deleting TheMealDB first. The JSON contains full copyrighted instructional prose (steps text), user descriptions, ratings, and AllRecipes-hosted photo refs (images.allrecipes.com/userphotos). **Legal posture: this is exactly the copyrighted-aggregate pattern guardrails forbid — not legally distributable in a shipping app.** `import_allrecipes.py` writes NO provenance/attribution fields, so imported rows are indistinguishable from clean TheMealDB rows.
+- **Evidence the import RAN at least once**: `zeus-backend/scripts/recipe_audit.csv` lists rows with DB-generated UUID PKs (e.g. b1d42bad-...), not source string IDs ("11125") — meaning AllRecipes-derived recipes were inserted into a DB. Audit also shows dessert/cookie titles (Almond Bars, Anzac Biscuits) the importer claims to EXCLUDE, and every row mistagged "Dinner, Lunch". COULD NOT verify current production row count: supabase-readonly MCP tool was not reachable in the 2026-06-19 session. User reported recipes table = 0 rows; treat as UNVERIFIED until queried.
+- Recommendation stands: do NOT ship the AllRecipes dump. Use TheMealDB base + user-initiated share-import + (optionally) a licensed bulk API.
 
 ## Do NOT build
 - Instagram Graph API integration without business verification (not worth it for v1).

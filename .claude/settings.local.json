@@ -99,12 +99,18 @@
       "Bash(du -sh zeus-backend/scripts/allrecipes_import/*.zip zeus-backend/scripts/allrecipes_import/database zeus-backend/data)",
       "Bash(ls -la zeus-backend/scripts/*_progress.json zeus-backend/scripts/recipe_audit.csv)",
       "Bash(rm -f nul openapi.json \"C：UsersmcbyaAppDataLocalTempopenapi.json\")",
-      "Bash(rm -f C*openapi.json)"
+      "Bash(rm -f C*openapi.json)",
+      "Bash(cd /c/Users/mcbya/Zeus && ls zeus-backend/migrations/ 2>/dev/null | sort; echo \"---FK refs to recipes in migrations---\"; grep -rilE \"references recipes|recipe_id|recipe_likes|recipe_saves\" zeus-backend/migrations/ 2>/dev/null)",
+      "Read(//c/c/Users/mcbya/Zeus/zeus-backend/**)",
+      "Bash(grep -rilE \"create table.*recipe|recipe_likes|recipe_saves\" zeus-backend/ --include=\"*.sql\")",
+      "Bash(grep -rniE \"create table \\(if not exists \\)?\\(public\\\\.\\)?\\(recipes|recipe_likes|recipe_saves|recipe_interactions|saved_recipes|meal_plans\\)\" zeus-backend/ --include=\"*.sql\")",
+      "Bash(cd \"c:/Users/mcbya/Zeus\" && rm -rf zeus-app/.claude && echo \"removed stray zeus-app/.claude\" && git status --short | grep \"zeus-app/.claude\" || echo \"gone\")"
     ],
     "deny": [],
     "ask": [],
     "additionalDirectories": [
-      "c:\\Users\\mcbya\\Zeus\\.claude"
+      "c:\\Users\\mcbya\\Zeus\\.claude",
+      "c:\\Users\\mcbya\\Zeus\\zeus-app\\.claude"
     ]
   }
 }

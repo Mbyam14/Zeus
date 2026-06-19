@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     # AI
     anthropic_api_key: str
 
+    # USDA FoodData Central (nutrition matching)
+    usda_fdc_api_key: str = ""
+
     # Instacart
     instacart_api_key: str = ""
     instacart_api_url: str = "https://connect.instacart.com/idp/v1"
