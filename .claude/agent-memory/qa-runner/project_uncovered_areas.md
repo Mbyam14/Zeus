@@ -22,7 +22,7 @@ No test files exist anywhere in zeus-app/. There is no Jest config, no `__tests_
 ## Backend (zeus-backend) — partial coverage
 
 Tests exist for: auth, meal_plans, pantry, recipes, users.
-pytest is listed in requirements.txt but NOT installed in the venv as of 2026-06-19 (no pytest.exe in venv/Scripts/). Tests may be runnable via `python -m pytest` but this was not verified (shell access denied in first run session).
+pytest was NOT pre-installed in the venv as of 2026-06-19; confirmed installed and running as of 2026-06-20 (`python -m pytest` works). All 5 recipe tests passed live against Supabase in 7.17s.
 
 **Uncovered backend areas:**
 - AI chat endpoints (zeus_ai_chat)

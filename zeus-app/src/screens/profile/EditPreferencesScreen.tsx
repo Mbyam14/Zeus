@@ -427,7 +427,7 @@ export const EditPreferencesScreen: React.FC<EditPreferencesScreenProps> = ({ na
               { backgroundColor: preferences.budget_friendly ? 'rgba(255,255,255,0.2)' : colors.success + '18' },
             ]}>
               <Ionicons
-                name="eco-outline"
+                name="leaf-outline"
                 size={24}
                 color={preferences.budget_friendly ? colors.buttonText : colors.success}
               />

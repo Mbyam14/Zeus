@@ -727,7 +727,7 @@ Shared from Zeus - Your AI Meal Planner`;
           {/* Nutrition placeholder when macros aren't available (USDA pipeline couldn't
               match enough ingredients). Surfaces a clear "calculation pending" message
               so users aren't confused by a missing section. */}
-          {!(recipe.calories > 0 || recipe.protein_grams > 0 || recipe.carbs_grams > 0 || recipe.fat_grams > 0) && (
+          {!((recipe.calories ?? 0) > 0 || (recipe.protein_grams ?? 0) > 0 || (recipe.carbs_grams ?? 0) > 0 || (recipe.fat_grams ?? 0) > 0) && (
             <View style={[styles.macrosSection, { alignItems: 'center' }]}>
               <Ionicons name="analytics-outline" size={20} color={colors.textMuted} style={{ marginBottom: 4 }} />
               <Text style={{ fontSize: 13, color: colors.textMuted, fontWeight: '500', textAlign: 'center' }}>
@@ -737,7 +737,7 @@ Shared from Zeus - Your AI Meal Planner`;
           )}
 
           {/* Nutrition/Macros — with macro distribution bar + target % when targets set */}
-          {(recipe.calories > 0 || recipe.protein_grams > 0 || recipe.carbs_grams > 0 || recipe.fat_grams > 0) && (() => {
+          {((recipe.calories ?? 0) > 0 || (recipe.protein_grams ?? 0) > 0 || (recipe.carbs_grams ?? 0) > 0 || (recipe.fat_grams ?? 0) > 0) && (() => {
             const cal     = scaleNutrition(recipe.calories) || 0;
             const protein = scaleNutrition(recipe.protein_grams) || 0;
             const carbs   = scaleNutrition(recipe.carbs_grams) || 0;

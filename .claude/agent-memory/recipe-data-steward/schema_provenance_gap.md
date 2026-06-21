@@ -28,6 +28,11 @@ Also add corresponding fields to `RecipeResponse` in `zeus-backend/app/schemas/r
 - AI-generated rows (`is_ai_generated = true`): `source_platform = 'ai_generated'`.
 - User-created rows: `source_platform = 'manual'`.
 
-## Status: NOT MIGRATED as of 2026-05-25. Design only.
+## Status: DATA + API LAYER CLOSED as of 2026-06-20 (sprint 2026-06-20, pre-qa-runner).
+- DB columns confirmed live via Management API query: `source_platform` (varchar), `source_url` (varchar), `imported_at` (timestamptz) all exist, nullable. Index `idx_recipes_source_platform` exists.
+- Recorded migration: `20260619182041_add_recipe_provenance_columns` (additive, IF NOT EXISTS, backfilled themealdb). The proposed `source_handle` / `import_status` / `is_imported` were NOT added and are NOT needed yet.
+- Backfill state of 596 rows: 595 themealdb rows have source_platform='themealdb' + imported_at set but source_url=NULL; 1 row has source_platform=NULL. No AI rows currently in table.
+- API LAYER NOW DONE: `RecipeResponse` (zeus-backend/app/schemas/recipe.py) exposes `source_platform`, `source_url`, `imported_at`; `_format_recipe_response` (recipe_service.py ~line 891) maps them. All read queries use select("*") so columns flow automatically through the single mapper — no per-query column-list edits needed.
+- REMAINING (future): (a) backfill source_url for 595 themealdb rows (mapping to original IDs not preserved — would need re-derivation); (b) set source_platform on create/AI paths (currently left NULL on insert); (c) frontend attribution render (out of scope this sprint).
 
 See also [[source-reliability]] for the import-pipeline this unblocks.

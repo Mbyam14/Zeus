@@ -879,7 +879,15 @@ class RecipeService:
         creator_username = None
         if "users" in recipe_data and recipe_data["users"]:
             creator_username = recipe_data["users"]["username"]
-        
+
+        # Parse provenance timestamp (nullable; stored as ISO string by Supabase)
+        imported_at_raw = recipe_data.get("imported_at")
+        imported_at = (
+            datetime.fromisoformat(imported_at_raw.replace("Z", "+00:00"))
+            if imported_at_raw
+            else None
+        )
+
         return RecipeResponse(
             id=recipe_data["id"],
             user_id=recipe_data["user_id"],
@@ -903,7 +911,10 @@ class RecipeService:
             protein_grams=recipe_data.get("protein_grams"),
             carbs_grams=recipe_data.get("carbs_grams"),
             fat_grams=recipe_data.get("fat_grams"),
-            serving_size=recipe_data.get("serving_size")
+            serving_size=recipe_data.get("serving_size"),
+            source_platform=recipe_data.get("source_platform"),
+            source_url=recipe_data.get("source_url"),
+            imported_at=imported_at,
         )
     
     async def _is_recipe_liked(self, recipe_id: str, user_id: str) -> bool:

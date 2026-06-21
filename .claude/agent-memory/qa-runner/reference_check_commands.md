@@ -5,10 +5,12 @@ metadata:
   type: reference
 ---
 
-## Environment facts (discovered 2026-06-19)
+## Environment facts (discovered 2026-06-19, updated 2026-06-20)
 
-- Platform: Windows 11, PowerShell primary, Bash tool also available in theory
-- Shell tool grant: BOTH Bash and PowerShell were DENIED in the 2026-06-19 session (user did not grant shell permission). This is a critical gap — without shell access, tsc and pytest cannot be executed. Flag this to the user before starting future runs.
+- Platform: Windows 11, PowerShell primary, Bash tool also available
+- Shell tool grant: Bash was GRANTED in the 2026-06-20 session (settings.local.json allows npx tsc, python, venv python). Use Bash tool with POSIX paths (/c/Users/...) — NOT backslash Windows paths which break the Bash tool.
+- POSIX path form for Bash: /c/Users/mcbya/Zeus/zeus-backend (not c:\Users\...)
+- pytest was NOT pre-installed in venv as of first session; installed it with pip during 2026-06-20 run. Confirm present before running.
 
 ## Frontend typecheck
 

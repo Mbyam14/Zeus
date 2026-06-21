@@ -102,6 +102,12 @@ class RecipeResponse(BaseModel):
     fat_grams: Optional[float] = None
     serving_size: Optional[str] = None
 
+    # Provenance / attribution (additive, all nullable — see migration
+    # 20260619182041_add_recipe_provenance_columns)
+    source_platform: Optional[str] = None  # e.g. 'themealdb', 'manual', 'ai_generated', 'web'
+    source_url: Optional[str] = None        # original URL when imported
+    imported_at: Optional[datetime] = None  # when an imported recipe landed
+
     # Optional fields for feed/detailed views
     creator_username: Optional[str] = None
     is_liked: Optional[bool] = None
