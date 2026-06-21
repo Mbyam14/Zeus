@@ -1,15 +1,15 @@
 ---
 name: project-tab-structure
-description: Actual tab structure in MainTabNavigator.tsx differs from MEMORY.md — five tabs in this order, no Home tab, initial route is Recipes
+description: Actual tab structure in MainTabNavigator.tsx — six tabs, Home first, initial route is Home (corrected 2026-06-20)
 metadata:
   type: project
 ---
 
-The Zeus app's `MainTabNavigator.tsx:44-50` defines five tabs in this order:
-**Pantry, MealPlan, Recipes, GroceryList, Profile** — with `initialRouteName="Recipes"`.
+The Zeus app's `MainTabNavigator.tsx` defines **six** bottom tabs in this order:
+**Home, Pantry, MealPlan, Recipes, GroceryList, Profile** — with `initialRouteName="Home"` (line 145; Home tab registered line 167, backed by a HomeStack).
 
-There is **no Home/Today tab**. The user-facing MEMORY.md references "Home, Meal Plan, Recipes, Grocery, Profile" — this is inaccurate.
+The Home/Today tab **shipped in commit 0a36c36** ("UX overhaul: Home tab, onboarding rebuild, ..."). The app now opens to a directive "what should I cook?" surface, not the old "browse" mode.
 
-**Why:** Either MEMORY.md is stale, or there's a Home tab in the roadmap that hasn't been built. Worth confirming with the user before treating "Home" as canonical.
+**History (do not act on):** This file previously (pre-2026-06-20) recorded five tabs with `initialRouteName="Recipes"` and no Home tab. That was accurate before 0a36c36 and is now corrected.
 
-**How to apply:** When auditing tab-level flows, ground in `MainTabNavigator.tsx` not MEMORY.md. When proposing a "Home tab" rebuild, flag that this would be a new screen, not an enhancement of an existing one. Initial route is `Recipes`, which is a discovery surface — the app opens to "browse" mode, not a directive "what should I cook tonight?" surface.
+**How to apply:** Ground tab-level audits in `MainTabNavigator.tsx`. The Home tab is the first impression and initial route — prioritize its flows. Recipes is no longer the entry surface.
